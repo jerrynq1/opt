@@ -1,0 +1,30 @@
+.xmap-panel{margin-top:10px;padding:12px 16px 10px;display:flex;flex-direction:column;gap:9px}
+.xmap-panel[hidden]{display:none!important}
+.xmap-head{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.xmap-eyebrow{font-size:10px;letter-spacing:.16em;color:var(--acc);font-weight:800}
+.xmap-head h3{margin:2px 0 0;font-size:15px;color:var(--ink)}
+.xmap-head .msg{margin:2px 0 0;font-size:11px}
+.xmap-state{flex:none;border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:11px;color:var(--mut);background:var(--inp)}
+.xmap-state.ok{color:var(--win);border-color:color-mix(in srgb,var(--win) 45%,var(--line))}
+.xmap-state.warn{color:var(--loss);border-color:color-mix(in srgb,var(--loss) 40%,var(--line))}
+.xmap-state.loading{color:var(--acc)}
+.xmap-controls{display:flex;align-items:end;gap:10px;flex-wrap:wrap}
+.xmap-controls>label:not(.xmap-check):not(.xmap-opacity){display:flex;flex-direction:column;gap:4px;min-width:135px;color:var(--mut);font-size:10px;font-weight:700;letter-spacing:.06em}
+.xmap-controls select{height:32px;padding:4px 8px;font-size:12px}
+.xmap-controls .xmap-check{display:flex;align-items:center;gap:5px;height:32px;color:var(--mut);font-size:11px;white-space:nowrap}
+.xmap-controls .xmap-check input{width:15px;height:15px;margin:0}
+.xmap-opacity{display:flex;align-items:center;gap:6px;height:32px;color:var(--mut);font-size:11px;white-space:nowrap}
+.xmap-opacity input{width:82px;padding:0}
+.xmap-controls .btn{height:32px;padding:5px 12px;font-size:11px}
+.xmap-controls .btn:disabled{opacity:.65;cursor:default}
+.xmap-meta{font-size:11px;color:var(--mut);font-variant-numeric:tabular-nums;min-height:15px}
+.xmap-legend{display:flex;align-items:center;gap:12px;flex-wrap:wrap;color:var(--mut);font-size:10px}
+.xmap-legend span{display:inline-flex;align-items:center;gap:5px}
+.xmap-dot{display:inline-block;width:8px;height:8px;border-radius:50%}
+.xmap-dot.call{background:#35e59a}.xmap-dot.put{background:#ff536b}
+.xmap-line{display:inline-block;width:15px;border-top:2px dashed}
+.xmap-line.call{border-color:#ff5c8a}.xmap-line.put{border-color:#35d6b0}.xmap-line.flip{border-color:#ffc857}
+.xmap-disclaimer{margin:0;color:var(--mut);font-size:10px;line-height:1.4}
+@media(max-width:650px){.xmap-panel{padding:10px}.xmap-controls>label:not(.xmap-check):not(.xmap-opacity){min-width:calc(50% - 8px);flex:1}.xmap-controls .btn{flex:1}.xmap-legend{gap:7px}}
+
+.xmap-line.pain{border-color:#b68cff}.xmap-panel .xmap-controls .btn{height:32px;padding:5px 12px;font-size:11px}

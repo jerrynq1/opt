@@ -1,0 +1,312 @@
+//@version=6
+indicator("SSMT+", shorttitle = "SSMT+", overlay = true, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 200)
+
+const string TZ = "America/New_York"
+
+const string G_PAIR = "Correlated Symbol"
+const string G_CYC  = "Cycles"
+const string G_DISP = "Display"
+const string G_BOX  = "Boxes"
+
+pairMode = input.string("Auto", "Pair", options = ["Auto", "Manual"], inline = "pair", group = G_PAIR)
+pairInput = input.symbol("CME_MINI:ES1!", "", inline = "pair", tooltip = "Auto: NQ-ES, MNQ-MES, YM-ES, MYM-MES, same contract as the chart. Manual: the symbol picked here.", group = G_PAIR)
+
+showMicro = input.bool(false, "Micro (22.5m)", inline = "c1", tooltip = "1m to 5m charts.", group = G_CYC)
+show90    = input.bool(true, "90-Minute", inline = "c1", tooltip = "1m to 15m charts.", group = G_CYC)
+showDaily = input.bool(true, "Daily", inline = "c2", tooltip = "The four 6-hour quarters: Q1 18:00, Q2 00:00, Q3 06:00, Q4 12:00. 1m to 1H charts.", group = G_CYC)
+showQ1    = input.bool(true, "Q1", inline = "c3", group = G_CYC)
+showQ2    = input.bool(true, "Q2", inline = "c3", group = G_CYC)
+showQ3    = input.bool(true, "Q3", inline = "c3", group = G_CYC)
+showQ4    = input.bool(true, "Q4", inline = "c3", tooltip = "Daily: only SSMTs that form in the ticked quarters.", group = G_CYC)
+showWeek  = input.bool(true, "Weekly", inline = "c4", group = G_CYC)
+showMonth = input.bool(true, "Monthly", inline = "c4", tooltip = "Weekly and Monthly work up to a daily chart.", group = G_CYC)
+
+lineCol   = input.color(#000000, "Color", inline = "line", group = G_DISP)
+lineStyle = input.string("Dotted", "", options = ["Solid", "Dashed", "Dotted"], inline = "line", group = G_DISP)
+maxShown  = input.int(20, "Max visible", minval = 1, maxval = 100, tooltip = "Only this many of the most recent SSMTs stay on the chart.", group = G_DISP)
+lookback  = input.string("1 Week", "Lookback Period", options = ["1 Day", "1 Week", "1 Month", "Max"], group = G_DISP)
+labelSize = input.string("Small", "Label size", options = ["Tiny", "Small", "Normal", "Large"], group = G_DISP)
+
+boxDaily = input.bool(false, "Daily quarter boxes", inline = "box", group = G_BOX)
+box90m   = input.bool(false, "90m boxes", inline = "box", group = G_BOX)
+
+type Side
+    bool  on
+    bool  dead
+    int   id
+    line  ln
+    label lb
+
+type Cycle
+    int   rank
+    int   key
+    float hi
+    float lo
+    int   hiBar
+    int   loBar
+    float prevHi
+    float prevLo
+    int   prevHiBar
+    int   prevLoBar
+    float pairHi
+    float pairLo
+    float prevPairHi
+    float prevPairLo
+    Side  up
+    Side  dn
+    box   bx
+    int   firedBar
+    int   firedDir
+
+type Counter
+    int  seq
+    bool changed
+
+color clear = color.new(color.black, 100)
+
+labelSz() =>
+    switch labelSize
+        "Tiny"   => size.tiny
+        "Normal" => size.normal
+        "Large"  => size.large
+        => size.small
+
+priceText(float p) => str.tostring(p, format.mintick)
+
+tfSec    = timeframe.in_seconds()
+canMicro = timeframe.isintraday and tfSec <= 300
+can90    = timeframe.isintraday and tfSec <= 900 and 5400 % tfSec == 0
+canDaily = timeframe.isintraday and tfSec <= 3600 and 21600 % tfSec == 0
+canWeek  = tfSec <= 86400
+
+lookbackMs = switch lookback
+    "1 Day"   => 86400000
+    "1 Week"  => 7 * 86400000
+    "1 Month" => 31 * 86400000
+    => na
+inView = na(lookbackMs) or time >= last_bar_time - lookbackMs
+
+tradingDay = time_tradingday
+minuteOfDay = hour(time, TZ) * 60 + minute(time, TZ)
+sinceOpen = (minuteOfDay - 1080 + 1440) % 1440
+quarter = int(sinceOpen / 360)
+paused = timeframe.isintraday and minuteOfDay >= 1020 and minuteOfDay < 1080
+
+microKey = tradingDay * 64 + int(sinceOpen * 2 / 45)
+key90    = tradingDay * 16 + int(sinceOpen / 90)
+dailyKey = tradingDay * 4 + quarter
+weekKey  = int((int(math.floor(tradingDay / 86400000.0)) + 3) / 7)
+monthKey = year(tradingDay, "UTC") * 12 + month(tradingDay, "UTC")
+
+autoPair = switch syminfo.root
+    "NQ"  => "ES"
+    "ES"  => "NQ"
+    "MNQ" => "MES"
+    "MES" => "MNQ"
+    "YM"  => "ES"
+    "MYM" => "MES"
+    => ""
+manual   = pairMode == "Manual"
+pairSym  = manual ? pairInput : autoPair == "" ? "" : (syminfo.root == "YM" or syminfo.root == "MYM") ? "CME_MINI:" + autoPair + "1!" : str.replace(syminfo.tickerid, syminfo.root, autoPair)
+pairName = manual ? array.last(str.split(pairInput, ":")) : autoPair
+hasPair  = pairSym != ""
+[pairHigh, pairLow] = request.security(hasPair ? pairSym : syminfo.tickerid, timeframe.period, [high, low], ignore_invalid_symbol = true)
+
+newCycle(int rank) => Cycle.new(rank = rank, up = Side.new(), dn = Side.new())
+
+var micro   = newCycle(0)
+var min90   = newCycle(1)
+var daily   = newCycle(2)
+var weekly  = newCycle(3)
+var monthly = newCycle(4)
+var counter = Counter.new(0, false)
+
+var array<line>   lines  = array.new<line>()
+var array<label>  labels = array.new<label>()
+var array<int>    ids    = array.new<int>()
+var array<int>    ranks  = array.new<int>()
+var array<string> tags   = array.new<string>()
+var array<string> tips   = array.new<string>()
+var array<box>    boxes  = array.new<box>()
+
+rollCycle(Cycle c, int key, bool drawBox) =>
+    if na(c.key) or key != c.key
+        c.prevHi := c.hi
+        c.prevLo := c.lo
+        c.prevHiBar := c.hiBar
+        c.prevLoBar := c.loBar
+        c.prevPairHi := c.pairHi
+        c.prevPairLo := c.pairLo
+        c.hi := high
+        c.lo := low
+        c.hiBar := bar_index
+        c.loBar := bar_index
+        c.pairHi := pairHigh
+        c.pairLo := pairLow
+        c.key := key
+        c.up.on := false
+        c.up.dead := false
+        c.dn.on := false
+        c.dn.dead := false
+        if drawBox and inView
+            c.bx := box.new(bar_index, high, bar_index, low, border_color = lineCol, border_style = line.style_dotted, bgcolor = clear)
+            boxes.push(c.bx)
+            if boxes.size() > 150
+                boxes.shift().delete()
+    true
+
+updateCycle(Cycle c) =>
+    if high > c.hi
+        c.hi := high
+        c.hiBar := bar_index
+    if low < c.lo
+        c.lo := low
+        c.loBar := bar_index
+    c.pairHi := na(c.pairHi) ? pairHigh : math.max(c.pairHi, nz(pairHigh, c.pairHi))
+    c.pairLo := na(c.pairLo) ? pairLow : math.min(c.pairLo, nz(pairLow, c.pairLo))
+    if not na(c.bx)
+        c.bx.set_right(bar_index)
+        c.bx.set_top(c.hi)
+        c.bx.set_bottom(c.lo)
+    true
+
+addMark(line ln, label lb, int id, int rank, string tag, string tip) =>
+    lines.push(ln)
+    labels.push(lb)
+    ids.push(id)
+    ranks.push(rank)
+    tags.push(tag)
+    tips.push(tip)
+    if lines.size() > maxShown
+        lines.shift().delete()
+        labels.shift().delete()
+        ids.shift()
+        ranks.shift()
+        tags.shift()
+        tips.shift()
+    counter.changed := true
+    true
+
+removeMark(int id) =>
+    i = ids.indexof(id)
+    if i >= 0
+        lines.remove(i).delete()
+        labels.remove(i).delete()
+        ids.remove(i)
+        ranks.remove(i)
+        tags.remove(i)
+        tips.remove(i)
+    counter.changed := true
+    true
+
+mergeLabels() =>
+    n = labels.size()
+    if n > 0
+        for i = 0 to n - 1
+            lb = labels.get(i)
+            x = lb.get_x()
+            y = lb.get_y()
+            first = true
+            if i > 0
+                for j = 0 to i - 1
+                    if labels.get(j).get_x() == x and labels.get(j).get_y() == y
+                        first := false
+            if first
+                names = ""
+                tip = ""
+                for r = 0 to 4
+                    for k = 0 to n - 1
+                        if ranks.get(k) == r and labels.get(k).get_x() == x and labels.get(k).get_y() == y
+                            names := names + (names == "" ? "" : " | ") + tags.get(k)
+                            tip := tip + (tip == "" ? "" : "\n") + tips.get(k)
+                lb.set_text("SSMT [" + names + "]")
+                lb.set_tooltip(tip)
+            else
+                lb.set_text("")
+    true
+
+checkSSMT(Cycle c, int dir, string tag, string name, bool enabled) =>
+    atHigh = dir == -1
+    s = atHigh ? c.up : c.dn
+    prev = atHigh ? c.prevHi : c.prevLo
+    prevPair = atHigh ? c.prevPairHi : c.prevPairLo
+    if enabled and hasPair and not na(prev) and not na(prevPair) and not s.dead
+        ext = atHigh ? c.hi : c.lo
+        extBar = atHigh ? c.hiBar : c.loBar
+        pairExt = atHigh ? c.pairHi : c.pairLo
+        chartTook = atHigh ? ext > prev : ext < prev
+        pairTook = atHigh ? pairExt > prevPair : pairExt < prevPair
+        diverged = chartTook != pairTook
+        who = (chartTook ? syminfo.ticker : pairName) + " took it, " + (chartTook ? pairName : syminfo.ticker) + " did not"
+        tip = (atHigh ? "Bearish" : "Bullish") + " SSMT [" + name + "] w/" + pairName + ": previous " + (atHigh ? "high " : "low ") + priceText(prev) + ". " + who + "."
+        if s.on and not diverged
+            removeMark(s.id)
+            s.on := false
+            s.dead := true
+        if s.on and diverged and not na(s.ln)
+            if s.lb.get_x() != extBar or s.lb.get_y() != ext
+                counter.changed := true
+            s.ln.set_xy2(extBar, ext)
+            s.lb.set_xy(extBar, ext)
+            i = ids.indexof(s.id)
+            if i >= 0
+                tips.set(i, tip)
+        if not s.on and diverged and barstate.isconfirmed
+            counter.seq := counter.seq + 1
+            s.id := counter.seq
+            s.ln := na
+            s.lb := na
+            if inView
+                prevBar = atHigh ? c.prevHiBar : c.prevLoBar
+                s.ln := line.new(prevBar, prev, extBar, ext, color = lineCol, style = lineStyle == "Dashed" ? line.style_dashed : lineStyle == "Solid" ? line.style_solid : line.style_dotted)
+                s.lb := label.new(extBar, ext, "SSMT [" + tag + "]", color = clear, style = atHigh ? label.style_label_down : label.style_label_up, textcolor = lineCol, size = labelSz(), tooltip = tip, text_font_family = font.family_monospace)
+                addMark(s.ln, s.lb, s.id, c.rank, tag, tip)
+            s.on := true
+            c.firedBar := bar_index
+            c.firedDir := dir
+    true
+
+dailyQuarterOn = (quarter == 0 and showQ1) or (quarter == 1 and showQ2) or (quarter == 2 and showQ3) or (quarter == 3 and showQ4)
+dailyName = "Daily Q" + str.tostring(quarter + 1)
+
+if not paused
+    if canMicro
+        rollCycle(micro, microKey, false)
+        updateCycle(micro)
+        checkSSMT(micro, -1, "Micro", "Micro", showMicro)
+        checkSSMT(micro, 1, "Micro", "Micro", showMicro)
+    if can90
+        rollCycle(min90, key90, box90m)
+        updateCycle(min90)
+        checkSSMT(min90, -1, "90m", "90m", show90)
+        checkSSMT(min90, 1, "90m", "90m", show90)
+    if canDaily
+        rollCycle(daily, dailyKey, boxDaily)
+        updateCycle(daily)
+        checkSSMT(daily, -1, "D", dailyName, showDaily and dailyQuarterOn)
+        checkSSMT(daily, 1, "D", dailyName, showDaily and dailyQuarterOn)
+    if canWeek
+        rollCycle(weekly, weekKey, false)
+        updateCycle(weekly)
+        rollCycle(monthly, monthKey, false)
+        updateCycle(monthly)
+        checkSSMT(weekly, -1, "W", "Weekly", showWeek)
+        checkSSMT(weekly, 1, "W", "Weekly", showWeek)
+        checkSSMT(monthly, -1, "M", "Monthly", showMonth)
+        checkSSMT(monthly, 1, "M", "Monthly", showMonth)
+
+if counter.changed
+    mergeLabels()
+    counter.changed := false
+
+fired(Cycle c, int dir) => c.firedBar == bar_index and c.firedDir == dir
+alertcondition(fired(micro, -1), "SSMT Micro - High side", "SSMT+: bearish Micro SSMT on {{ticker}} at {{close}}")
+alertcondition(fired(micro, 1), "SSMT Micro - Low side", "SSMT+: bullish Micro SSMT on {{ticker}} at {{close}}")
+alertcondition(fired(min90, -1), "SSMT 90m - High side", "SSMT+: bearish 90m SSMT on {{ticker}} at {{close}}")
+alertcondition(fired(min90, 1), "SSMT 90m - Low side", "SSMT+: bullish 90m SSMT on {{ticker}} at {{close}}")
+alertcondition(fired(daily, -1), "SSMT Daily - High side", "SSMT+: bearish Daily SSMT on {{ticker}} at {{close}}")
+alertcondition(fired(daily, 1), "SSMT Daily - Low side", "SSMT+: bullish Daily SSMT on {{ticker}} at {{close}}")
+alertcondition(fired(weekly, -1), "SSMT Weekly - High side", "SSMT+: bearish Weekly SSMT on {{ticker}} at {{close}}")
+alertcondition(fired(weekly, 1), "SSMT Weekly - Low side", "SSMT+: bullish Weekly SSMT on {{ticker}} at {{close}}")
+alertcondition(fired(monthly, -1), "SSMT Monthly - High side", "SSMT+: bearish Monthly SSMT on {{ticker}} at {{close}}")
+alertcondition(fired(monthly, 1), "SSMT Monthly - Low side", "SSMT+: bullish Monthly SSMT on {{ticker}} at {{close}}")

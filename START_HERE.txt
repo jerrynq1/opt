@@ -1,0 +1,21 @@
+ICT QUANTLAB — SIMPLE MARKET WORKSPACE
+
+CHẠY LOCAL
+1. Giải nén toàn bộ thư mục.
+2. Mở terminal tại thư mục chứa index.html.
+3. Chạy: python -m http.server 8000
+4. Mở: http://localhost:8000
+
+CÁC KHU VỰC
+- Chart: NAS100, SP500, XAUUSD, XAGUSD.
+- QQQ Options và GLD Options: dữ liệu ETF Options qua Binance Worker.
+- Kho Indicator: chỉ giữ hai nhóm Orderflow và Market Model. Orderflow gồm Footprint, Big Trade, Statistic, Absorption, DOM/MBO, HVN Profile, Killzones, ICT/CRT, TPO support, Goldbach, Quarterly Theory và Cross-Asset Liquidity Map. Market Model gồm CRT Turtle Soup+, SSMT+, SDRange+, Wyckoff+ và PO3 Plus.
+- Kết nối cTrader: nhập Client ID, Client Secret, Access Token và Account ID trong trình duyệt cá nhân.
+
+CẤU HÌNH BINANCE OPTIONS
+Kiểm tra URL Worker trong js/stock-options-config.js. Worker triển khai bằng wrangler.toml và worker/index.js.
+
+LƯU Ý
+- Đây là workspace cá nhân chạy phía trình duyệt; không chia sẻ Client Secret hoặc Access Token.
+- NAS100/SP500 có thể cần map lại tên symbol theo broker.
+- ETF Options là dữ liệu QQQ/GLD, không phải order book trực tiếp của NAS100/XAUUSD.

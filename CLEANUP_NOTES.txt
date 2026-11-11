@@ -1,0 +1,26 @@
+ICT QUANTLAB — SIMPLE WORKSPACE
+
+WORKSPACE
+- Chart candlestick: NAS100, SP500, XAUUSD, XAGUSD.
+- QQQ Options và GLD Options.
+- Kết nối cTrader Open API.
+- Kho Indicator chỉ gồm hai nhóm Orderflow và Market Model.
+
+ORDERFLOW / MARKET MODEL
+- Orderflow: Footprint, Big Trade, Statistic, Absorption, DOM/MBO, HVN Profile, Killzones, CRT, ICT 2022, Goldbach, Quarterly Theory, Cross-Asset Liquidity Map và TPO support.
+- Market Model: CRT Turtle Soup+, SSMT+, SDRange+, Wyckoff+ và PO3 Plus.
+
+ĐÃ LOẠI BỎ
+- Bảng Price Variation, Replay và DTT.
+- Indicator ngoài hai nhóm Orderflow / Market Model.
+- Các trang Quant Lab, Market Statistics, Elliott Structure Lab và Commodity Options cũ.
+- Tài liệu Markdown (.md).
+
+ROOT ẨN DÙNG LÀM HOST NỘI BỘ
+- v-tpo: UI/settings nội bộ cho TPO Orderflow.
+- v-cs: UI/settings màu nến và chart style.
+
+KIỂM TRA
+- Chạy `bash tests/run-all.sh` để kiểm thử.
+- Local HTML/CSS/JS assets được kiểm tra trong `tests/simple-workspace.test.js`.
+- cTrader và Binance Worker cần cấu hình credentials/URL ở trình duyệt hoặc file config tương ứng.

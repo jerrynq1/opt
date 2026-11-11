@@ -1,0 +1,12 @@
+Market Model indicator ports — source notices
+
+The following user-supplied Pine Script v6 files are preserved unchanged in pine-source-originals/:
+
+- crt-turtle-soup.pine — includes a Mozilla Public License 2.0 notice.
+- sdrange-plus.pine — includes a Mozilla Public License 2.0 notice.
+- wyckoff-plus.pine — includes a Mozilla Public License 2.0 notice and © arleay attribution.
+- po3-plus.pine — includes a Mozilla Public License 2.0 notice.
+- ssmt.pine — no explicit license header was present in the supplied file.
+
+The JavaScript implementation is a platform port, not the original Pine runtime. Retain the source notices when distributing the relevant source. Verify the original terms for SSMT before redistributing it publicly.
+MPL 2.0 text: https://mozilla.org/MPL/2.0/

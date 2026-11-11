@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+
+<html lang="vi">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1, viewport-fit=cover" name="viewport"/>
+<title>ICT QuantLab — Trading Workspace</title>
+<link href="img/logo.png" rel="icon" type="image/png"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&amp;family=DM+Sans:wght@400;500;600;700&amp;family=Space+Grotesk:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="css/style.css" rel="stylesheet"/>
+<link href="css/options.css" rel="stylesheet"/>
+<link href="css/stock-options.css" rel="stylesheet"/>
+<link href="css/cross-asset-map.css" rel="stylesheet"/>
+
+
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<link href="css/simple-workspace.css" rel="stylesheet"/>
+<link href="css/simple-options-polish.css" rel="stylesheet"/>
+<link href="css/ict-quantlab-theme.css" rel="stylesheet"/>
+<meta content="ICT QuantLab trading workspace for NAS100, SP500, XAUUSD and XAGUSD charts, QQQ/GLD ETF options, indicators and cTrader." name="description"/></head>
+<body class="nt simple-ui"><div class="scrim" id="scrim"></div><aside aria-label="Main navigation" id="side">
+<div class="sh">
+<button aria-label="Thu gọn thanh bên" class="ib" id="tg" type="button"><svg fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><rect height="16" rx="3.5" width="18" x="3" y="4"></rect><path d="M9.5 4v16"></path></svg></button>
+<h1 class="brand"><span class="brand-mark">Q<span>·</span></span><span class="brand-copy"><b>ICT QUANTLAB</b><small>MARKET WORKSPACE</small></span></h1>
+</div>
+<div class="sidebar-kicker">WORKSPACE</div>
+<nav aria-label="Main navigation" id="nav"></nav>
+<div class="sf">
+<button class="theme-toggle" id="th" title="Đổi giao diện" type="button"><span class="ic">☀</span><span class="lb">Giao diện</span></button>
+<div class="sidebar-footnote"><span class="foot-led"></span><span>Personal terminal · Local browser</span></div>
+</div>
+</aside><div class="main">
+<header class="topbar">
+<div class="topbar-left">
+<button aria-label="Mở menu" class="ib mobile-menu" id="tg2" type="button"><svg fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><rect height="16" rx="3.5" width="18" x="3" y="4"></rect><path d="M9.5 4v16"></path></svg></button>
+<div class="topbar-page"><small>ICT QUANTLAB / WORKSPACE</small><strong id="workspaceTitle">Chart</strong></div>
+</div>
+<div class="topbar-right">
+<span class="topbar-caption">MARKET DATA · cTRADER</span>
+<button class="topbar-connect" data-go="conn" type="button"><span class="connect-led"></span> Kết nối cTrader <span aria-hidden="true">↗</span></button>
+</div>
+</header>
+<div class="wrap"><section class="view on" id="v-chart">
+<div class="card bar chart-toolbar">
+<div class="market-picker-wrap">
+<span class="toolbar-label">MARKET</span>
+<div class="symw">
+<input aria-autocomplete="list" aria-controls="symDd" aria-expanded="false" aria-label="Mã giao dịch" autocapitalize="characters" autocomplete="off" id="sym" role="combobox" spellcheck="false" title="Chọn một trong bốn thị trường"/>
+<svg aria-hidden="true" class="chev" viewbox="0 0 20 20"><path d="M5 8l5 5 5-5"></path></svg>
+</div>
+</div>
+<div class="timeframe-wrap"><span class="toolbar-label">TIMEFRAME</span><div class="tfs" id="tfs"></div></div>
+<div class="toolbar-divider"></div>
+<div class="toolbar-status"><span class="toolbar-label">FEED</span><span class="pill" id="st">Chưa kết nối</span></div>
+<div class="px"><span><small>Bid</small><b id="bid">–</b></span><span><small>Ask</small><b id="ask">–</b></span></div>
+<div class="chart-actions">
+
+<button aria-expanded="false" class="btn ghost sm" id="xmapToggle" title="Bật bảng ETF Options Liquidity Map" type="button">⇄ ETF Map</button>
+<button class="btn ghost sm" data-go="ind" type="button">ƒx Indicators</button>
+
+
+</div>
+</div>
+<section aria-label="Cross-asset options map" class="card xmap-panel" hidden="" id="xmapPanel">
+<div class="xmap-head"><div><div class="xmap-eyebrow">ETF OPTIONS → CFD / INDEX</div><h3>ETF Options Liquidity Map · Indicator</h3><p class="msg">Lớp vẽ đã chuyển vào Kho Indicator. Thêm “ETF Options Liquidity Map” trong nhóm Orderflow, sau đó dùng nút mắt để bật/tắt và bánh răng để cấu hình.</p></div><span class="xmap-state" id="xmapState">Chưa bật</span></div>
+<div class="xmap-controls">
+<label>EXPIRY<select id="xmapExpiry"><option value="">Bật indicator để tải kỳ hạn…</option></select></label>
+<button class="btn sm" id="xmapAddIndicator" type="button">Mở Kho Indicator</button>
+<button class="btn ghost sm" id="xmapTarget" type="button">Mở chart NAS100</button>
+</div>
+<div class="xmap-meta" id="xmapMeta">Cấu hình nguồn ETF, heatmap, bubble, wall, Gamma Flip, Max Pain và GEX 1–10 trong settings của indicator.</div>
+<div class="xmap-legend"><span><i class="xmap-dot call"></i> Call volume</span><span><i class="xmap-dot put"></i> Put volume</span><span><i class="xmap-line call"></i> Call OI Wall</span><span><i class="xmap-line put"></i> Put OI Wall</span><span><i class="xmap-line flip"></i> Gamma Flip</span><span><i class="xmap-line pain"></i> Max Pain / GEX levels</span></div>
+<p class="xmap-disclaimer">Bubble là volume hợp đồng quyền chọn theo strike, không phải volume futures/CFD theo thời gian. Heatmap và levels là proxy từ ETF options, không phải order book/dealer positioning thực của NAS100/XAUUSD. Vol Trigger chỉ vẽ khi source cung cấp level riêng.</p>
+</section>
+<div class="card" id="chartCard"><div id="ohlc"></div><div id="legend"></div><div id="cw"><div id="chart"></div><div id="panes"></div></div>
+<div id="clk"><button aria-expanded="false" aria-haspopup="dialog" id="clkB" title="Đổi múi giờ hiển thị" type="button"><span id="clkT">--:--:--</span><small id="clkZ"></small><span aria-hidden="true">▾</span></button></div>
+<div aria-label="Múi giờ" id="tzp" role="dialog"></div>
+</div>
+</section><section aria-label="QQQ Stock Options" class="view stock-options-view" id="v-qqqOptions"></section><section aria-label="GLD Stock Options" class="view stock-options-view" id="v-gldOptions"></section><section class="view" id="v-ind"><div class="workspace-page-head"><div><span class="eyebrow">TOOLS / INDICATORS</span><h1>Kho <em>Indicator</em></h1><p>Chỉ hiển thị indicator thuộc hai nhóm Orderflow và Market Model. Bật/tắt và cấu hình trực tiếp trên chart.</p></div><span class="page-tag">ORDERFLOW · MARKET MODEL</span></div>
+
+<div class="card"><h2>Đang dùng trên chart</h2><div id="actList"></div></div>
+<div class="card" style="margin-top:14px"><div class="bar" style="margin-bottom:12px"><h2 style="margin:0">Kho indicator</h2><div class="tfs" id="indF"></div></div><div class="grid" id="indGrid"></div></div>
+</section><section class="view" id="v-conn"><div class="workspace-page-head"><div><span class="eyebrow">DATA SOURCE / CONNECTION</span><h1>Kết nối <em>cTrader</em></h1><p>Kết nối tài khoản Demo hoặc Live để lấy giá và dữ liệu nến cho bốn thị trường.</p></div><span class="page-tag">OPEN API</span></div>
+<div class="card" id="ctCard" style="max-width:560px">
+<h2>Kết nối cTrader Open API</h2>
+<p class="msg" style="margin:0 0 6px">Nhập thông tin ứng dụng cTrader Open API của bạn (Client ID, Client Secret lấy ở trang Applications của Spotware; Access Token lấy bằng OAuth cho tài khoản cần dùng). Trình duyệt nối thẳng tới <code>live/demo.ctraderapi.com:5036</code>, không qua worker.</p>
+<p class="msg" style="margin:0 0 6px">Key được lưu trong localStorage của trình duyệt này, chỉ dùng để test ở máy cá nhân. Đừng đưa bản này lên hosting công khai.</p>
+<label class="msg" for="cId">Client ID</label>
+<div class="kv"><input autocomplete="off" id="cId" spellcheck="false"/></div>
+<label class="msg" for="cSec">Client Secret</label>
+<div class="kv"><input autocomplete="off" id="cSec" spellcheck="false" type="password"/><button class="btn ghost" data-show="cSec" type="button">Hiện</button></div>
+<label class="msg" for="cTok">Access Token</label>
+<div class="kv"><input autocomplete="off" id="cTok" spellcheck="false" type="password"/><button class="btn ghost" data-show="cTok" type="button">Hiện</button></div>
+<label class="msg" for="cAcc">Account ID hoặc số tài khoản (tuỳ chọn, để trống = tài khoản đầu tiên của token)</label>
+<div class="kv"><input autocomplete="off" id="cAcc" inputmode="numeric" spellcheck="false"/></div>
+<label class="msg" for="cEnv">Môi trường</label>
+<div class="kv"><select id="cEnv"><option value="auto">Tự nhận (theo tài khoản)</option><option value="live">Live</option><option value="demo">Demo</option></select></div>
+<div class="bar" style="margin-top:14px"><button class="btn" id="cSave" type="button">Lưu &amp; kết nối</button><button class="btn ghost" id="cClear" type="button">Xoá key</button><span class="msg" id="cMsg"></span></div>
+</div>
+<div class="card" id="cacheCard" style="max-width:560px;margin-top:14px">
+<h2>Xoá cache của web</h2>
+<p class="msg" style="margin:0 0 6px">Dùng khi vừa cập nhật source mà trang vẫn chạy bản cũ. Nút này tải lại HTML, CSS và JavaScript, xoá Cache Storage và Service Worker rồi tải lại trang. Key cTrader, mã, khung giờ và cài đặt indicator được giữ nguyên.</p>
+<div class="bar"><button class="btn ghost" id="cacheClr" type="button">Xoá cache &amp; tải lại</button><span class="msg" id="cacheMsg"></span></div>
+</div>
+</section><div aria-hidden="true" hidden="hidden" id="legacy-support-views"><section class="view" id="v-tpo">
+<div class="tpo-page-head">
+<div><div class="tpo-eyebrow">MARKET STRUCTURE</div><h2>Market Profile <span>· TPO</span></h2><p class="msg">Đọc sự chấp nhận giá theo thời gian: mỗi chữ cái đại diện cho một bracket đã giao dịch tại mức giá đó.</p></div>
+<div class="tpo-page-actions"><span class="tpo-status" id="tpoFeedStatus">Đang chờ dữ liệu</span><button class="btn sm" data-tpo-action="refresh" type="button">↻ Làm mới</button></div>
+</div>
+<div aria-live="polite" class="tpo-summary-grid" id="tpoSummary"></div>
+<div class="card tpo-profile-card">
+<div class="tpo-profile-head"><div><h3 id="tpoSessionTitle">TPO Profile</h3><p class="msg" id="tpoSessionMeta">Đang tải dữ liệu phiên…</p></div><div class="tpo-quick-controls">
+<label>Phiên<select data-tpo="sessionPick"><option value="current">Hiện tại</option><option value="previous">Phiên trước</option></select></label>
+<label>Bracket<select data-tpo="periodMin"><option value="5">5m</option><option value="10">10m</option><option value="15">15m</option><option value="30">30m</option><option value="60">60m</option></select></label>
+</div></div>
+<div class="tpo-legend"><span><i class="poc"></i> POC</span><span><i class="va"></i> Value Area</span><span><i class="single"></i> Single Print</span><span><i class="ib"></i> Initial Balance</span></div>
+<div class="tpo-table">
+<div class="tpo-table-head"><div class="tpo-axis-head">PRICE</div><div class="tpo-header-scroll" id="tpoHeaderScroll"><canvas id="tpoHeaderCanvas"></canvas></div></div>
+<div class="tpo-body-scroll" id="tpoBodyScroll"><div class="tpo-table-body"><canvas class="tpo-axis-canvas" id="tpoAxisCanvas"></canvas><div class="tpo-grid-scroll" id="tpoGridScroll"><canvas id="tpoGridCanvas"></canvas></div></div></div>
+<div class="tpo-empty" hidden="" id="tpoEmpty"><b>Chưa có dữ liệu TPO</b><span id="tpoEmptyText">Kết nối cTrader và tải dữ liệu M1 để dựng Market Profile.</span><button class="btn ghost sm" data-tpo-action="go-chart" type="button">Mở Chart</button></div>
+</div>
+<div class="tpo-profile-foot" id="tpoProfileFoot">Nguồn dữ liệu sẽ hiển thị tại đây.</div>
+</div>
+<div class="card tpo-settings-card" id="tpoSettings"></div>
+</section><section class="view" id="v-cs"><div id="csBody"></div></section></div></div></div><script src="js/core.js"></script><script src="js/symbols.js"></script><script src="js/timezone.js"></script><script src="js/ctrader.js"></script><script src="js/chart.js"></script><script src="js/candle-style.js"></script><script src="js/indicators-defs.js"></script><script src="js/indicators-custom.js"></script><script src="js/pine-indicators-defs.js"></script><script src="js/indicators-engine.js"></script><script src="js/connection-ui.js"></script><script src="js/stock-options-config.js"></script><script src="js/stock-options.js"></script><script src="js/cross-asset-map.js"></script><script src="js/init.js"></script><script src="js/drawings-core.js"></script><script src="js/market-model-indicators.js"></script><script src="js/volume-profile.js"></script><script src="js/hvn-profile.js"></script><script src="js/killzones.js"></script><script src="js/ict-2022.js"></script><script src="js/crt.js"></script><script src="js/tpo.js"></script><script src="js/goldbach.js"></script><script src="js/qt.js"></script><script src="js/orderflow-footprint.js"></script><script src="js/orderflow-bigtrade.js"></script><script src="js/orderflow-statistic.js"></script><script src="js/orderflow-absorption.js"></script><script src="js/orderflow-dom.js"></script><script src="js/drawings-interact.js"></script><script src="js/mobile.js"></script><script src="js/paper-trading.js"></script><script src="js/tpo-advanced.js"></script></body>
+</html>

@@ -1,0 +1,9 @@
+name = "paper-binance-stock-proxy"
+main = "worker/index.js"
+compatibility_date = "2026-11-09"
+workers_dev = true
+
+# Optional: restrict browser access to your GitHub Pages origin.
+# Example after creating your repo: ALLOWED_ORIGINS = "https://YOUR-USERNAME.github.io"
+[vars]
+ALLOWED_ORIGINS = "*"

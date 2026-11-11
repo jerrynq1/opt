@@ -1,0 +1,697 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © arleay
+//@version=6
+indicator("Wyckoff+", "WY+ | @arleay", overlay = true, max_lines_count = 500, max_labels_count = 500, max_boxes_count = 150, max_bars_back = 1500)
+
+const int MIN = 60000
+const int HOUR = 3600000
+const string HANDLE = "@arle" + "ay" + "nt"
+const string MARK = "‍​‌‌​​​​‌​‌‌‌​​‌​​‌‌​‌‌​​​‌‌​​‌​‌​‌‌​​​​‌​‌‌‌‌​​‌‍"
+const string CR = "free script by " + HANDLE + " · if you paid for this, you were scammed" + MARK
+
+mode = input.string("Spring", "Version", options = ["Spring", "Sweep", "Volume"], group = "Setup", tooltip = "spring: a break of support that closes back above it is bought at the close. sweep: support is swept, the range top breaks on a close, then a limit waits in the last demand zone. volume: a wide, low volume break of support, then a strong candle in the trade direction. shorts mirror all three")
+preset = input.string("Core", "Rules", options = ["Core", "Filtered"], group = "Setup", tooltip = "core is the plain sequence for the chosen version. filtered adds a secondary test, phase B longer than phase A, a minimum range time, a minimum first target, an engulfing candle for spring and a maximum sweep depth")
+dirMode = input.string("Both", "Direction", options = ["Both", "Long", "Short"], group = "Setup", tooltip = "long follows accumulation ranges, short follows distribution ranges")
+swingLen = input.int(5, "Swing strength (bars)", minval = 2, maxval = 20, group = "Setup", tooltip = "bars on each side of a climax low or high")
+trendMin = input.int(240, "Markdown lookback (minutes)", minval = 15, group = "Setup", tooltip = "a climax low has to be the lowest low of this window, a climax high the highest high")
+depthAtr = input.float(3, "Markdown depth (ATR)", minval = 0.5, step = 0.5, group = "Setup", tooltip = "minimum drop into the climax low, or rise into the climax high, measured over the lookback")
+atrLen = input.int(14, "ATR length", minval = 2, maxval = 100, group = "Setup")
+minH = input.float(2, "Range min height (ATR)", minval = 0.5, step = 0.5, group = "Setup", tooltip = "the rally off the climax has to be at least this tall before the range counts")
+maxH = input.float(12, "Range max height (ATR)", minval = 1, step = 1, group = "Setup", tooltip = "a taller move is a trend, not a range, and the range is dropped")
+stTol = input.float(0.5, "Retest tolerance (ATR)", minval = 0.1, step = 0.1, group = "Setup", tooltip = "how close a low has to come to the climax low to count as a secondary test")
+rngHours = input.float(48, "Range expires (hours)", minval = 1, step = 1, group = "Setup", tooltip = "a range that has not been traded by then is dropped")
+winMin = input.int(120, "Recovery window (minutes)", minval = 5, group = "Setup", tooltip = "spring and volume: how long price has to recover after support breaks. an unrecovered break drops the range")
+
+springVol = input.string("Low volume", "Break candle volume", options = ["Low volume", "Any"], group = "Volume", tooltip = "volume version: the candle that breaks support has to be wide. low volume also needs it under the average")
+trigger = input.string("Intent candle", "Trigger", options = ["Intent candle", "Test then intent"], group = "Volume", tooltip = "volume version. intent candle: a strong candle in the trade direction after the break. test then intent: price first retests support with a narrow candle, then the strong candle")
+volLen = input.int(20, "Volume average length", minval = 2, maxval = 200, group = "Volume")
+lowVol = input.float(0.8, "Low volume (x average)", minval = 0.1, step = 0.1, group = "Volume")
+highVol = input.float(1, "High volume (x average)", minval = 0.5, step = 0.1, group = "Volume", tooltip = "volume on the trigger candle")
+wideAtr = input.float(1.2, "Wide candle (ATR)", minval = 0.3, step = 0.1, group = "Volume")
+medAtr = input.float(0.8, "Medium candle (ATR)", minval = 0.2, step = 0.1, group = "Volume", tooltip = "smallest range of the trigger candle")
+narrowAtr = input.float(0.7, "Narrow candle (ATR)", minval = 0.1, step = 0.1, group = "Volume", tooltip = "largest range of the retest candle")
+climaxAtr = input.float(1.5, "Climax candle (ATR)", minval = 0.5, step = 0.1, group = "Volume", tooltip = "volume version and filtered rules: the climax candle has to be this wide")
+climaxVol = input.float(1.5, "Climax volume (x average)", minval = 0.5, step = 0.1, group = "Volume", tooltip = "volume version and filtered rules: the climax candle needs this much volume")
+
+sosSrc = input.string("Range high", "Break level", options = ["Range high", "Swing high"], group = "Sweep", tooltip = "sweep version. range high is the top of the range, the full break. swing high is the last swing inside the range before the sweep, an earlier break")
+sosMin = input.int(480, "Break window (minutes)", minval = 5, group = "Sweep", tooltip = "after the sweep, price has to close through the break level inside this time")
+entryAt = input.string("Zone top", "Entry at", options = ["Zone top", "Zone midpoint"], group = "Sweep")
+stopAt = input.string("Sweep low", "Stop at", options = ["Sweep low", "Zone low"], group = "Sweep", tooltip = "sweep low is under the swept extreme. when the first target is under the minimum R, the stop moves to the zone low")
+pullMin = input.int(240, "Limit expires (minutes)", minval = 5, group = "Sweep", tooltip = "an unfilled limit is cancelled after this")
+zoneExit = input.bool(true, "Exit on close through zone", group = "Sweep", tooltip = "an open trade is closed at the market when a candle closes beyond the far side of the zone")
+
+bufTicks = input.int(2, "Stop buffer (ticks)", minval = 0, maxval = 50, group = "Entry and exit", tooltip = "added beyond the stop level")
+fixedR = input.float(2, "Second target (R)", minval = 0.5, step = 0.5, group = "Entry and exit", tooltip = "the first target is the range top, or the impulse high in the sweep version. whichever is closer is target 1")
+minR = input.float(1, "Min first target (R)", minval = 0.5, step = 0.5, group = "Entry and exit", tooltip = "filtered rules skip a setup whose first target is closer than this. the sweep version also uses it to pick the stop")
+useBE = input.bool(true, "Stop to entry", group = "Entry and exit", inline = "be")
+beR = input.float(1, "at (R)", minval = 0.1, step = 0.1, group = "Entry and exit", inline = "be", tooltip = "the stop also moves to entry when target 1 trades")
+showBeLine = input.bool(true, "BE marker", group = "Entry and exit", tooltip = "orange dotted line at the level that moves the stop to entry")
+maxHold = input.float(24, "Trade expires (hours)", minval = 1, step = 1, group = "Entry and exit", tooltip = "an open trade is closed at the market after this")
+riskPerTrade = input.float(300, "Risk per trade $", minval = 1, group = "Entry and exit")
+showSizing = input.bool(false, "Sizing on entry label", group = "Entry and exit")
+
+minRangeMin = input.int(60, "Min range time (minutes)", minval = 0, group = "Filtered", tooltip = "filtered only. the range has to be at least this old before a break counts")
+maxSweepAtr = input.float(3, "Max sweep depth (ATR)", minval = 0.5, step = 0.5, group = "Filtered", tooltip = "filtered only, sweep version. a deeper sweep drops the range")
+
+viewMode = input.string("Minimal", "View", options = ["Minimal", "Full", "Entries only"], group = "Display", tooltip = "minimal: live ranges, the stages that happened and the plans. full: adds the midline and the last three dropped ranges with the reason. entries only: just the entries with their SL, TP and BE lines, no ranges, stage labels or zones")
+showRange = input.bool(true, "Range", group = "Display", tooltip = "box with support and the top of the range")
+showEvents = input.bool(true, "Stage labels", group = "Display", tooltip = "climax, rally, retest, break and trigger tags")
+showPending = input.bool(true, "Pending setups", group = "Display", tooltip = "the dashed limit that waits in the zone. no alerts")
+sltpText = input.string("Off", "SL and TP text", options = ["Off", "R only", "Price"], group = "Display", tooltip = "off shows the SL and TP lines with no text. r only tags each line with its multiple of the stop. price tags the name and price")
+delStopped = input.bool(true, "Delete stopped setups", group = "Display", tooltip = "a setup that hits its stop is removed from the chart with its range and zone. the table still lists it as the last trade")
+showPrices = input.bool(true, "Prices", group = "Display", tooltip = "prices on the range, entry and BE tags")
+showLabels = input.bool(true, "Labels", group = "Display", tooltip = "off hides all chart text and keeps lines and boxes")
+pastSetups = input.int(6, "Past setups shown", minval = 1, maxval = 20, group = "Display", tooltip = "finished setups kept on the chart with their range, newest first. live ranges and open trades are always shown")
+lookback = input.string("Max", "Lookback", options = ["1 Day", "1 Week", "1 Month", "Max"], group = "Display")
+textSize = input.string("Small", "Text", options = ["Tiny", "Small", "Normal", "Large"], group = "Display")
+showTable = input.bool(true, "Table", group = "Display", inline = "t")
+tableSpot = input.string("Top Right", "", options = ["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group = "Display", inline = "t")
+
+longCol = input.color(#2962FF, "Long", group = "Style", inline = "c")
+shortCol = input.color(#F23645, "Short", group = "Style", inline = "c")
+beCol = input.color(#FF9800, "BE", group = "Style", inline = "c")
+zoneFill = input.color(color.new(#787B86, 88), "Range", group = "Style", inline = "z")
+zoneText = input.color(#787B86, "text", group = "Style", inline = "z")
+
+ink = #000000
+grey = #787B86
+noFill = color.new(color.black, 100)
+txt = textSize == "Tiny" ? size.tiny : textSize == "Small" ? size.small : textSize == "Normal" ? size.normal : size.large
+
+bool filtered = preset == "Filtered"
+bool needSt = mode == "Volume" or filtered
+bool needClimax = mode == "Volume" or filtered
+float tick = syminfo.mintick
+int barMs = timeframe.in_seconds() * 1000
+int lookMs = lookback == "1 Day" ? 86400000 : lookback == "1 Week" ? 604800000 : lookback == "1 Month" ? 2592000000 : 0
+
+barsFor(int minutes) => math.max(1, math.round(minutes * 60 / timeframe.in_seconds()))
+price(float p) => str.tostring(p, format.mintick)
+pr(float p) => showPrices ? " " + price(p) : ""
+tagText(string s) => showLabels ? s : ""
+sideTag(int d) => d == 1 ? "WY+" : "WY-"
+sideName(int d) => d == 1 ? "ACC" : "DIST"
+dirOk(int d) => dirMode == "Both" or (dirMode == "Long" and d == 1) or (dirMode == "Short" and d == -1)
+inLook(int t) => lookMs == 0 or time_close - t <= lookMs
+clock(int t) => str.format_time(t, "dd MMM HH:mm", syminfo.timezone)
+
+type Bag
+    array<line> lines
+    array<label> labels
+    array<box> boxes
+
+method clean(Bag b) =>
+    for l in b.lines
+        line.delete(l)
+    for l in b.labels
+        label.delete(l)
+    for x in b.boxes
+        box.delete(x)
+    b.lines.clear()
+    b.labels.clear()
+    b.boxes.clear()
+    true
+
+type Rng
+    int d
+    int stage = 1
+    float nSup
+    float nCrk
+    float nSwing
+    int tC = 0
+    int bC = 0
+    int tCrk = 0
+    int bCrk = 0
+    int tSt = 0
+    float nSt
+    bool frozen = false
+    bool armed = false
+    bool brk = false
+    int tBrk = 0
+    float nSpr
+    int tSpr = 0
+    int bSpr = 0
+    float nImp
+    bool lowVolBrk = false
+    bool qual = false
+    int tQual = 0
+    int bQual = 0
+    bool tested = false
+    int tTest = 0
+    int bTest = 0
+    float nTest
+    int tSos = 0
+    float nSosPx
+    int tEnd = 0
+    int tradeId = 0
+    bool hide = false
+    string why = ""
+
+type Trade
+    int id
+    int d
+    int state = 2
+    float nEntry
+    float nStop
+    float nStop0
+    float nTp1
+    float nTp2
+    float nBe
+    float risk0
+    bool tp1Hit = false
+    bool beDone = false
+    int t0
+    int tIn
+    int tEnd = 0
+    int exp
+    int qty
+    float riskUsd
+    int score
+    bool grade = false
+    string result = ""
+    string note
+    string kind
+    float zTop
+    float zBot
+    int zT = 0
+    Rng rng
+
+type St
+    string blocked = "-"
+    Trade last
+    bool lf = false
+    bool sf = false
+    int nextId = 0
+
+var St st = St.new()
+var array<Rng> act = array.new<Rng>(2)
+var array<Rng> rngs = array.new<Rng>()
+var array<Trade> trades = array.new<Trade>()
+var Rng noRng = na
+var array<int> blockT = array.from(0, 0)
+var Bag ctx = Bag.new(array.new<line>(), array.new<label>(), array.new<box>())
+var array<int> evX = array.new<int>()
+var array<float> evY = array.new<float>()
+var array<bool> evB = array.new<bool>()
+var array<string> evS = array.new<string>()
+var array<string> evTip = array.new<string>()
+
+int trendBars = math.max(2 * swingLen + 1, barsFor(trendMin))
+float atrV = ta.atr(atrLen)
+float vAvg = ta.sma(volume, volLen)
+bool volOk = not na(volume) and volume > 0
+float pLo = ta.pivotlow(low, swingLen, swingLen)
+float pHi = ta.pivothigh(high, swingLen, swingLen)
+float lowTr = ta.lowest(low, trendBars)
+float highTr = ta.highest(high, trendBars)
+float hhA = ta.highest(high, swingLen)
+float llA = ta.lowest(low, swingLen)
+int hbA = ta.highestbars(high, swingLen)
+int lbA = ta.lowestbars(low, swingLen)
+
+seedOk(int d) =>
+    float p = d == 1 ? pLo : pHi
+    bool ok = not na(p)
+    if ok
+        float extTr = d == 1 ? lowTr[swingLen] : highTr[swingLen]
+        float depth = d == 1 ? highTr[swingLen] - p : p - lowTr[swingLen]
+        ok := p == extTr and depth >= depthAtr * atrV[swingLen]
+    if ok and needClimax
+        bool wideC = high[swingLen] - low[swingLen] >= climaxAtr * atrV[swingLen]
+        bool volC = volOk[swingLen] and volume[swingLen] >= climaxVol * vAvg[swingLen]
+        ok := wideC and volC
+    ok
+
+newRng(int d) =>
+    Rng r = Rng.new()
+    int off = d == 1 ? hbA : lbA
+    r.d := d
+    r.nSup := d == 1 ? pLo : -pHi
+    r.tC := time[swingLen]
+    r.bC := bar_index - swingLen
+    r.nCrk := d == 1 ? hhA : -llA
+    r.tCrk := time[math.abs(off)]
+    r.bCrk := bar_index + off
+    r
+
+killRng(Rng r, int ix, string why) =>
+    r.stage := 0
+    r.why := why
+    r.tEnd := time_close
+    act.set(ix, noRng)
+    st.blocked := sideName(r.d) + " " + why
+    true
+
+openTrade(Rng r, int ix, float nEnt, float nStop, float tgtA, bool pend, float zTop, float zBot, int zT) =>
+    int d = r.d
+    float risk = nEnt - nStop
+    float tgtB = nEnt + fixedR * risk
+    float tA = tgtA > nEnt ? tgtA : tgtB
+    float tp1 = math.min(tA, tgtB)
+    float tp2 = math.max(tA, tgtB)
+    float r1 = risk > 0 ? (tp1 - nEnt) / risk : 0.0
+    bool phaseOk = r.tSt > 0 and (r.tBrk - r.tSt) >= (r.tSt - r.tC)
+    bool volTrig = volOk and volume >= highVol * vAvg
+    string why = ""
+    if risk <= 0
+        why := "no valid stop"
+    else if filtered and r1 < minR
+        why := "first target under " + str.tostring(minR, "#.##") + "R"
+    else if filtered and not phaseOk
+        why := "phase B shorter than phase A"
+    if why != ""
+        killRng(r, ix, why)
+    else
+        st.nextId := st.nextId + 1
+        Trade t = Trade.new()
+        t.id := st.nextId
+        t.d := d
+        t.state := pend ? 1 : 2
+        t.nEntry := nEnt
+        t.nStop := nStop
+        t.nStop0 := nStop
+        t.nTp1 := tp1
+        t.nTp2 := tp2
+        t.nBe := nEnt + beR * risk
+        t.risk0 := risk
+        t.t0 := time
+        t.tIn := time
+        t.exp := pend ? time_close + pullMin * MIN : time_close + int(maxHold * HOUR)
+        t.qty := syminfo.pointvalue > 0 ? int(math.floor(riskPerTrade / (risk * syminfo.pointvalue))) : 0
+        t.riskUsd := t.qty * risk * syminfo.pointvalue
+        t.score := (r.tSt > 0 ? 1 : 0) + (phaseOk ? 1 : 0) + (r.lowVolBrk ? 1 : 0) + (volTrig ? 1 : 0) + (r1 >= 2 ? 1 : 0)
+        t.grade := t.score >= 4
+        t.kind := mode
+        t.zTop := zTop
+        t.zBot := zBot
+        t.zT := zT
+        t.rng := r
+        t.note := sideTag(d) + " " + mode + (filtered ? " · filtered" : " · core") + "\nRange " + price(d * r.nSup) + " – " + price(d * r.nCrk) + "\n" + (mode == "Sweep" ? "Sweep low " : "Break low ") + price(d * r.nSpr) + "\nEntry " + price(d * nEnt) + (pend ? " (limit)" : "") + "\nSL " + price(d * nStop) + "\nBE " + price(d * t.nBe) + "\nTP1 " + price(d * tp1) + " · TP2 " + price(d * tp2) + "\n" + str.tostring(t.qty) + " contracts = $" + str.tostring(t.riskUsd, "#,##0") + "\nChecklist " + str.tostring(t.score) + "/5: retest " + (r.tSt > 0 ? "yes" : "no") + ", B>A " + (phaseOk ? "yes" : "no") + ", low volume break " + (r.lowVolBrk ? "yes" : "no") + ", volume on trigger " + (volTrig ? "yes" : "no") + ", target 2R+ " + (r1 >= 2 ? "yes" : "no") + "\n" + CR
+        trades.push(t)
+        if trades.size() > 80
+            trades.shift()
+        r.stage := 4
+        r.tradeId := t.id
+        r.tEnd := time_close
+        act.set(ix, noRng)
+        blockT.set(ix, time)
+        if not pend
+            if d == 1
+                st.lf := true
+            else
+                st.sf := true
+    why == ""
+
+step(int d) =>
+    int ix = d == 1 ? 0 : 1
+    Rng r = act.get(ix)
+    bool seed = dirOk(d) and time[swingLen] > blockT.get(ix) and seedOk(d)
+    bool fresh = false
+    if seed
+        if na(r)
+            r := newRng(d)
+            act.set(ix, r)
+            rngs.push(r)
+            if rngs.size() > 90
+                rngs.shift()
+            fresh := true
+        else if not r.brk
+            st.blocked := sideName(d) + " climax ignored, a range is still open"
+    if not na(r) and not fresh
+        float nl = d == 1 ? low : -high
+        float nh = d == 1 ? high : -low
+        float nc = d * close
+        float no = d * open
+        float tol = stTol * atrV
+        float buf = bufTicks * tick
+        float pivN = d == 1 ? pHi : -pLo
+        if time_close - r.tC > int(rngHours * HOUR)
+            killRng(r, ix, "range expired")
+        if r.stage == 1 and not r.brk
+            if nl < r.nSup
+                if r.armed
+                    r.brk := true
+                    r.tBrk := time
+                    r.nSpr := nl
+                    r.tSpr := time
+                    r.bSpr := bar_index
+                    r.nImp := nh
+                    r.lowVolBrk := volOk and volume < lowVol * vAvg
+                else
+                    killRng(r, ix, "support broke before the range formed")
+            else
+                if not r.frozen and nh > r.nCrk
+                    r.nCrk := nh
+                    r.tCrk := time
+                    r.bCrk := bar_index
+                float h = r.nCrk - r.nSup
+                if not r.frozen and h > maxH * atrV
+                    killRng(r, ix, "range too tall")
+                else
+                    if not na(pivN) and pivN > r.nSup and pivN <= r.nCrk and bar_index - swingLen > r.bC
+                        r.nSwing := pivN
+                    bool tallEnough = h >= minH * atrV and bar_index > r.bCrk
+                    if r.tSt == 0 and tallEnough and nl <= r.nSup + tol
+                        r.tSt := time
+                        r.nSt := nl
+                        r.frozen := true
+                    if not r.frozen and tallEnough and nc < (r.nSup + r.nCrk) / 2
+                        r.frozen := true
+                    if r.frozen and nc > r.nCrk
+                        killRng(r, ix, "broke out without a spring")
+                    else
+                        bool oldEnough = time_close - r.tC >= (filtered ? minRangeMin : 0) * MIN
+                        r.armed := r.armed or (r.frozen and h >= minH * atrV and (not needSt or r.tSt > 0) and oldEnough)
+        if r.stage == 1 and r.brk
+            if nl < r.nSpr
+                r.nSpr := nl
+                r.tSpr := time
+                r.bSpr := bar_index
+            r.nImp := math.max(r.nImp, nh)
+            float rngBar = nh - nl
+            bool wide = rngBar >= wideAtr * atrV
+            bool lowV = volOk and volume < lowVol * vAvg
+            bool intent = nc > no and rngBar >= medAtr * atrV and volOk and volume >= highVol * vAvg and nc > r.nSup
+            int winStart = r.qual ? r.tQual : r.tBrk
+            bool inWin = time_close - winStart <= winMin * MIN
+            if mode == "Spring"
+                bool engulf = d * close[1] < d * open[1] and nc > d * open[1]
+                bool rec = nc > r.nSup and nc > no and (not filtered or engulf)
+                if rec
+                    openTrade(r, ix, nc, r.nSpr - buf, r.nCrk, false, float(na), float(na), 0)
+                else if not inWin
+                    killRng(r, ix, "no recovery inside the window")
+            else if mode == "Sweep"
+                float sosLvl = sosSrc == "Swing high" and not na(r.nSwing) ? r.nSwing : r.nCrk
+                bool tooDeep = filtered and r.nSup - r.nSpr > maxSweepAtr * atrV
+                if tooDeep
+                    killRng(r, ix, "sweep too deep")
+                else if nc > sosLvl
+                    int span = bar_index - r.bSpr
+                    int kz = math.max(span, 1)
+                    for k = 2 to math.max(2, math.min(span, 300))
+                        if k <= span and kz == math.max(span, 1)
+                            bool bear = d * close[k] < d * open[k]
+                            float gapLow = d == 1 ? low[k - 2] : -high[k - 2]
+                            float candHigh = d == 1 ? high[k] : -low[k]
+                            if bear and gapLow > candHigh
+                                kz := k
+                    float zTop = d == 1 ? high[kz] : -low[kz]
+                    float zBot = d == 1 ? low[kz] : -high[kz]
+                    int zT = time[kz]
+                    float entN = entryAt == "Zone top" ? zTop : (zTop + zBot) / 2
+                    float sweepStop = r.nSpr - buf
+                    float zoneStop = zBot - buf
+                    float stopN = stopAt == "Sweep low" ? sweepStop : zoneStop
+                    float riskTry = entN - stopN
+                    if stopAt == "Sweep low" and riskTry > 0 and (r.nImp - entN) / riskTry < minR
+                        stopN := zoneStop
+                    r.tSos := time
+                    r.nSosPx := nh
+                    openTrade(r, ix, entN, stopN, r.nImp, true, zTop, zBot, zT)
+                else if time_close - r.tBrk > sosMin * MIN
+                    killRng(r, ix, "no break of the range")
+            else
+                if nl < r.nSup and wide and (springVol == "Any" or lowV) and not r.qual
+                    r.qual := true
+                    r.tQual := time
+                    r.bQual := bar_index
+                    r.lowVolBrk := lowV
+                if r.qual
+                    if bar_index > r.bQual
+                        if trigger == "Intent candle"
+                            if intent
+                                openTrade(r, ix, nc, r.nSpr - buf, r.nCrk, false, float(na), float(na), 0)
+                        else
+                            if not r.tested
+                                if nl <= r.nSup + tol and nc >= r.nSup and rngBar <= narrowAtr * atrV
+                                    r.tested := true
+                                    r.tTest := time
+                                    r.bTest := bar_index
+                                    r.nTest := nl
+                            else if intent and bar_index > r.bTest
+                                openTrade(r, ix, nc, r.nSpr - buf, r.nCrk, false, float(na), float(na), 0)
+                    if r.stage == 1 and not inWin
+                        killRng(r, ix, "no trigger inside the window")
+                else if not inWin
+                    killRng(r, ix, "break was not a wide candle")
+    true
+
+finish(Trade t, string how, float nExit) =>
+    t.state := 3
+    t.tEnd := time_close
+    float rr = t.risk0 > 0 ? (nExit - t.nEntry) / t.risk0 : 0.0
+    t.result := how + " " + (rr >= 0 ? "+" : "") + str.tostring(rr, "#.##") + "R"
+    st.last := t
+    if how == "SL" and not na(t.rng)
+        t.rng.hide := true
+    true
+
+manage(Trade t) =>
+    int d = t.d
+    float nl = d == 1 ? low : -high
+    float nh = d == 1 ? high : -low
+    float nc = d * close
+    if t.state == 1
+        if nl <= t.nEntry
+            t.state := 2
+            t.tIn := time
+            t.exp := time_close + int(maxHold * HOUR)
+            if d == 1
+                st.lf := true
+            else
+                st.sf := true
+        else if nh >= t.nTp1
+            t.state := 3
+            t.result := "cancelled"
+            t.tEnd := time_close
+            st.blocked := sideTag(d) + " limit cancelled, target traded first"
+        else if time_close >= t.exp
+            t.state := 3
+            t.result := "cancelled"
+            t.tEnd := time_close
+            st.blocked := sideTag(d) + " limit cancelled, expired"
+    else if t.state == 2 and time > t.tIn
+        if nl <= t.nStop
+            finish(t, t.beDone ? "BE" : "SL", t.nStop)
+        else if nh >= t.nTp2
+            finish(t, "TP2", t.nTp2)
+        else
+            if not t.tp1Hit and nh >= t.nTp1
+                t.tp1Hit := true
+                if useBE
+                    t.beDone := true
+                    t.nStop := t.nEntry
+            if useBE and not t.beDone and nh >= t.nBe
+                t.beDone := true
+                t.nStop := t.nEntry
+            if t.kind == "Sweep" and zoneExit and nc < t.zBot
+                finish(t, "ZONE", nc)
+            else if time_close >= t.exp
+                finish(t, "EXP", nc)
+    true
+
+rightTag(int x, float y, string s, color c, string tip) =>
+    if showLabels and s != ""
+        ctx.labels.push(label.new(x, y, s, xloc = xloc.bar_time, style = label.style_label_left, color = noFill, textcolor = c, size = txt, text_font_family = font.family_monospace, tooltip = tip))
+    true
+
+leftTag(int x, float y, string s, color c, string tip) =>
+    if showLabels and s != ""
+        ctx.labels.push(label.new(x, y, s, xloc = xloc.bar_time, style = label.style_label_right, color = noFill, textcolor = c, size = txt, text_font_family = font.family_monospace, tooltip = tip))
+    true
+
+evTag(int x, float y, string s, bool below, string tip) =>
+    if showLabels and showEvents
+        evX.push(x)
+        evY.push(y)
+        evB.push(below)
+        evS.push(s)
+        evTip.push(tip)
+    true
+
+lineTag(string nm, float rr, float p) => sltpText == "Off" ? "" : sltpText == "R only" ? (rr >= 0 ? "+" : "") + str.tostring(rr, "#.##") + "R" : nm + pr(p)
+
+phaseOf(Rng r) => r.stage == 4 ? "D" : r.brk ? "C" : r.armed ? "B" : "A"
+
+drawRange(Rng r) =>
+    int d = r.d
+    float pS = d * r.nSup
+    float pC = d * r.nCrk
+    bool live = r.stage == 1
+    bool dead = r.stage == 0
+    int x2 = live ? time_close : r.tEnd
+    color kc = dead ? color.new(grey, 40) : ink
+    if showRange
+        string bt = live or viewMode == "Full" ? sideName(d) + " " + phaseOf(r) + (dead ? " · " + r.why : "") : ""
+        ctx.boxes.push(box.new(r.tC, math.max(pS, pC), x2, math.min(pS, pC), xloc = xloc.bar_time, border_color = color(na), bgcolor = dead ? color.new(zoneFill, 94) : zoneFill, text = tagText(bt), text_size = size.tiny, text_color = zoneText, text_halign = text.align_left, text_valign = d == 1 ? text.align_top : text.align_bottom, text_font_family = font.family_monospace))
+        ctx.lines.push(line.new(r.tC, pS, x2, pS, xloc = xloc.bar_time, color = kc, style = line.style_solid, width = 1))
+        ctx.lines.push(line.new(r.tCrk, pC, x2, pC, xloc = xloc.bar_time, color = kc, style = line.style_solid, width = 1))
+        leftTag(r.tC, pS, (d == 1 ? "SUP" : "RES") + pr(pS), kc, d == 1 ? "support: the climax low" : "resistance: the climax high")
+        leftTag(r.tC, pC, (d == 1 ? "CREEK" : "ICE") + pr(pC), kc, d == 1 ? "top of the range: the rally high after the climax" : "bottom of the range: the reaction low after the climax")
+        if viewMode == "Full"
+            ctx.lines.push(line.new(r.tC, (pS + pC) / 2, x2, (pS + pC) / 2, xloc = xloc.bar_time, color = color.new(grey, 40), style = line.style_dotted, width = 1))
+    if not dead
+        evTag(r.tC, pS, d == 1 ? "SC" : "BC", d == 1, d == 1 ? "selling climax: the low that starts the range" : "buying climax: the high that starts the range")
+        evTag(r.tCrk, pC, "AR", d == -1, d == 1 ? "automatic rally: sets the top of the range" : "automatic reaction: sets the bottom of the range")
+    if r.tSt > 0 and not dead
+        evTag(r.tSt, d * r.nSt, "ST", d == 1, "secondary test of the climax")
+    if r.brk and not dead
+        string sprName = mode == "Sweep" ? "SWEEP" : d == 1 ? "SPRING" : "UTAD"
+        evTag(r.tSpr, d * r.nSpr, sprName, d == 1, "false break of the range edge. the extreme sets the stop")
+    if r.tested and not dead
+        evTag(r.tTest, d * r.nTest, "TEST", d == 1, "retest of the broken edge on a narrow candle")
+    if r.tSos > 0 and not dead
+        evTag(r.tSos, d * r.nSosPx, d == 1 ? "SOS" : "SOW", d == -1, "close through the range edge: sign of " + (d == 1 ? "strength" : "weakness"))
+    true
+
+drawTrade(Trade t) =>
+    int d = t.d
+    color c = d == 1 ? longCol : shortCol
+    bool pend = t.state == 1
+    bool lost = t.state == 3 and (str.startswith(t.result, "SL") or t.result == "cancelled")
+    color lc = pend ? color.new(c, 60) : lost ? grey : c
+    color kc = pend ? color.new(ink, 60) : ink
+    int x1 = pend ? t.t0 : t.tIn
+    int x2 = pend ? time_close + 3 * barMs : t.tIn + 12 * barMs
+    float pe = d * t.nEntry
+    float ps = d * t.nStop0
+    float p1 = d * t.nTp1
+    float p2 = d * t.nTp2
+    float pb = d * t.nBe
+    if t.kind == "Sweep" and not na(t.zTop) and showRange and viewMode != "Entries only"
+        float za = d * t.zTop
+        float zb = d * t.zBot
+        ctx.boxes.push(box.new(t.zT, math.max(za, zb), x2, math.min(za, zb), xloc = xloc.bar_time, border_color = color(na), bgcolor = zoneFill, text = tagText(d == 1 ? "DEMAND" : "SUPPLY"), text_size = size.tiny, text_color = zoneText, text_halign = text.align_left, text_valign = text.align_center, text_font_family = font.family_monospace))
+        ctx.lines.push(line.new(t.zT, (za + zb) / 2, x2, (za + zb) / 2, xloc = xloc.bar_time, color = color.new(grey, 30), style = line.style_dotted, width = 1))
+    ctx.lines.push(line.new(x1, pe, x2, pe, xloc = xloc.bar_time, color = lc, style = pend ? line.style_dashed : line.style_solid, width = 2))
+    string tag = sideTag(d) + (t.grade ? " ●" : "") + (showSizing ? " " + str.tostring(t.qty) + " contracts = $" + str.tostring(t.riskUsd, "#,##0") : "") + (pend ? " LIMIT?" : "")
+    rightTag(x2, pe, tag, lc, t.note + (t.result != "" ? "\nResult: " + t.result : ""))
+    ctx.lines.push(line.new(x1, ps, x2, ps, xloc = xloc.bar_time, color = kc, style = line.style_dotted, width = 1))
+    rightTag(x2, ps, lineTag("SL", -1.0, ps), kc, "")
+    ctx.lines.push(line.new(x1, p1, x2, p1, xloc = xloc.bar_time, color = kc, style = line.style_dotted, width = 1))
+    rightTag(x2, p1, lineTag("TP1", (t.nTp1 - t.nEntry) / t.risk0, p1), kc, "")
+    if math.abs(p2 - p1) >= tick
+        ctx.lines.push(line.new(x1, p2, x2, p2, xloc = xloc.bar_time, color = kc, style = line.style_dotted, width = 1))
+        rightTag(x2, p2, lineTag("TP2", (t.nTp2 - t.nEntry) / t.risk0, p2), kc, "")
+    if useBE and showBeLine
+        ctx.lines.push(line.new(x1, pb, x2, pb, xloc = xloc.bar_time, color = beCol, style = line.style_dotted, width = 1))
+        rightTag(x2, pb, "BE" + pr(pb), beCol, "the stop moves to entry when this level trades")
+    true
+
+flushEv() =>
+    int n = evX.size()
+    int i = 0
+    while i < n
+        int j = 0
+        bool merged = false
+        while j < i and not merged
+            if evS.get(j) != "" and evB.get(j) == evB.get(i) and math.abs(evX.get(j) - evX.get(i)) <= barMs
+                if not str.contains(evS.get(j), evS.get(i))
+                    evS.set(j, evS.get(j) + "/" + evS.get(i))
+                    evTip.set(j, evTip.get(j) + "\n" + evTip.get(i))
+                merged := true
+            j += 1
+        if merged
+            evS.set(i, "")
+        i += 1
+    i := 0
+    while i < n
+        if evS.get(i) != ""
+            ctx.labels.push(label.new(evX.get(i), evY.get(i), evS.get(i), xloc = xloc.bar_time, style = evB.get(i) ? label.style_label_up : label.style_label_down, color = noFill, textcolor = ink, size = txt, text_font_family = font.family_monospace, tooltip = evTip.get(i)))
+        i += 1
+    true
+
+drawAll() =>
+    evX.clear()
+    evY.clear()
+    evB.clear()
+    evS.clear()
+    evTip.clear()
+    ctx.clean()
+    int nT = trades.size()
+    int firstId = nT >= pastSetups ? trades.get(nT - pastSetups).id : 0
+    int i = rngs.size() - 1
+    int deadShown = 0
+    while i >= 0
+        Rng r = rngs.get(i)
+        i -= 1
+        bool live = r.stage == 1
+        bool done = r.stage == 4 and r.tradeId >= firstId and inLook(r.tC) and not (delStopped and r.hide)
+        bool gone = viewMode == "Full" and r.stage == 0 and deadShown < 3 and inLook(r.tC)
+        if gone
+            deadShown += 1
+        if (live or done or gone) and viewMode != "Entries only"
+            drawRange(r)
+    for t in trades
+        bool keep = t.state < 3 or (t.id >= firstId and inLook(t.t0))
+        if keep and (t.state > 1 or showPending)
+            if not (t.state == 3 and (t.result == "cancelled" or (delStopped and str.startswith(t.result, "SL"))))
+                drawTrade(t)
+    flushEv()
+    true
+
+st.lf := false
+st.sf := false
+if barstate.isconfirmed
+    for t in trades
+        if t.state < 3
+            manage(t)
+    step(1)
+    step(-1)
+
+bool longEntry = st.lf
+bool shortEntry = st.sf
+
+alertcondition(longEntry, "WY+ — Long", "WY+ — Long {{ticker}} @ {{close}} · " + CR)
+alertcondition(shortEntry, "WY+ — Short", "WY+ — Short {{ticker}} @ {{close}} · " + CR)
+
+if barstate.islast
+    drawAll()
+
+sideText(int d) =>
+    Rng r = act.get(d == 1 ? 0 : 1)
+    string s = ""
+    if not dirOk(d)
+        s := "off"
+    else if na(r)
+        s := "waiting for a climax"
+    else if r.brk
+        s := (mode == "Sweep" ? "swept " : "broke ") + price(d * r.nSpr) + ", waiting for " + (mode == "Sweep" ? "the range break" : mode == "Volume" ? (r.qual ? "the trigger" : "a wide low volume break") : "a close back inside")
+    else if r.armed
+        s := "armed " + price(d * r.nSup) + " – " + price(d * r.nCrk)
+    else
+        s := "forming " + price(d * r.nSup) + " – " + price(d * r.nCrk)
+    s
+
+var table board = table.new(tableSpot == "Top Right" ? position.top_right : tableSpot == "Bottom Right" ? position.bottom_right : tableSpot == "Top Left" ? position.top_left : position.bottom_left, 2, 7, border_width = 0)
+
+row(int r, string k, string v, string tip) =>
+    table.cell(board, 0, r, k, text_color = color.new(chart.fg_color, 50), text_size = txt, text_font_family = font.family_monospace, text_halign = text.align_left)
+    table.cell(board, 1, r, v, text_color = chart.fg_color, bgcolor = color.new(grey, 90), text_size = txt, text_font_family = font.family_monospace, text_halign = text.align_left, tooltip = tip)
+    true
+
+if barstate.islast and showTable
+    table.clear(board, 0, 0, 1, 6)
+    table.cell(board, 0, 0, "Wyckoff+" + MARK, text_color = chart.fg_color, text_size = txt, text_font_family = font.family_monospace, text_halign = text.align_left)
+    table.cell(board, 1, 0, mode + " · " + preset + (mode == "Volume" and not volOk ? " · no volume data" : ""), text_color = color.new(chart.fg_color, 50), text_size = txt, text_font_family = font.family_monospace, text_halign = text.align_left)
+    string setupText = "-"
+    string setupTip = ""
+    for t in trades
+        if t.state == 1
+            setupText := sideTag(t.d) + " limit " + price(t.d * t.nEntry) + " · SL " + price(t.d * t.nStop) + " · TP " + price(t.d * t.nTp1)
+            setupTip := t.note
+        else if t.state == 2
+            setupText := sideTag(t.d) + " in " + price(t.d * t.nEntry) + " · SL " + price(t.d * t.nStop) + " · TP " + price(t.d * t.nTp1)
+            setupTip := t.note
+    string lastText = "-"
+    string lastTip = ""
+    if not na(st.last)
+        lastText := sideTag(st.last.d) + " " + st.last.result + " · " + clock(st.last.tEnd)
+        lastTip := st.last.note
+    row(1, "Long side", sideText(1), "accumulation range: climax low, rally to the top, retest, then the break of support")
+    row(2, "Short side", sideText(-1), "distribution range: climax high, reaction to the bottom, retest, then the break of resistance")
+    row(3, "Setup", setupText, setupTip)
+    row(4, "Blocked", st.blocked, "last range or setup that was dropped, and why")
+    row(5, "Last", lastText, lastTip)
+    row(6, "Credit", "free · " + HANDLE + " on X", CR)

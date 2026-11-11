@@ -1,0 +1,645 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+//@version=6
+indicator("PO3 Plus", "P3+", overlay = true, max_lines_count = 300, max_labels_count = 300, max_boxes_count = 300)
+
+const string NY = "America/New_York"
+const int MIN = 60000
+
+po3Tf = input.string("4H", "PO3 timeframe", options = ["30m", "1H", "4H", "Daily", "Weekly"], group = "PO3", tooltip = "the candle everything is read inside: range, sweep and distribution. the chart must be at most half of it. candles follow the new york clock: 4h from 18:00, daily from 00:00, weekly by the new york calendar week")
+po3Gate = input.bool(true, "Sweep must pass the PO3 open", group = "PO3", tooltip = "the sweep has to go beyond the open of the po3 candle before the return counts, and a setup is dropped when its po3 candle ends before an entry. off accepts any sweep inside the candle")
+entryMode = input.string("Inversion", "Entry", options = ["Inversion", "Retest", "Either"], group = "Setup", tooltip = "inversion: a close through a gap formed since the sweep began. retest: after the return, price trades back to the swept edge and closes holding it. either: whichever fires first")
+targetMode = input.string("2R", "Target", options = ["2R", "Prior liquidity", "SD projection"], group = "Setup", tooltip = "2r: multiple of the stop distance. prior liquidity: nearest untaken swing beyond the entry. sd projection: tp1 at 2 sd and tp2 at 4 sd of the manipulation leg")
+rr = input.float(2.0, "R multiple", minval = 0.5, step = 0.5, group = "Setup", tooltip = "used by the 2r target")
+rangeMin = input.int(8, "Range min bars", minval = 3, maxval = 60, group = "Range", tooltip = "shortest run of bars that counts as a consolidation")
+rangeMax = input.int(60, "Range max bars", minval = 10, maxval = 200, group = "Range", tooltip = "how far back the range is searched. it never reaches before the open of the po3 candle")
+rangeAtr = input.float(5.0, "Range height max (ATR)", minval = 1.0, step = 0.5, group = "Range", tooltip = "the range may not be taller than this many 14-bar atrs")
+driftPct = input.int(50, "Range max drift %", minval = 10, maxval = 100, group = "Range", tooltip = "net move across the range as a share of its height. keeps trending runs from counting as accumulation")
+dispAtr = input.float(0.8, "Return body min (ATR)", minval = 0.0, step = 0.1, group = "Range", tooltip = "the move back in must close in the reversal direction with a body of at least this many atrs. 0 accepts any close back inside")
+manipMin = input.int(30, "Manipulation expiry (min)", minval = 1, group = "Range", tooltip = "the sweep is dropped if no close back inside the range comes within this many minutes")
+entryWin = input.int(60, "Entry window (min)", minval = 1, group = "Range", tooltip = "minutes after the return in which an entry can still fire")
+legStrength = input.int(3, "Swing bars each side", minval = 1, maxval = 10, group = "Range", tooltip = "swings used for the projection origin and prior liquidity")
+useBE = input.bool(false, "Stop to entry after TP1", group = "Risk", tooltip = "only applies to the sd projection target")
+riskPerTrade = input.float(300, "Risk per trade $", minval = 1, group = "Risk")
+tfLimit = input.int(15, "Timeframe limit (min)", minval = 1, group = "Display", tooltip = "the model is read on intraday charts up to this many minutes")
+
+viewMode = input.string("Minimal", "View", options = ["Minimal", "Full"], group = "Display", tooltip = "minimal: live setups and finished trades. full: adds setups that died before an entry")
+showFrame = input.bool(true, "Candle frame", group = "Display", tooltip = "outline of each po3 candle's high and low so far, with the read of the candle")
+showOpen = input.bool(true, "PO3 open", group = "Display", tooltip = "dotted line at the open of each po3 candle")
+showBoxes = input.bool(true, "Stage boxes", group = "Display", tooltip = "accumulation, manipulation and distribution boxes")
+showLeg = input.bool(true, "Manipulation leg", group = "Display", tooltip = "a bold line along the sweep from the range edge to its extreme, with the distance and whether it passed the open")
+showTrades = input.bool(true, "Entries", group = "Display", tooltip = "entry, stop and target lines. off keeps the stages and still tracks the trades")
+showProj = input.bool(false, "SD projection", group = "Display", tooltip = "2 to 2.5 and 4 to 4.5 deviations of the manipulation leg")
+showPending = input.bool(true, "Pending setups", group = "Display", tooltip = "waiting gaps, retest edge and the stop level before an entry")
+showPrices = input.bool(false, "Prices", group = "Display")
+showLabels = input.bool(true, "Labels", group = "Display", tooltip = "off hides all chart text and keeps lines and boxes")
+framesKept = input.int(3, "Candles kept", minval = 1, maxval = 10, group = "Display", tooltip = "display budget for candle frames and open lines")
+maxSetups = input.int(4, "Setups kept", minval = 1, maxval = 20, group = "Display", tooltip = "display budget. only the newest setups are drawn, including dropped ones in full view. older ones are hidden even if still open. every setup is still tracked")
+textSize = input.string("Small", "Text", options = ["Tiny", "Small", "Normal", "Large", "Huge"], group = "Display")
+showTable = input.bool(true, "Table", group = "Display", inline = "t")
+tableSpot = input.string("Top Right", "", options = ["Top Right", "Bottom Right", "Top Left", "Bottom Left"], group = "Display", inline = "t")
+
+longCol = input.color(#2962FF, "Long", group = "Style", inline = "c")
+shortCol = input.color(#F23645, "Short", group = "Style", inline = "c")
+beCol = input.color(#FF9800, "BE", group = "Style", inline = "c")
+accCol = input.color(color.new(#4CAF50, 88), "Accumulation", group = "Style", inline = "b")
+manCol = input.color(color.new(#F23645, 85), "Manipulation", group = "Style", inline = "b")
+distCol = input.color(color.new(#2962FF, 88), "Distribution", group = "Style", inline = "b")
+gapCol = input.color(color.new(#787B86, 85), "Gaps and SD", group = "Style", inline = "b")
+legCol = input.color(#F23645, "Manipulation leg", group = "Style", inline = "d")
+frameCol = input.color(color.new(#787B86, 45), "Candle frame", group = "Style", inline = "d")
+
+ink = #000000
+grey = #787B86
+noFill = color.new(color.black, 100)
+txt = textSize == "Tiny" ? size.tiny : textSize == "Small" ? size.small : textSize == "Normal" ? size.normal : textSize == "Large" ? size.large : size.huge
+barMs = timeframe.in_seconds() * 1000
+int pMs = po3Tf == "30m" ? 1800000 : po3Tf == "1H" ? 3600000 : po3Tf == "4H" ? 14400000 : po3Tf == "Daily" ? 86400000 : 604800000
+bool chartOk = timeframe.isintraday and timeframe.in_seconds() <= tfLimit * 60 and timeframe.in_seconds() * 2000 <= pMs
+float atrV = ta.atr(14)
+
+price(float p) => str.tostring(p, format.mintick)
+clock(int t) => str.format_time(t, "HH:mm", NY)
+pr(float p) => showPrices ? " " + price(p) : ""
+tagText(string s) => showLabels ? s : ""
+sigOf(int d) => d == 1 ? "P3+" : "P3-"
+
+type Bag
+    array<line> lines
+    array<label> labels
+    array<box> boxes
+
+method clean(Bag b) =>
+    for l in b.lines
+        line.delete(l)
+    for l in b.labels
+        label.delete(l)
+    for x in b.boxes
+        box.delete(x)
+    b.lines.clear()
+    b.labels.clear()
+    b.boxes.clear()
+    true
+
+newBag() => Bag.new(array.new<line>(), array.new<label>(), array.new<box>())
+
+type Pv
+    float p
+    int t
+    bool taken = false
+
+type Po
+    int t0
+    int t1
+    float o
+    float hi
+    float lo
+    int key
+
+type Setup
+    int dir
+    int state = 1
+    float rHi
+    float rLo
+    int rT0
+    int rBars
+    float mo
+    int poKey
+    int manT0
+    float manExt
+    int manExtT
+    int retT
+    float origin
+    int originT
+    array<float> fvTop
+    array<float> fvBot
+    array<int> fvT
+    float trigTop
+    float trigBot
+    int trigT
+    string how = ""
+    float entry
+    float stop
+    float stop0
+    float tp1
+    float tp2
+    string n1 = ""
+    string n2 = ""
+    bool tp1Hit = false
+    int t0
+    int endT
+    int qty
+    float riskUsd
+    string why = ""
+    string result = ""
+    string note = ""
+
+type Board
+    string blocked = "-"
+    Setup last
+
+var array<Setup> setups = array.new<Setup>()
+var array<Pv> pHi = array.new<Pv>()
+var array<Pv> pLo = array.new<Pv>()
+var array<Po> candles = array.new<Po>()
+var Board st = Board.new()
+var Bag bag = newBag()
+var float poO = na
+var int poT = na
+var int poBar = na
+
+int mNow = hour(time, NY) * 60 + minute(time, NY)
+int dKey = year(time, NY) * 10000 + month(time, NY) * 100 + dayofmonth(time, NY)
+int slot4 = int((mNow >= 1080 ? mNow - 1080 : mNow + 360) / 240)
+int poKey = po3Tf == "30m" ? dKey * 100 + int(mNow / 30) : po3Tf == "1H" ? dKey * 100 + int(mNow / 60) : po3Tf == "4H" ? dKey * 100 + slot4 : po3Tf == "Daily" ? dKey : year(time, NY) * 100 + weekofyear(time, NY)
+bool newPo = na(poKey[1]) or poKey != poKey[1]
+
+if chartOk
+    if newPo or na(poO)
+        poO := open
+        poT := time
+        poBar := bar_index
+
+newSetup(int dir, float hi, float lo, int t0, int n) =>
+    Setup s = Setup.new()
+    s.dir := dir
+    s.rHi := hi
+    s.rLo := lo
+    s.rT0 := t0
+    s.rBars := n
+    s.fvTop := array.new<float>()
+    s.fvBot := array.new<float>()
+    s.fvT := array.new<int>()
+    s
+
+sdLvl(Setup s, float k) => s.origin + s.dir * k * math.abs(s.manExt - s.origin)
+
+legOrigin(Setup s) =>
+    float p = na
+    int pt = na
+    array<Pv> src = s.dir == 1 ? pHi : pLo
+    if src.size() > 0
+        for i = src.size() - 1 to 0
+            Pv v = src.get(i)
+            if v.t < s.manExtT and v.t >= s.rT0
+                p := v.p
+                pt := v.t
+                break
+    if na(p)
+        p := s.dir == 1 ? s.rHi : s.rLo
+        pt := s.rT0
+    [p, pt]
+
+findLiq(int dir, float entry) =>
+    float best = na
+    array<Pv> src = dir == 1 ? pHi : pLo
+    for v in src
+        if not v.taken and (v.p - entry) * dir > 0
+            if na(best) or (v.p - best) * dir < 0
+                best := v.p
+    best
+
+die(Setup s, string why) =>
+    s.state := 5
+    s.endT := time_close
+    s.why := why
+    st.blocked := sigOf(s.dir) + " dropped " + clock(time_close) + ": " + why
+    true
+
+finish(Setup s, string how, float exitPx) =>
+    s.state := 4
+    s.endT := time_close
+    float pts = math.abs(s.entry - s.stop0)
+    float r = pts > 0 ? (exitPx - s.entry) * s.dir / pts : 0.0
+    s.result := how + " " + (r >= 0 ? "+" : "") + str.tostring(r, "#.##") + "R"
+    true
+
+tradeNote(Setup s) =>
+    float pts = math.abs(s.entry - s.stop0)
+    string tp1Line = na(s.tp1) ? "" : "\nTP1 " + s.n1 + " " + price(s.tp1) + (useBE ? " | stop to entry" : "")
+    string tp2Line = "\nTP " + s.n2 + " " + price(s.tp2)
+    "PO3 " + (s.dir == 1 ? "long" : "short") + "\nRange " + price(s.rLo) + " - " + price(s.rHi) + " | " + str.tostring(s.rBars) + " bars\nSweep " + (s.dir == 1 ? "low " : "high ") + price(s.manExt) + "\nTrigger " + s.how + " at the close\nEntry " + price(s.entry) + "\nSL " + price(s.stop0) + " | " + str.tostring(pts, "#.##") + " pts" + tp1Line + tp2Line + "\n" + str.tostring(s.qty) + " contracts = $" + str.tostring(s.riskUsd, "#,##0")
+
+tryEnter(Setup s, string how, float gTop, float gBot, int gT) =>
+    bool isLong = s.dir == 1
+    float entry = close
+    float stop = s.manExt
+    float pts = math.abs(entry - stop)
+    float tp1 = na
+    float tp2 = na
+    string n1 = ""
+    string n2 = ""
+    string miss = ""
+    if targetMode == "2R"
+        tp2 := entry + s.dir * rr * pts
+        n2 := str.tostring(rr, "#.##") + "R"
+    else if targetMode == "Prior liquidity"
+        tp2 := findLiq(s.dir, entry)
+        n2 := isLong ? "Swing H" : "Swing L"
+        miss := "no untaken swing ahead"
+    else
+        float t1 = sdLvl(s, 2.0)
+        float t2 = sdLvl(s, 4.0)
+        miss := "entry is already past 2 SD"
+        if (t1 - entry) * s.dir > 0
+            tp1 := t1
+            n1 := "2 SD"
+            tp2 := t2
+            n2 := "4 SD"
+    bool ok = pts > 0 and not na(tp2)
+    if ok
+        s.state := 3
+        s.how := how
+        s.trigTop := gTop
+        s.trigBot := gBot
+        s.trigT := gT
+        s.entry := entry
+        s.stop := stop
+        s.stop0 := stop
+        s.tp1 := tp1
+        s.tp2 := tp2
+        s.n1 := n1
+        s.n2 := n2
+        s.t0 := time_close
+        s.qty := int(math.floor(riskPerTrade / (pts * syminfo.pointvalue)))
+        s.riskUsd := s.qty * pts * syminfo.pointvalue
+        s.note := tradeNote(s)
+        st.last := s
+        st.blocked := "-"
+    else
+        st.blocked := sigOf(s.dir) + " " + how + " " + clock(time_close) + ", " + (pts > 0 ? miss : "no stop distance")
+    ok
+
+stepSetup(Setup s) =>
+    bool fired = false
+    bool isLong = s.dir == 1
+    if po3Gate and (s.state == 1 or s.state == 2) and s.poKey != poKey
+        die(s, "PO3 candle ended")
+    if s.state == 1
+        if isLong and low < s.manExt
+            s.manExt := low
+            s.manExtT := time
+        else if not isLong and high > s.manExt
+            s.manExt := high
+            s.manExtT := time
+        bool farClose = isLong ? close > s.rHi : close < s.rLo
+        bool backIn = isLong ? close > s.rLo and close <= s.rHi : close < s.rHi and close >= s.rLo
+        bool strong = math.abs(close - open) >= dispAtr * atrV and (isLong ? close > open : close < open)
+        if farClose
+            die(s, "closed through the far side")
+        else if backIn and strong
+            bool passed = not po3Gate or na(s.mo) or (isLong ? s.manExt < s.mo : s.manExt > s.mo)
+            if passed
+                s.state := 2
+                s.retT := time
+            else
+                die(s, "sweep did not pass the " + po3Tf + " open")
+        else if time_close - s.manT0 >= manipMin * MIN
+            die(s, "no close back inside in " + str.tostring(manipMin) + " min")
+    if s.state == 2
+        [o, ot] = legOrigin(s)
+        s.origin := o
+        s.originT := ot
+        bool breached = isLong ? low < s.manExt : high > s.manExt
+        bool farClose = isLong ? close > s.rHi : close < s.rLo
+        if breached
+            die(s, "stop level traded through")
+        else if farClose
+            die(s, "ran through the range")
+        else if time_close - s.retT >= entryWin * MIN
+            die(s, "entry window expired")
+        else
+            float tTop = na
+            float tBot = na
+            int tT = na
+            if entryMode != "Retest" and s.fvTop.size() > 0
+                for i = s.fvTop.size() - 1 to 0
+                    bool inv = isLong ? close > s.fvTop.get(i) : close < s.fvBot.get(i)
+                    if inv
+                        tTop := s.fvTop.get(i)
+                        tBot := s.fvBot.get(i)
+                        tT := s.fvT.get(i)
+                        break
+            bool hitInv = not na(tTop)
+            bool hitRet = entryMode != "Inversion" and time > s.retT and (isLong ? low <= s.rLo and close > s.rLo : high >= s.rHi and close < s.rHi)
+            if hitInv or hitRet
+                fired := tryEnter(s, hitInv ? "IFVG" : "Retest", tTop, tBot, tT)
+    if s.state == 3 and time_close > s.t0
+        bool stopTouched = isLong ? low <= s.stop : high >= s.stop
+        bool tp1Touched = not s.tp1Hit and not na(s.tp1) and (isLong ? high >= s.tp1 : low <= s.tp1)
+        bool tp2Touched = isLong ? high >= s.tp2 : low <= s.tp2
+        if stopTouched
+            finish(s, s.tp1Hit and useBE ? "BE" : "SL", s.stop)
+        else
+            if tp1Touched
+                s.tp1Hit := true
+                if useBE
+                    s.stop := s.entry
+            if tp2Touched
+                finish(s, "TP", s.tp2)
+    fired
+
+seed() =>
+    float hi = na
+    float lo = na
+    float bHi = na
+    float bLo = na
+    int n = 0
+    int cap = math.min(rangeMax, bar_index - poBar)
+    if cap >= rangeMin
+        for i = 1 to cap
+            hi := na(hi) ? high[i] : math.max(hi, high[i])
+            lo := na(lo) ? low[i] : math.min(lo, low[i])
+            if na(hi) or na(lo) or hi - lo > rangeAtr * atrV
+                break
+            n := i
+            bHi := hi
+            bLo := lo
+    bool good = n >= rangeMin
+    if good
+        float height = bHi - bLo
+        good := height > 0 and math.abs(close[1] - close[n]) <= driftPct / 100.0 * height
+    int dir = 0
+    if good
+        bool up = high > bHi
+        bool dn = low < bLo
+        if up and not dn
+            dir := -1
+        else if dn and not up
+            dir := 1
+        else if up and dn
+            dir := 2
+    int t0 = n > 0 ? time[n] : na
+    [dir, bHi, bLo, n, t0]
+
+boxAt(int l, float t, int r, float b, color bg, string tx) =>
+    box x = box.new(l, math.max(t, b), r, math.min(t, b), xloc = xloc.bar_time, border_color = noFill, bgcolor = bg, text = tagText(tx), text_size = txt, text_color = color.new(ink, 35), text_halign = text.align_left, text_valign = text.align_top, text_font_family = font.family_monospace)
+    bag.boxes.push(x)
+    true
+
+lineAt(int x1, int x2, float y, color c, string sty, int w) =>
+    bag.lines.push(line.new(x1, y, x2, y, xloc = xloc.bar_time, color = c, style = sty, width = w))
+    true
+
+rightTag(int x, float y, string s, color c, string tip) =>
+    bag.labels.push(label.new(x, y, tagText(s), xloc = xloc.bar_time, style = label.style_label_left, color = noFill, textcolor = c, size = txt, text_font_family = font.family_monospace, tooltip = tip))
+    true
+
+drawSetup(Setup s) =>
+    bool isLong = s.dir == 1
+    bool live = s.state <= 3
+    bool dead = s.state == 5
+    int xEnd = live ? time_close : s.endT
+    color cDir = isLong ? longCol : shortCol
+    color fade = color.new(grey, 88)
+    float swept = isLong ? s.rLo : s.rHi
+    float far = isLong ? s.rHi : s.rLo
+    string tip = sigOf(s.dir) + " range " + price(s.rLo) + " - " + price(s.rHi) + " | " + str.tostring(s.rBars) + " bars"
+    if showBoxes
+        boxAt(s.rT0, s.rHi, s.manT0, s.rLo, dead ? fade : accCol, "ACC")
+        int manR = s.state == 1 ? xEnd : na(s.retT) ? s.endT : s.retT + barMs
+        boxAt(s.manT0, swept, manR, s.manExt, dead ? fade : manCol, s.state == 1 ? "MANIP?" : "MANIP")
+        if not na(s.retT)
+            float goal = not na(s.tp1) ? s.tp1 : not na(s.tp2) ? s.tp2 : far
+            boxAt(s.retT, swept, xEnd, goal, dead ? fade : distCol, na(s.entry) ? "DIST?" : "DIST")
+    if showLeg
+        color lc = dead ? grey : legCol
+        bag.lines.push(line.new(s.manT0, swept, s.manExtT, s.manExt, xloc = xloc.bar_time, color = lc, style = line.style_solid, width = 2))
+        bool past = not na(s.mo) and (isLong ? s.manExt < s.mo : s.manExt > s.mo)
+        string legTxt = "M " + str.tostring(math.abs(s.manExt - swept), format.mintick) + (past ? " past open" : "")
+        bag.labels.push(label.new(s.manExtT, s.manExt, tagText(legTxt), xloc = xloc.bar_time, style = isLong ? label.style_label_up : label.style_label_down, color = noFill, textcolor = lc, size = txt, text_font_family = font.family_monospace, tooltip = "manipulation: the " + (isLong ? "low" : "high") + " of the range was swept to " + price(s.manExt)))
+    if showProj and not na(s.retT) and not na(s.origin) and math.abs(s.manExt - s.origin) > 0
+        color pc = color.new(ink, 60)
+        lineAt(s.manExtT, xEnd, s.origin, pc, line.style_dotted, 1)
+        rightTag(xEnd, s.origin, "0" + pr(s.origin), pc, "manipulation leg origin " + price(s.origin) + " | swing formed " + clock(s.originT))
+        boxAt(s.manExtT, sdLvl(s, 2.0), xEnd, sdLvl(s, 2.5), dead ? fade : gapCol, "2 SD")
+        boxAt(s.manExtT, sdLvl(s, 4.0), xEnd, sdLvl(s, 4.5), dead ? fade : gapCol, "4 SD")
+    if s.state == 2 and showPending
+        color pend = color.new(cDir, 30)
+        if entryMode != "Inversion"
+            lineAt(s.retT, xEnd, swept, pend, line.style_dashed, 1)
+            rightTag(xEnd, swept, "RETEST?" + pr(swept), pend, "a bar trading back to the swept edge and closing holding it fires the entry")
+        if entryMode != "Retest" and s.fvTop.size() > 0
+            int shown = 0
+            for i = s.fvTop.size() - 1 to 0
+                if shown < 2
+                    bool inv = isLong ? close > s.fvTop.get(i) : close < s.fvBot.get(i)
+                    if not inv
+                        shown += 1
+                        box x = box.new(s.fvT.get(i), s.fvTop.get(i), xEnd, s.fvBot.get(i), xloc = xloc.bar_time, border_color = color.new(grey, 40), border_style = line.style_dashed, bgcolor = gapCol, text = tagText("IFVG?"), text_size = txt, text_color = color.new(ink, 35), text_halign = text.align_right, text_valign = text.align_center, text_font_family = font.family_monospace)
+                        bag.boxes.push(x)
+        color slc = color.new(ink, 60)
+        lineAt(s.retT, xEnd, s.manExt, slc, line.style_dotted, 1)
+        rightTag(xEnd, s.manExt, "SL?" + pr(s.manExt), slc, "the sweep extreme. the stop if the entry fires")
+    if showTrades and not na(s.entry)
+        bool lost = s.state == 4 and str.startswith(s.result, "SL")
+        color ec = lost ? grey : cDir
+        int xe = s.t0 + 6 * barMs
+        int x2 = s.t0 + 12 * barMs
+        string etip = s.note + (s.result != "" ? "\nResult: " + s.result + " at " + clock(s.endT) + " (r is the final exit)" : "")
+        if s.how == "IFVG"
+            boxAt(s.trigT, s.trigTop, xe, s.trigBot, gapCol, "IFVG")
+        lineAt(s.t0, xe, s.entry, ec, line.style_solid, 2)
+        rightTag(x2, s.entry, sigOf(s.dir), ec, etip)
+        lineAt(s.t0, x2, s.stop0, ink, line.style_dotted, 1)
+        if s.state == 3
+            rightTag(x2, s.stop0, "SL" + pr(s.stop0), ink, "")
+        lineAt(s.t0, x2, s.tp2, ink, line.style_dotted, 1)
+        if s.state == 3
+            rightTag(x2, s.tp2, "TP " + s.n2 + pr(s.tp2), ink, "")
+        if not na(s.tp1)
+            lineAt(s.t0, x2, s.tp1, ink, line.style_dotted, 1)
+            if s.state == 3
+                rightTag(x2, s.tp1, "TP1 " + s.n1 + pr(s.tp1), ink, "")
+            if useBE
+                lineAt(xe, x2, s.entry, beCol, line.style_dotted, 2)
+    true
+
+candleRead(Po p) =>
+    Setup hit = na
+    for s in setups
+        if s.poKey == p.key and s.state != 5
+            hit := s
+    string r = ""
+    if not na(hit)
+        bool past = not na(hit.mo) and (hit.dir == 1 ? hit.manExt < hit.mo : hit.manExt > hit.mo)
+        r := (hit.dir == 1 ? "low swept" : "high swept") + (past ? " past the open" : " inside the candle") + (hit.state >= 2 ? " | distribution " + (hit.dir == 1 ? "up" : "down") : " | waiting")
+    r
+
+drawAll() =>
+    bag.clean()
+    int tradedShown = 0
+    if setups.size() > 0
+        for i = setups.size() - 1 to 0
+            Setup s = setups.get(i)
+            bool show = false
+            if (s.state <= 4 or viewMode == "Full") and tradedShown < maxSetups
+                show := true
+                tradedShown += 1
+            if show
+                drawSetup(s)
+    if chartOk and candles.size() > 0 and (showFrame or showOpen)
+        int first = math.max(0, candles.size() - framesKept)
+        for i = first to candles.size() - 1
+            Po p = candles.get(i)
+            bool cur = i == candles.size() - 1
+            int xr = cur ? time_close : p.t1
+            string read = candleRead(p)
+            if showFrame
+                bag.boxes.push(box.new(p.t0, p.hi, xr, p.lo, xloc = xloc.bar_time, border_color = frameCol, border_style = line.style_dotted, bgcolor = noFill, text = tagText("PO3 " + po3Tf + (read != "" ? " | " + read : "")), text_size = txt, text_color = color.new(grey, 20), text_halign = text.align_left, text_valign = text.align_bottom, text_font_family = font.family_monospace))
+            if showOpen
+                lineAt(p.t0, xr, p.o, color.new(ink, 60), line.style_dotted, 1)
+                if cur
+                    rightTag(xr, p.o, po3Tf + " O" + pr(p.o), color.new(ink, 60), po3Tf + " candle open, " + clock(p.t0) + " New York")
+    true
+
+bool longEntry = false
+bool shortEntry = false
+string fillMsg = ""
+
+bool bearG = high < low[2]
+bool bullG = low > high[2]
+float phv = ta.pivothigh(high, legStrength, legStrength)
+float plv = ta.pivotlow(low, legStrength, legStrength)
+
+if barstate.isconfirmed and chartOk and not na(atrV)
+    if newPo or candles.size() == 0
+        if candles.size() > 0
+            Po prev = candles.last()
+            prev.t1 := time
+        candles.push(Po.new(time, na, open, high, low, poKey))
+        while candles.size() > 12
+            candles.shift()
+    else
+        Po cp = candles.last()
+        cp.hi := math.max(cp.hi, high)
+        cp.lo := math.min(cp.lo, low)
+
+    for v in pHi
+        if high > v.p
+            v.taken := true
+    for v in pLo
+        if low < v.p
+            v.taken := true
+    if not na(phv)
+        pHi.push(Pv.new(phv, time[legStrength]))
+    if not na(plv)
+        pLo.push(Pv.new(plv, time[legStrength]))
+    while pHi.size() > 40
+        pHi.remove(0)
+    while pLo.size() > 40
+        pLo.remove(0)
+
+    [sd, sHi, sLo, sN, sT0] = seed()
+    if sd == 2
+        st.blocked := "range swept on both sides in one bar"
+    else if sd != 0
+        bool overlap = false
+        for s in setups
+            if s.state <= 3 and sLo < s.rHi and sHi > s.rLo
+                overlap := true
+                if s.dir != sd
+                    st.blocked := "opposite sweep while " + sigOf(s.dir) + " is active"
+        if not overlap
+            Setup ns = newSetup(sd, sHi, sLo, sT0, sN)
+            ns.manT0 := time
+            ns.manExt := sd == 1 ? low : high
+            ns.manExtT := time
+            ns.mo := poO
+            ns.poKey := poKey
+            setups.push(ns)
+
+    for s in setups
+        if s.state == 1 or s.state == 2
+            if s.dir == 1 and bearG
+                s.fvTop.push(low[2])
+                s.fvBot.push(high)
+                s.fvT.push(time[2])
+            else if s.dir == -1 and bullG
+                s.fvTop.push(low)
+                s.fvBot.push(high[2])
+                s.fvT.push(time[2])
+            while s.fvTop.size() > 20
+                s.fvTop.remove(0)
+                s.fvBot.remove(0)
+                s.fvT.remove(0)
+
+    for s in setups
+        if s.state <= 3
+            bool fired = stepSetup(s)
+            if fired
+                longEntry := s.dir == 1
+                shortEntry := s.dir == -1
+                fillMsg := "PO3 Plus " + (s.dir == 1 ? "long " : "short ") + syminfo.ticker + " @ " + price(s.entry) + " SL " + price(s.stop0) + " TP " + price(s.tp2)
+
+    while setups.size() > 80
+        int gone = -1
+        for i = 0 to setups.size() - 1
+            if gone < 0 and setups.get(i).state >= 4
+                gone := i
+        if gone < 0
+            break
+        setups.remove(gone)
+
+if barstate.islast
+    drawAll()
+
+alertcondition(longEntry, "PO3 Plus - Long", "PO3 Plus - Long {{ticker}} @ {{close}}")
+alertcondition(shortEntry, "PO3 Plus - Short", "PO3 Plus - Short {{ticker}} @ {{close}}")
+if fillMsg != ""
+    alert(fillMsg, alert.freq_once_per_bar_close)
+
+var table board = table.new(tableSpot == "Top Right" ? position.top_right : tableSpot == "Bottom Right" ? position.bottom_right : tableSpot == "Top Left" ? position.top_left : position.bottom_left, 2, 7, border_width = 0)
+
+row(int r, string k, string v, string tip) =>
+    table.cell(board, 0, r, k, text_color = color.new(chart.fg_color, 50), text_size = txt, text_font_family = font.family_monospace, text_halign = text.align_left)
+    table.cell(board, 1, r, v, text_color = chart.fg_color, bgcolor = color.new(grey, 90), text_size = txt, text_font_family = font.family_monospace, text_halign = text.align_left, tooltip = tip)
+    true
+
+if barstate.islast and showTable
+    table.clear(board, 0, 0, 1, 6)
+    table.cell(board, 0, 0, "PO3 Plus", text_color = chart.fg_color, text_size = txt, text_font_family = font.family_monospace, text_halign = text.align_left)
+    Setup cur = na
+    int live = 0
+    for s in setups
+        if s.state <= 3
+            live += 1
+            cur := s
+    string stageText = chartOk ? "accumulating, waiting for a sweep out of the range" : "intraday chart, up to " + str.tostring(tfLimit) + "m and half of " + po3Tf
+    string stageTip = ""
+    string rangeText = "-"
+    string rangeTip = ""
+    string entryText = "-"
+    string openText = chartOk and not na(poO) ? po3Tf + " open " + price(poO) + " since " + clock(poT) : "-"
+    if not na(cur)
+        string side = cur.dir == 1 ? "low swept" : "high swept"
+        if cur.state == 1
+            stageText := "Manipulation | " + side + " | waiting for a close back in | drops " + clock(cur.manT0 + manipMin * MIN)
+        else if cur.state == 2
+            stageText := "Distribution expected " + (cur.dir == 1 ? "up" : "down") + " | armed | window to " + clock(cur.retT + entryWin * MIN)
+        else
+            stageText := sigOf(cur.dir) + " open since " + clock(cur.t0)
+        if live > 1
+            stageText := str.tostring(live) + " live | " + stageText
+        stageTip := cur.note
+        rangeText := price(cur.rLo) + " - " + price(cur.rHi) + " | " + str.tostring(cur.rBars) + " bars"
+        rangeTip := "accumulation range found inside the po3 candle before the sweep"
+        if cur.state == 2
+            entryText := entryMode == "Inversion" ? "close " + (cur.dir == 1 ? "above" : "below") + " a gap since the sweep" : entryMode == "Retest" ? "retest of " + price(cur.dir == 1 ? cur.rLo : cur.rHi) : "gap close or retest"
+        else if cur.state == 3
+            entryText := cur.how + " | SL " + price(cur.stop) + " | TP " + price(cur.tp2)
+        else
+            entryText := "after the close back inside"
+        if not na(cur.mo)
+            bool beyond = cur.dir == 1 ? cur.manExt < cur.mo : cur.manExt > cur.mo
+            openText := beyond ? (cur.dir == 1 ? "sweep below the " + po3Tf + " open | low first" : "sweep above the " + po3Tf + " open | high first") : "sweep did not pass the " + po3Tf + " open"
+    string lastText = "-"
+    string lastTip = ""
+    if not na(st.last)
+        lastText := sigOf(st.last.dir) + " " + (st.last.result != "" ? st.last.result : "open")
+        lastTip := st.last.note
+    row(1, "Stage", stageText, stageTip)
+    row(2, "Range", rangeText, rangeTip)
+    row(3, "Entry", entryText, "entry " + entryMode + " | target " + targetMode)
+    row(4, "PO3", openText, "the open of the current po3 candle and where the sweep went against it")
+    row(5, "Blocked", st.blocked, "last sweep that did not become a trade")
+    row(6, "Last", lastText, lastTip)
