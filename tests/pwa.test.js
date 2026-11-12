@@ -36,7 +36,7 @@ test('mobile tab order is QQQ, GLD, Chart, Indicators, Connection with Chart cen
 
 test('PWA service worker precaches app shell but does not cache live trading APIs', () => {
   const sw = read('sw.js');
-  assert.match(sw, /ict-quantlab-shell-v15/);
+  assert.match(sw, /ict-quantlab-shell-v16/);
   assert.match(sw, /\"\.\/js\/pwa\.js\"/);
   assert.match(sw, /if \(request\.method !== \"GET\"\) return/);
   assert.match(sw, /Market APIs and cTrader sockets remain live-only/);

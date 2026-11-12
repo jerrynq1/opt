@@ -115,7 +115,7 @@ test('default workspace theme is dark and the chart feed pill is width-bounded',
 test('Options methodology panel is populated before market data loads', () => {
   const stock = read('js/stock-options.js');
   const theme = read('css/ict-quantlab-theme.css');
-  for (const text of ['Binance Stock Options', 'Binance Equity WebSocket', 'OI × Greek × multiplier', 'Giữ null, không thay bằng 0']) {
+  for (const text of ['Binance Stock Options', 'Binance Equity WebSocket', 'OI × Greek × multiplier', 'Giả định 0 cho analytics · tự cập nhật khi có dữ liệu']) {
     assert.ok(stock.includes(text), `missing methodology/status item: ${text}`);
   }
   assert.match(theme, /so-method-card \.opt-meta\{display:grid/);
@@ -137,7 +137,7 @@ test('tablet feed pill stays inside its status column and narrow-phone indicator
 test('live Options metadata keeps the same styled chips after quotes load', () => {
   const stock = read('js/stock-options.js');
   assert.match(stock, /meta\.innerHTML=items\.map\(\(\[label,value\]\)=>`<span class="opt-meta-item">/);
-  for (const label of ['OPTIONS FEED', 'REST SOURCE', 'CONTRACT MULTIPLIER', 'OI COVERAGE', 'MISSING DATA', 'SPOT WEBSOCKET']) {
+  for (const label of ['OPTIONS FEED', 'REST SOURCE', 'CONTRACT MULTIPLIER', 'OI OBSERVED', 'MISSING DATA', 'SPOT WEBSOCKET']) {
     assert.ok(stock.includes(label));
   }
 });

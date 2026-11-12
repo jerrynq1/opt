@@ -30,3 +30,5 @@
 @media(max-width:1100px){.so-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.so-exposure-grid{grid-template-columns:1fr}}
 @media(max-width:760px){.so-head h2{font-size:21px}.so-levels{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:480px){.so-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.so-kpis .opt-metric{padding:10px}.so-kpis .opt-metric strong{font-size:16px}.so-levels{grid-template-columns:1fr 1fr}.so-oi-row{grid-template-columns:54px minmax(60px,1fr) 52px;gap:6px}}
+
+.so-chain-table tbody td.opt-assumed-zero{color:#8293a8;font-style:italic;text-decoration:underline dotted rgba(130,147,168,.45);text-underline-offset:2px}

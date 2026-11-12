@@ -13,7 +13,7 @@ function loadStockOptionsHelpers() {
   );
   source = source.replace(
     '  buildViews();\n  window.stockOptionsSetActive=setActive;',
-    '  window.__stockOptionsTest={normaliseQuote,mergeLiveQuote,calc,strikeSymbols,renderExposure,renderLevels,gammaFlipOf,maxPainOf,bsmGamma,resolveGamma,gammaFlipInputKey,yearsToExpiry,expiryAtUsCloseUtc,quoteRowsFromReply,effectiveMultiplier,mergeQuoteSnapshot,quoteNeedsAnalyticsRetry};\n  return;\n  buildViews();\n  window.stockOptionsSetActive=setActive;'
+    '  window.__stockOptionsTest={normaliseQuote,mergeLiveQuote,calc,strikeSymbols,renderExposure,renderLevels,renderChain,quoteCell,gammaFlipOf,maxPainOf,bsmGamma,resolveGamma,gammaFlipInputKey,yearsToExpiry,expiryAtUsCloseUtc,quoteRowsFromReply,effectiveMultiplier,mergeQuoteSnapshot,quoteNeedsAnalyticsRetry};\n  return;\n  buildViews();\n  window.stockOptionsSetActive=setActive;'
   );
   const elements = new Map();
   const document = { getElementById(id) {
@@ -132,6 +132,8 @@ test('option volume by strike survives missing OI and is kept separate from OI e
   assert.equal(result.dist[0].putOI, 5);
   assert.equal(result.volume, 20);
   assert.equal(result.oiKnown, 1);
+  assert.equal(result.oiAssumedZero, 1);
+  assert.equal(result.dist[0].gex, -5000);
 });
 
 
@@ -408,19 +410,96 @@ test('GEX Ratio is total Call GEX divided by absolute total Put GEX', () => {
   assert.equal(result.gexRatioBias,'call-dominant');
 });
 
-test('Max Pain stays unavailable when any contract in a completed chain has missing OI', () => {
+
+test('322-contract expiry with 277 observed OI and 45 null OI still produces full analytics by zero-fill', () => {
+  const contracts=[];
+  const quotes=new Map();
+  for(let i=0;i<161;i++){
+    const strike=570+i;
+    for(const side of ['C','P']){
+      const symbol=`QQQ261120${side}${String(strike*1000).padStart(8,'0')}`;
+      const index=contracts.length;
+      contracts.push({os:symbol});
+      const assumedZero=index<45;
+      quotes.set(symbol,{
+        optionSymbol:symbol,side,strike,multiplier:100,
+        openInterest:assumedZero?null:(side==='C'?100+i:90+i),
+        volume:assumedZero?null:25,gamma:.001,iv:.30,delta:side==='C'?.5:-.5
+      });
+    }
+  }
+  const contractSymbols=new Set(contracts.map(x=>x.os));
+  const result=helpers.calc({price:650,expiry:'2026-11-20',chainComplete:true,contracts,contractSymbols,quotes},Date.parse('2026-11-12T12:00:00Z'));
+  assert.equal(result.totalContracts,322);
+  assert.equal(result.oiKnown,277);
+  assert.equal(result.oiAssumedZero,45);
+  assert.equal(result.oiComplete,true);
+  assert.ok(Math.abs(result.coverage-(277/322))<1e-12,'observed OI coverage remains honest');
+  assert.equal(result.oiAnalyticsCoverage,1,'all received contracts are represented in analytics via observed OI or zero-fill');
+  assert.equal(result.gexComplete,true);
+  assert.equal(result.gexKnown,322);
+  assert.equal(result.gexMissing,0);
+  assert.equal(result.maxPainComplete,true);
+  assert.ok(result.maxPain);
+  assert.ok(result.gexCallWall);
+  assert.ok(result.gexPutWall);
+  assert.equal(result.gexLevels.length,10);
+});
+
+test('Null OI on a received contract is zero-filled for OI/GEX/Max Pain analytics', () => {
   const session = {
-    price: 100, chainComplete: true,
-    contracts: [{ os: 'QQQ261110C00090000' }, { os: 'QQQ261110P00110000' }],
+    price: 100, expiry:'2026-11-20', chainComplete: true,
+    contracts: [{ os: 'QQQ261120C00090000' }, { os: 'QQQ261120P00110000' }],
     quotes: new Map([
-      ['c', { optionSymbol:'c', side:'C', strike:90, multiplier:1, openInterest:10, volume:0, gamma:0.1, delta:0.5 }],
-      ['p', { optionSymbol:'p', side:'P', strike:110, multiplier:1, openInterest:null, volume:0, gamma:0.1, delta:-0.5 }]
+      ['c', { optionSymbol:'c', side:'C', strike:90, multiplier:1, openInterest:10, volume:0, gamma:0.1, iv:.25, delta:0.5 }],
+      ['p', { optionSymbol:'p', side:'P', strike:110, multiplier:1, openInterest:null, volume:null, gamma:0.1, iv:null, delta:-0.5 }]
     ])
   };
-  const result = helpers.calc(session);
+  const result = helpers.calc(session,Date.parse('2026-11-12T12:00:00Z'));
   assert.equal(result.complete, true);
-  assert.equal(result.oiComplete, false);
-  assert.equal(result.maxPain, null);
+  assert.equal(result.oiComplete, true);
+  assert.equal(result.oiMissing, 1);
+  assert.equal(result.oiAssumedZero, 1);
+  assert.equal(result.volumeAssumedZero, 1);
+  assert.equal(result.dist.find(x=>x.strike===110).putOI, 0);
+  assert.equal(result.dist.find(x=>x.strike===110).putPainOI, 0);
+  assert.equal(result.gexComplete, true);
+  assert.equal(result.gexMissing, 0);
+  assert.equal(result.maxPainComplete, true);
+  assert.equal(result.maxPain.strike, 90);
+  assert.equal(result.maxPain.payout, 0);
+  assert.equal(result.gammaFlipComplete, true);
+});
+
+
+test('Gamma Flip excludes null-OI contracts as assumed zero but keeps the completed full-chain calculation', () => {
+  const expiry='2026-11-20', now=Date.parse('2026-11-12T12:00:00Z');
+  const rows=[
+    {optionSymbol:'c110',side:'C',strike:110,multiplier:100,openInterest:100,iv:.30},
+    {optionSymbol:'p90',side:'P',strike:90,multiplier:100,openInterest:100,iv:.30},
+    {optionSymbol:'c125',side:'C',strike:125,multiplier:null,openInterest:null,iv:null}
+  ];
+  const result=helpers.gammaFlipOf(rows,100,expiry,now);
+  assert.equal(result.complete,true);
+  assert.ok(result.coverage===1);
+  assert.ok(result.level>90&&result.level<100);
+});
+
+test('received null OI is not retried forever; it is zero-filled until an actual OI update arrives', () => {
+  const symbol='QQQ261120C00100000';
+  const session={quotes:new Map([[symbol,{optionSymbol:symbol,openInterest:null,iv:null,multiplier:null}]])};
+  assert.equal(helpers.quoteNeedsAnalyticsRetry(session,symbol),false);
+  helpers.mergeLiveQuote(session,{os:symbol,oi:'25',iv:'.30',m:'100'});
+  assert.equal(session.quotes.get(symbol).openInterest,25);
+});
+
+test('Option Chain cells display null OI and Volume as zero with an assumed-zero marker', () => {
+  const htmlOI=helpers.quoteCell({openInterest:null},'openInterest',String);
+  const htmlVol=helpers.quoteCell({volume:null},'volume',String);
+  assert.match(htmlOI,/>0<\/td>/);
+  assert.match(htmlVol,/>0<\/td>/);
+  assert.match(htmlOI,/opt-assumed-zero/);
+  assert.match(htmlVol,/opt-assumed-zero/);
 });
 
 test('Max Pain is unavailable when every contract has zero OI instead of fabricating the lowest strike', () => {
@@ -512,10 +591,10 @@ test('partial live update with explicit null OI, IV and multiplier preserves pre
   assert.equal(updated.last,4.2);
 });
 
-test('quote with a payload but missing OI is marked for analytics retry, not mistaken for complete data', () => {
+test('quote with a payload but missing OI is accepted as zero-fill and not retried forever', () => {
   const symbol='QQQ261120C00100000';
   const session={quotes:new Map([[symbol,{optionSymbol:symbol,side:'C',strike:100,openInterest:null,multiplier:100,gamma:.1,iv:.3}]])};
-  assert.equal(helpers.quoteNeedsAnalyticsRetry(session,symbol),true);
+  assert.equal(helpers.quoteNeedsAnalyticsRetry(session,symbol),false);
   session.quotes.set(symbol,{...session.quotes.get(symbol),openInterest:10});
   assert.equal(helpers.quoteNeedsAnalyticsRetry(session,symbol),false);
 });
