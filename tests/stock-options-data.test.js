@@ -13,7 +13,7 @@ function loadStockOptionsHelpers() {
   );
   source = source.replace(
     '  buildViews();\n  window.stockOptionsSetActive=setActive;',
-    '  window.__stockOptionsTest={normaliseQuote,mergeLiveQuote,calc,strikeSymbols,renderExposure,gammaFlipOf,maxPainOf,bsmGamma,gammaFlipInputKey,yearsToExpiry,expiryAtUsCloseUtc};\n  return;\n  buildViews();\n  window.stockOptionsSetActive=setActive;'
+    '  window.__stockOptionsTest={normaliseQuote,mergeLiveQuote,calc,strikeSymbols,renderExposure,renderLevels,gammaFlipOf,maxPainOf,bsmGamma,resolveGamma,gammaFlipInputKey,yearsToExpiry,expiryAtUsCloseUtc};\n  return;\n  buildViews();\n  window.stockOptionsSetActive=setActive;'
   );
   const elements = new Map();
   const document = { getElementById(id) {
@@ -197,23 +197,76 @@ test('OI Walls rank by OI while CW/PW rank by signed Net GEX and GEX 1-10 exclud
   assert.deepEqual(ladderStrikes.slice(0,2), [115,100], 'remaining strikes sorted by absolute Net GEX');
 });
 
-test('GEX walls and Zero Gamma stay unavailable when gamma/OI/multiplier coverage is incomplete', () => {
+test('GEX preview stays provisional when one contract lacks both provider Gamma and IV', () => {
   const session = {
     price:100, chainComplete:true,
     contracts:[{os:'a'},{os:'b'}],
     quotes:new Map([
-      ['a',{optionSymbol:'a',side:'C',strike:100,multiplier:1,openInterest:10,gamma:.2,volume:0}],
-      ['b',{optionSymbol:'b',side:'P',strike:105,multiplier:1,openInterest:10,gamma:null,volume:0}]
+      ['a',{optionSymbol:'a',side:'C',strike:100,multiplier:1,openInterest:10,gamma:.2,iv:.25,volume:0}],
+      ['b',{optionSymbol:'b',side:'P',strike:105,multiplier:1,openInterest:10,gamma:null,iv:null,volume:0}]
     ])
   };
   const result=helpers.calc(session);
   assert.equal(result.oiComplete,true);
   assert.equal(result.gexComplete,false);
+  assert.equal(result.gexProvisional,true);
   assert.equal(result.gexCoverage,.5);
-  assert.equal(result.gexCallWall,null);
+  assert.equal(result.gexCallWall.strike,100);
   assert.equal(result.gexPutWall,null);
-  assert.deepEqual(Array.from(result.gexLevels),[]);
   assert.equal(result.gammaFlip,null);
+});
+
+test('GEX is derived from Option Chain IV when Binance omits per-strike Gamma', () => {
+  const expiry='2026-12-18', now=Date.parse('2026-11-12T12:00:00Z'), spot=100;
+  const rows=[
+    ['c100','C',100,120,.28],['c105','C',105,90,.30],
+    ['p95','P',95,110,.32],['p110','P',110,150,.29]
+  ];
+  const contracts=rows.map(([os])=>({os}));
+  const quotes=new Map(rows.map(([os,side,strike,oi,iv])=>[os,{
+    optionSymbol:os,side,strike,multiplier:100,openInterest:oi,iv,gamma:null,volume:0
+  }]));
+  const result=helpers.calc({price:spot,expiry,chainComplete:true,contracts,quotes},now);
+  assert.equal(result.gexComplete,true);
+  assert.equal(result.gexCoverage,1);
+  assert.equal(result.gammaProviderKnown,0);
+  assert.equal(result.gammaDerivedKnown,4);
+  assert.equal(result.gexMissing,0);
+  assert.ok(result.gexCallWall && result.gexCallWall.gex>0);
+  assert.ok(result.gexPutWall && result.gexPutWall.gex<0);
+  assert.ok(result.gexLevels.length>0);
+  assert.ok(result.gexRatio>0);
+  const time=helpers.yearsToExpiry(expiry,now);
+  const expected=helpers.bsmGamma(spot,100,time,.28)*120*100*spot*spot*.01;
+  assert.ok(Math.abs(result.dist.find(x=>x.strike===100).callGex-expected)<1e-8);
+  assert.equal(result.gammaFlipComplete,true);
+});
+
+test('Key Levels render GEX walls and ladder from derived IV Gamma without provider GEX', () => {
+  const expiry='2026-12-18', now=Date.parse('2026-11-12T12:00:00Z');
+  const rows=[['c100','C',100,120,.28],['c105','C',105,90,.30],['p95','P',95,110,.32],['p110','P',110,150,.29]];
+  const quotes=new Map(rows.map(([os,side,strike,oi,iv])=>[os,{optionSymbol:os,side,strike,multiplier:100,openInterest:oi,iv,gamma:null,volume:0}]));
+  const session={cfg:{key:'qqq'},price:100,expiry,chainComplete:true,contracts:rows.map(([os])=>({os})),quotes};
+  helpers.renderLevels(session);
+  const html=helpers.elements.get('so-qqq-levels').innerHTML;
+  assert.match(html,/CW · GEX CALL WALL/);
+  assert.match(html,/PW · GEX PUT WALL/);
+  assert.match(html,/GEX ladder/);
+  assert.doesNotMatch(html,/Chưa có dữ liệu GEX theo strike/);
+  assert.match(html,/tự tính BSM từ IV 4/);
+});
+
+
+test('signed provider Put Gamma is normalized to positive option Gamma before applying the Put GEX sign', () => {
+  const resolved=helpers.resolveGamma({gamma:-.25,iv:null,strike:100},100,null);
+  assert.equal(resolved.gamma,.25);
+  assert.equal(resolved.source,'provider');
+  const session={price:100,chainComplete:true,contracts:[{os:'put'}],quotes:new Map([
+    ['put',{optionSymbol:'put',side:'P',strike:100,multiplier:10,openInterest:5,gamma:-.25,iv:null,volume:0}]
+  ])};
+  const result=helpers.calc(session);
+  assert.equal(result.gexComplete,true);
+  assert.equal(result.dist[0].gex,-1250);
 });
 
 test('Gamma Flip is calculated by repricing Black-Scholes gamma across hypothetical underlying prices', () => {

@@ -211,3 +211,14 @@ test('Indicator exposes one Gamma Flip / Zero Gamma toggle and one chart line, w
   const draw=source.slice(source.indexOf('function drawCrossAssetMap'),source.indexOf('window.drawCrossAssetMap'));
   assert.equal((draw.match(/GAMMA FLIP \/ ZERO GAMMA/g)||[]).length,1);
 });
+
+
+test('provisional GEX walls and ladder are not mapped to the CFD chart', () => {
+  const snapshot = snap();
+  snapshot.gexComplete = false;
+  const mapped = math.buildMappedMap(snapshot, 652, 4062, null, 1000);
+  assert.equal(mapped.gexCallWall, null);
+  assert.equal(mapped.gexPutWall, null);
+  assert.deepEqual(Array.from(mapped.gexLevels), []);
+  assert.ok(mapped.callOIWall, 'OI walls can still map when OI coverage is complete');
+});

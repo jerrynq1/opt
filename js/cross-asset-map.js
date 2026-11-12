@@ -76,15 +76,15 @@
     // Legacy callWall/putWall aliases are accepted as OI walls only.
     const callOIWall=track((snapshot.callOIWall||snapshot.callWall)?mapLevel((snapshot.callOIWall||snapshot.callWall).strike,prev?.callOIWall||prev?.callWall,sourcePrice,targetPrice,mappedAt,{...(snapshot.callOIWall||snapshot.callWall),strike:(snapshot.callOIWall||snapshot.callWall).strike}):null,'CALL OI WALL');
     const putOIWall=track((snapshot.putOIWall||snapshot.putWall)?mapLevel((snapshot.putOIWall||snapshot.putWall).strike,prev?.putOIWall||prev?.putWall,sourcePrice,targetPrice,mappedAt,{...(snapshot.putOIWall||snapshot.putWall),strike:(snapshot.putOIWall||snapshot.putWall).strike}):null,'PUT OI WALL');
-    const gexCallWall=track(snapshot.gexCallWall?mapLevel(snapshot.gexCallWall.strike,prev?.gexCallWall,sourcePrice,targetPrice,mappedAt,{...snapshot.gexCallWall,strike:snapshot.gexCallWall.strike}):null,'CW GEX');
-    const gexPutWall=track(snapshot.gexPutWall?mapLevel(snapshot.gexPutWall.strike,prev?.gexPutWall,sourcePrice,targetPrice,mappedAt,{...snapshot.gexPutWall,strike:snapshot.gexPutWall.strike}):null,'PW GEX');
+    const gexCallWall=track(snapshot.gexComplete!==false&&snapshot.gexCallWall?mapLevel(snapshot.gexCallWall.strike,prev?.gexCallWall,sourcePrice,targetPrice,mappedAt,{...snapshot.gexCallWall,strike:snapshot.gexCallWall.strike}):null,'CW GEX');
+    const gexPutWall=track(snapshot.gexComplete!==false&&snapshot.gexPutWall?mapLevel(snapshot.gexPutWall.strike,prev?.gexPutWall,sourcePrice,targetPrice,mappedAt,{...snapshot.gexPutWall,strike:snapshot.gexPutWall.strike}):null,'PW GEX');
     const gammaFlipSource=snapshot.gammaFlip;
     const gammaFlip=track(gammaFlipSource==null?null:mapLevel(gammaFlipSource,prev?.gammaFlip,sourcePrice,targetPrice,mappedAt,{sourceValue:gammaFlipSource,method:snapshot.gammaFlipMethod||'BSM repricing · Net GEX zero-cross'}),'GAMMA FLIP / ZERO GAMMA');
     const maxPain=track(snapshot.maxPain?mapLevel(snapshot.maxPain.strike,prev?.maxPain,sourcePrice,targetPrice,mappedAt,{...snapshot.maxPain,strike:snapshot.maxPain.strike}):null,'MAX PAIN');
     const oldGex=new Map((prev?.gexLevels||[]).map((g,i)=>[Number(g.rank)||i+1,g]));
     // GEX 1–10 excludes only the two Net-GEX Gamma Walls (CW/PW), never OI walls.
     const gammaWallStrikes=[snapshot.gexCallWall?.strike,snapshot.gexPutWall?.strike];
-    const eligibleGex=(snapshot.gexLevels||[]).filter(g=>!gammaWallStrikes.some(w=>sameLevel(w,g.strike)));
+    const eligibleGex=snapshot.gexComplete!==false?(snapshot.gexLevels||[]).filter(g=>!gammaWallStrikes.some(w=>sameLevel(w,g.strike))):[];
     const gexLevels=eligibleGex.slice(0,10).map((g,i)=>{const rank=i+1;return track(mapLevel(g.strike,oldGex.get(rank),sourcePrice,targetPrice,mappedAt,{...g,rank,strike:g.strike}),`GEX ${rank}`)}).filter(Boolean);
     const changed=changedCount>0;
     const mappedCount=dist.length+[callOIWall,putOIWall,gexCallWall,gexPutWall,gammaFlip,maxPain].filter(x=>x?.target!==null&&x?.target!==undefined).length+gexLevels.filter(x=>x.target!==null).length;

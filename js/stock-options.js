@@ -110,8 +110,8 @@
         <div class="opt-method" id="${p}-method" hidden>
           <p><strong>Nguồn Option Chain:</strong> Binance Stock Options <code>option/chain-symbols</code> liệt kê OCC symbols theo ngày đáo hạn; <code>get-option-quote</code> trả Bid/Ask/Mid, volume, OI, multiplier, IV và Greeks.</p>
           <p><strong>Contract size:</strong> multiplier đọc từ từng option quote (mẫu GLD trong HAR là 100 shares/contract). Không hardcode OI và không thay <code>null</code> bằng 0.</p>
-          <p><strong>GEX:</strong> Σ(Gamma × OI × multiplier × Spot² × 0.01), Call dương và Put âm. <strong>DEX:</strong> Σ(Delta × OI × multiplier × Spot). Vega và Theta tổng hợp từ Greek × OI × multiplier.</p>
-          <p><strong>Key Levels:</strong> Call/Put OI Wall được tính riêng từ OI lớn nhất của từng phía. CW là strike có Net GEX dương lớn nhất; PW là strike có Net GEX âm lớn nhất theo trị tuyệt đối. GEX 1–10 xếp các strike còn lại theo |Net GEX| sau khi loại CW/PW (không loại OI Wall). GEX Ratio = tổng Call GEX / |tổng Put GEX|. Ratio > 1: Call Gamma trội, thiên hướng ổn định và biên độ hẹp; ratio < 1: Put Gamma trội, rủi ro biến động mạnh và trượt giá cao. Đây là heuristic theo quy ước Call+/Put−, không xác nhận dealer positioning.</p>
+          <p><strong>GEX:</strong> Σ(Gamma × OI × multiplier × Spot² × 0.01), Call dương và Put âm. Nếu Binance không trả Gamma cho contract, QuantLab tự tính Gamma bằng Black–Scholes từ IV, strike, Spot và DTE (r = q = 0); chỉ khi thiếu cả Gamma provider lẫn IV hợp lệ thì contract đó mới bị tính là thiếu GEX. <strong>DEX:</strong> Σ(Delta × OI × multiplier × Spot). Vega và Theta tổng hợp từ Greek × OI × multiplier.</p>
+          <p><strong>Key Levels:</strong> Call/Put OI Wall được tính riêng từ OI lớn nhất của từng phía. CW là strike có Net GEX dương lớn nhất; PW là strike có Net GEX âm lớn nhất theo trị tuyệt đối. Net GEX theo strike được tự tính từ Gamma provider hoặc Gamma BSM suy ra từ IV nếu provider bỏ trống. GEX 1–10 xếp các strike còn lại theo |Net GEX| sau khi loại CW/PW (không loại OI Wall). GEX Ratio = tổng Call GEX / |tổng Put GEX|. Ratio > 1: Call Gamma trội, thiên hướng ổn định và biên độ hẹp; ratio < 1: Put Gamma trội, rủi ro biến động mạnh và trượt giá cao. Đây là heuristic theo quy ước Call+/Put−, không xác nhận dealer positioning.</p>
           <p><strong>Gamma Flip / Zero Gamma:</strong> Giữ OI, IV và DTE cố định; giả định giá underlying tại từng mức, tính lại Gamma từng hợp đồng bằng Black–Scholes, sau đó tổng hợp Net GEX = Σ(Call +, Put −) × OI × multiplier × giá giả định² × 0.01. Gamma Flip / Zero Gamma là nghiệm làm tổng Net GEX đổi dấu. Mô hình dùng r = 0, q = 0, đáo hạn lúc 16:00 America/New_York và nội suy/bisection quanh điểm đổi dấu. Đây là mô hình ước lượng theo quy ước Call+/Put−, không phải vị thế dealer đã xác minh. Cần OI, multiplier, IV và expiry đầy đủ.</p>
           <p><strong>Max Pain:</strong> với mỗi giá settlement ứng viên K, tính Σ[Call OI × multiplier × max(K − strike, 0)] + Σ[Put OI × multiplier × max(strike − K, 0)] trên toàn bộ hợp đồng của đúng expiry. Chọn settlement có tổng payout thấp nhất. Nếu nhiều strike cùng mức thấp nhất, QuantLab hiển thị strike đại diện thấp nhất và công bố toàn bộ các strike đồng hạng. Chỉ tính khi Option Chain hoàn tất, mọi OI đều có dữ liệu hợp lệ và mọi contract có OI &gt; 0 có multiplier hợp lệ. Không cộng volume hoặc premium vào Max Pain.</p>
           <p><strong>Spot reference:</strong> Binance Equity WebSocket <code>${cfg.assetCode}@symbol_price</code> được dùng làm giá tham chiếu cho KPI, Exposure và các Key Levels.</p>
@@ -439,6 +439,18 @@
     const gamma=Math.exp(-.5*d1*d1)/(spot*den*Math.sqrt(2*Math.PI));
     return Number.isFinite(gamma)?gamma:null;
   }
+  // Binance may omit per-contract Gamma even while IV, OI and contract size are
+  // present. Derive the missing Greek from IV and time-to-expiry instead of
+  // suppressing every GEX-derived level for the expiry.
+  function resolveGamma(q,spot,time){
+    const provider=num(q.gamma);
+    // Vanilla-option Gamma is non-negative for both Calls and Puts; direction
+    // is applied later from the option side, so normalize signed feeds here.
+    if(provider!==null)return {gamma:Math.abs(provider),source:'provider'};
+    const sigma=ivSigma(q.iv);
+    const derived=spot>0&&time!==null&&sigma!==null?bsmGamma(spot,q.strike,time,sigma):null;
+    return derived!==null?{gamma:derived,source:'bsm-iv'}:{gamma:null,source:'missing'};
+  }
   function gammaFlipInputKey(rows){
     return rows.map(q=>[q.optionSymbol||'',q.strike??'',q.side||'',q.openInterest??'',q.multiplier??'',q.iv??''].join(':')).join('|');
   }
@@ -446,9 +458,13 @@
     const time=yearsToExpiry(expiry,now);
     if(time===null)return {level:null,complete:false,reason:'Thiếu DTE hợp lệ',coverage:0};
     const valid=rows.filter(q=>Number.isFinite(q.strike));
-    const eligible=valid.filter(q=>q.openInterest!==null&&q.openInterest!==undefined&&Number.isFinite(q.openInterest)&&q.multiplier>0&&Number.isFinite(q.multiplier)&&ivSigma(q.iv)!==null);
-    const coverage=valid.length?eligible.length/valid.length:0;
-    if(!valid.length||eligible.length!==valid.length)return {level:null,complete:false,reason:'Cần OI, multiplier và IV cho toàn bộ expiry',coverage};
+    const oiReady=valid.filter(q=>q.openInterest!==null&&q.openInterest!==undefined&&Number.isFinite(q.openInterest)&&q.openInterest>=0);
+    const missingOI=valid.length-oiReady.length;
+    const active=oiReady.filter(q=>q.openInterest>0);
+    const eligible=active.filter(q=>q.multiplier>0&&Number.isFinite(q.multiplier)&&ivSigma(q.iv)!==null);
+    const coverage=active.length?eligible.length/active.length:(missingOI===0?1:0);
+    if(!valid.length||missingOI>0||eligible.length!==active.length)return {level:null,crosses:[],complete:false,reason:'Cần OI đầy đủ; contract OI > 0 cần multiplier và IV hợp lệ',coverage};
+    if(!eligible.length)return {level:null,crosses:[],complete:true,reason:'Không có contract OI dương để tính Zero Gamma',coverage};
     const netAt=price=>{
       let total=0;
       for(const q of eligible){
@@ -489,27 +505,42 @@
   }
   function calc(s,now=Date.now()){
     const rows=getRows(s),spot=s.price;
+    const time=yearsToExpiry(s.expiry,now);
     let callOI=0,putOI=0,oiKnown=0,oiMissing=0,multiplierMissing=0,maxPainMultiplierMissing=0,callVol=0,putVol=0;
     const per=new Map();let delta=spot!==null?0:null,gamma=spot!==null?0:null,vega=0,theta=0;
-    let gexKnown=0,gexMissing=0;
+    let gexKnown=0,gexMissing=0,gammaProviderKnown=0,gammaDerivedKnown=0;
     for(const q of rows){
       if(!Number.isFinite(q.strike))continue;
-      const side=q.side;
-      const p=per.get(strikeKey(q.strike))||{strike:q.strike,gex:0,dex:0,vgex:0,thex:0,callOI:0,putOI:0,callVol:0,putVol:0,callGex:0,putGex:0,callDex:0,putDex:0,callVgex:0,putVgex:0,callThex:0,putThex:0,callPainOI:0,putPainOI:0};
+      const side=q.side==='P'?'P':'C';
+      const p=per.get(strikeKey(q.strike))||{strike:q.strike,gex:0,dex:0,vgex:0,thex:0,callOI:0,putOI:0,callVol:0,putVol:0,callGex:0,putGex:0,callDex:0,putDex:0,callVgex:0,putVgex:0,callThex:0,putThex:0,callPainOI:0,putPainOI:0,gammaProviderKnown:0,gammaDerivedKnown:0};
       if(q.volume!=null){if(side==='C'){callVol+=q.volume;p.callVol+=q.volume;}else{putVol+=q.volume;p.putVol+=q.volume;}}
       per.set(strikeKey(q.strike),p);
-      if(q.openInterest==null){oiMissing++;gexMissing++;continue;}
+      if(q.openInterest==null||!Number.isFinite(q.openInterest)||q.openInterest<0){oiMissing++;gexMissing++;continue;}
       const oi=q.openInterest,m=q.multiplier;
       oiKnown++;
       if(side==='C'){callOI+=oi;p.callOI+=oi;}else{putOI+=oi;p.putOI+=oi;}
       const validMultiplier=m!=null&&Number.isFinite(m)&&m>0;
       if(oi>0&&!validMultiplier)maxPainMultiplierMissing++;
       if(validMultiplier){if(side==='C')p.callPainOI+=oi*m;else p.putPainOI+=oi*m;}
+      // A zero-OI contract contributes exactly zero to every OI-weighted
+      // exposure and payout. It therefore does not require Gamma or multiplier.
+      if(oi===0){gexKnown++;continue;}
       if(!validMultiplier){multiplierMissing++;gexMissing++;continue;}
-      if(spot!==null&&q.gamma!=null&&Number.isFinite(q.gamma)){const raw=q.gamma*oi*m*spot*spot*.01;const v=side==='P'?-raw:raw;p.gex+=v;if(side==='C')p.callGex+=Math.abs(raw);else p.putGex-=Math.abs(raw);gamma+=v;gexKnown++;}else{gexMissing++;}
-      if(spot!==null&&q.delta!=null){const raw=q.delta*oi*m*spot;p.dex+=raw;if(side==='C')p.callDex+=Math.abs(raw);else p.putDex+=Math.abs(raw);delta+=raw;}
-      if(q.vega!=null){const raw=q.vega*oi*m;p.vgex+=raw;if(side==='C')p.callVgex+=Math.abs(raw);else p.putVgex+=Math.abs(raw);vega+=raw;}
-      if(q.theta!=null){const raw=q.theta*oi*m;p.thex+=raw;if(side==='C')p.callThex+=Math.abs(raw);else p.putThex+=Math.abs(raw);theta+=raw;}
+      if(spot!==null){
+        const resolved=resolveGamma(q,spot,time);
+        if(resolved.gamma!==null){
+          const raw=resolved.gamma*oi*m*spot*spot*.01;
+          const v=side==='P'?-raw:raw;
+          p.gex+=v;
+          if(side==='C')p.callGex+=Math.abs(raw);else p.putGex-=Math.abs(raw);
+          gamma+=v;gexKnown++;
+          if(resolved.source==='provider'){gammaProviderKnown++;p.gammaProviderKnown++;}
+          else{gammaDerivedKnown++;p.gammaDerivedKnown++;}
+        }else{gexMissing++;}
+      }else{gexMissing++;}
+      if(spot!==null&&q.delta!=null&&Number.isFinite(q.delta)){const raw=q.delta*oi*m*spot;p.dex+=raw;if(side==='C')p.callDex+=Math.abs(raw);else p.putDex+=Math.abs(raw);delta+=raw;}
+      if(q.vega!=null&&Number.isFinite(q.vega)){const raw=q.vega*oi*m;p.vgex+=raw;if(side==='C')p.callVgex+=Math.abs(raw);else p.putVgex+=Math.abs(raw);vega+=raw;}
+      if(q.theta!=null&&Number.isFinite(q.theta)){const raw=q.theta*oi*m;p.thex+=raw;if(side==='C')p.callThex+=Math.abs(raw);else p.putThex+=Math.abs(raw);theta+=raw;}
     }
     const dist=[...per.values()].sort((a,b)=>a.strike-b.strike);
     const calls=dist.filter(x=>x.callOI>0).sort((a,b)=>b.callOI-a.callOI);
@@ -519,40 +550,42 @@
     gexMissing=Math.max(gexMissing,totalContracts-gexKnown);
     const complete=!!s.chainComplete&&(s.contractSymbols?.size?Array.from(s.contractSymbols).every(symbol=>s.quotes.has(symbol)):s.quotes.size>=s.contracts.length);
     const oiComplete=complete&&oiMissing===0;
+    const gexAvailable=gexKnown>0&&spot!==null;
     const gexComplete=complete&&gexMissing===0&&spot!==null&&totalContracts>0;
+    const gexProvisional=gexAvailable&&!gexComplete;
     const maxPainComplete=oiComplete&&maxPainMultiplierMissing===0;
     const validOI=oiKnown,coverage=totalContracts?validOI/totalContracts:0;
     const gexCoverage=totalContracts?gexKnown/totalContracts:0;
-    // Net GEX convention: Calls contribute positive GEX and Puts negative GEX.
+    // OI walls are strictly OI-ranked; GEX walls are independently ranked
+    // from signed strike Net GEX. Partial GEX is useful for preview but is
+    // explicitly marked provisional until the entire expiry is hydrated.
     const callOIWall=calls[0]||null,putOIWall=puts[0]||null;
-    const positiveGex=gexComplete?dist.filter(x=>Number.isFinite(x.gex)&&x.gex>0).slice().sort((a,b)=>b.gex-a.gex):[];
-    const negativeGex=gexComplete?dist.filter(x=>Number.isFinite(x.gex)&&x.gex<0).slice().sort((a,b)=>a.gex-b.gex):[];
+    const positiveGex=gexAvailable?dist.filter(x=>Number.isFinite(x.gex)&&x.gex>0).slice().sort((a,b)=>b.gex-a.gex):[];
+    const negativeGex=gexAvailable?dist.filter(x=>Number.isFinite(x.gex)&&x.gex<0).slice().sort((a,b)=>a.gex-b.gex):[];
     const gexCallWall=positiveGex[0]||null;
     const gexPutWall=negativeGex[0]||null;
     const gammaWallKeys=new Set([gexCallWall?.strike,gexPutWall?.strike].filter(Number.isFinite).map(strikeKey));
-    const gexLevels=gexComplete?dist.filter(x=>Number.isFinite(x.gex)&&Math.abs(x.gex)>0&&!gammaWallKeys.has(strikeKey(x.strike)))
+    const gexLevels=gexAvailable?dist.filter(x=>Number.isFinite(x.gex)&&Math.abs(x.gex)>0&&!gammaWallKeys.has(strikeKey(x.strike)))
       .slice().sort((a,b)=>Math.abs(b.gex)-Math.abs(a.gex)).slice(0,10):[];
-    // Reprice only when expiry/DTE or OI, multiplier, IV, strike or side changes.
-    // Quote last/bid/ask ticks do not affect the BSM Gamma Flip scan.
+    // Reprice Zero Gamma from all positive-OI contracts using IV, regardless
+    // of whether Binance supplied a live Gamma Greek for the current quote.
     const flipCacheKey=[s.expiry||'',gammaFlipInputKey(rows),rows.length,Math.floor(now/60000)].join('|');
     let flipCalc=s._gammaFlipCache?.key===flipCacheKey?s._gammaFlipCache.value:null;
     if(!flipCalc){flipCalc=complete?gammaFlipOf(rows,spot,s.expiry,now):{level:null,crosses:[],complete:false,reason:'Full Option Chain chưa tải xong',coverage:0};try{s._gammaFlipCache={key:flipCacheKey,value:flipCalc}}catch{}}
-    // Cache the BSM scan, not the nearest root: the closest zero-cross can change as Spot moves.
     const gammaFlip=spot>0&&flipCalc.crosses?.length?flipCalc.crosses.slice().sort((a,b)=>Math.abs(a-spot)-Math.abs(b-spot))[0]:null;
-    // Requested GEX Ratio: total Call GEX divided by absolute total Put GEX.
-    // Call exposure is positive by convention; Put exposure is stored negative.
-    const callGexTotal=gexComplete?dist.reduce((sum,x)=>sum+Math.max(0,x.callGex||0),0):null;
-    const putGexTotal=gexComplete?dist.reduce((sum,x)=>sum+(x.putGex||0),0):null;
+    // GEX Ratio uses independently summed Call GEX / absolute summed Put GEX.
+    const callGexTotal=gexAvailable?dist.reduce((sum,x)=>sum+Math.max(0,x.callGex||0),0):null;
+    const putGexTotal=gexAvailable?dist.reduce((sum,x)=>sum+(x.putGex||0),0):null;
     const putGexAbsTotal=putGexTotal===null?null:Math.abs(putGexTotal);
-    const gexRatio=gexComplete&&putGexAbsTotal>0?callGexTotal/putGexAbsTotal:null;
-    const gexRatioState=!gexComplete?'incomplete':putGexAbsTotal===0?(callGexTotal>0?'call-only':'no-gex'):'ready';
+    const gexRatio=gexAvailable&&putGexAbsTotal>0?callGexTotal/putGexAbsTotal:null;
+    const gexRatioState=!gexAvailable?'unavailable':gexProvisional?'provisional':putGexAbsTotal===0?(callGexTotal>0?'call-only':'no-gex'):'ready';
     const gexRatioBias=gexRatioState==='call-only'?'call-dominant':gexRatioState==='no-gex'?'balanced':gexRatio===null?null:gexRatio>1?'call-dominant':gexRatio<1?'put-dominant':'balanced';
     return {rows,dist,callOI,putOI,oiKnown,oiMissing,multiplierMissing,maxPainMultiplierMissing,totalContracts,callVol,putVol,volume:callVol+putVol,delta,gamma,vega,theta,
       callOIWall,putOIWall,gexCallWall,gexPutWall,
       gammaFlip,gammaFlipComplete:flipCalc.complete&&spot>0,gammaFlipReason:spot>0?flipCalc.reason:'Chờ Spot underlying để chọn Gamma Flip gần nhất',gammaFlipCoverage:flipCalc.coverage,
       callGexTotal,putGexTotal,putGexAbsTotal,gexRatio,gexRatioState,gexRatioBias,
       gexLevels,maxPain:maxPainComplete?maxPainOf(dist):null,
-      complete,oiComplete,gexComplete,gexKnown,gexMissing,gexCoverage,maxPainComplete,coverage,
+      complete,oiComplete,gexAvailable,gexComplete,gexProvisional,gexKnown,gexMissing,gammaProviderKnown,gammaDerivedKnown,gexCoverage,maxPainComplete,coverage,
       oiWall:dist.reduce((best,x)=>{const v=Math.max(x.callOI,x.putOI);return v>0&&(!best||v>best.oi)?{strike:x.strike,oi:v}:best;},null)};
   }
 
@@ -581,17 +614,17 @@
     const cards=[
       {key:'call',label:'CALL OI WALL',tag:'OI · CALL',value:c.callOIWall?fmt(c.callOIWall.strike,2):'—',meta:c.callOIWall?`Call OI · ${compact(c.callOIWall.callOI)}${c.oiComplete?'':' · provisional'}`:'Chưa có Call OI'},
       {key:'put',label:'PUT OI WALL',tag:'OI · PUT',value:c.putOIWall?fmt(c.putOIWall.strike,2):'—',meta:c.putOIWall?`Put OI · ${compact(c.putOIWall.putOI)}${c.oiComplete?'':' · provisional'}`:'Chưa có Put OI'},
-      {key:'gex-call',label:'CW · GEX CALL WALL',tag:'MAX +NET GEX',value:c.gexCallWall?fmt(c.gexCallWall.strike,2):'—',meta:c.gexCallWall?`Net GEX +${compact(c.gexCallWall.gex)}`:c.gexComplete?'Không có Net GEX dương':'Cần đủ OI + Gamma + multiplier'},
-      {key:'gex-put',label:'PW · GEX PUT WALL',tag:'MAX |−NET GEX|',value:c.gexPutWall?fmt(c.gexPutWall.strike,2):'—',meta:c.gexPutWall?`Net GEX −${compact(Math.abs(c.gexPutWall.gex))}`:c.gexComplete?'Không có Net GEX âm':'Cần đủ OI + Gamma + multiplier'},
+      {key:'gex-call',label:'CW · GEX CALL WALL',tag:'MAX +NET GEX',value:c.gexCallWall?fmt(c.gexCallWall.strike,2):'—',meta:c.gexCallWall?`Net GEX +${compact(c.gexCallWall.gex)}${c.gexComplete?'':' · provisional'}`:c.gexAvailable?'Không có Net GEX dương':'Cần OI + multiplier và Gamma provider hoặc IV + DTE'},
+      {key:'gex-put',label:'PW · GEX PUT WALL',tag:'MAX |−NET GEX|',value:c.gexPutWall?fmt(c.gexPutWall.strike,2):'—',meta:c.gexPutWall?`Net GEX −${compact(Math.abs(c.gexPutWall.gex))}${c.gexComplete?'':' · provisional'}`:c.gexAvailable?'Không có Net GEX âm':'Cần OI + multiplier và Gamma provider hoặc IV + DTE'},
       {key:'gamma-flip',label:'GAMMA FLIP / ZERO GAMMA',tag:'BSM · NET GEX ZERO-CROSS',value:c.gammaFlip===null?'—':fmt(c.gammaFlip,2),meta:c.gammaFlip!==null?'Mức Net GEX đổi dấu khi repricing underlying':c.gammaFlipReason||'Cần full OI, multiplier, IV và DTE'},
       {key:'pain',label:'MAX PAIN',tag:'EXPIRY',value:c.maxPain?fmt(c.maxPain.strike,2):'—',meta:c.maxPain?`Payout · ${compact(c.maxPain.payout)}${c.maxPain.isTie?` · đồng hạng: ${c.maxPain.tiedStrikes.map(x=>fmt(x,2)).join(' / ')}`:''}`:!c.complete?'Cần tải đủ expiry':!c.oiComplete?'OI chưa đủ để tính':'Thiếu contract multiplier'},
-      {key:'gex-ratio',label:'GEX RATIO',tag:'CALL GEX / |PUT GEX|',value:c.gexRatioState==='call-only'?'∞':c.gexRatio===null?'—':`${c.gexRatio.toFixed(2)}x`,meta:c.gexRatioBias==='call-dominant'?'Call Gamma trội · xu hướng ổn định, biên độ hẹp':c.gexRatioBias==='put-dominant'?'Put Gamma trội · rủi ro biến động và trượt giá cao':c.gexRatioBias==='balanced'?'Call/Put Gamma tương đối cân bằng':c.gexRatioState==='no-gex'?'Không có GEX hợp lệ':'Cần full GEX coverage'}
+      {key:'gex-ratio',label:'GEX RATIO',tag:'CALL GEX / |PUT GEX|',value:c.gexRatioState==='call-only'?'∞':c.gexRatio===null?'—':`${c.gexProvisional?'~':''}${c.gexRatio.toFixed(2)}x`,meta:c.gexRatioBias==='call-dominant'?'Call Gamma trội · xu hướng ổn định, biên độ hẹp':c.gexRatioBias==='put-dominant'?'Put Gamma trội · rủi ro biến động và trượt giá cao':c.gexRatioBias==='balanced'?'Call/Put Gamma tương đối cân bằng':c.gexRatioState==='no-gex'?'Không có GEX hợp lệ':c.gexRatioState==='provisional'?'Tạm tính · đang tải phần còn lại':'Chưa có Gamma hoặc IV hợp lệ'}
     ];
-    const status=pending?'<span class="kl-status is-loading">Đang tải full chain</span>':'<span class="kl-status">Expiry đã đồng bộ</span>';
+    const status=!c.complete?'<span class="kl-status is-loading">Đang tải full chain</span>':c.gexProvisional?'<span class="kl-status is-loading">GEX tạm tính · thiếu dữ liệu</span>':'<span class="kl-status">Expiry đã đồng bộ</span>';
     const cardsHtml=cards.map(x=>`<article class="kl-card kl-${x.key}"><div class="kl-card-top"><span class="kl-label">${x.label}</span><span class="kl-tag">${x.tag}</span></div><strong class="kl-value">${esc(x.value)}</strong><span class="kl-meta">${esc(x.meta)}</span></article>`).join('');
     const maxGex=Math.max(1,...c.gexLevels.map(x=>Math.abs(x.gex)));
-    const gexHtml=c.gexLevels.length?c.gexLevels.map((x,i)=>{const pos=x.gex>=0,ratio=Math.max(2,Math.abs(x.gex)/maxGex*100);return `<div class="kl-gex-row ${pos?'is-positive':'is-negative'}"><span class="kl-rank">${String(i+1).padStart(2,'0')}</span><strong class="kl-strike">${fmt(x.strike,2)}</strong><span class="kl-track"><i style="width:${ratio.toFixed(1)}%"></i></span><b class="kl-gex-value">${x.gex>=0?'+':'−'}${compact(Math.abs(x.gex))}</b><span class="kl-side">${pos?'NET +':'NET −'}</span></div>`}).join(''):'<div class="kl-empty">Chưa có dữ liệu GEX theo strike.</div>';
-    el.innerHTML=`<div class="kl-summary-grid">${cardsHtml}</div><section class="kl-gex-panel"><div class="kl-gex-heading"><div><h4>GEX ladder <span>01—10</span></h4><p>Xếp theo |Net GEX| sau khi loại CW và PW · GEX walls, không loại OI walls</p></div>${status}</div><div class="kl-gex-list">${gexHtml}</div><p class="kl-footnote">Net GEX theo strike = Call GEX (+) + Put GEX (−). CW là Net GEX dương lớn nhất; PW là Net GEX âm có trị tuyệt đối lớn nhất. Call/Put OI Walls được tính độc lập từ OI. GEX Ratio = Σ Call GEX / |Σ Put GEX|. Ratio > 1: Call Gamma trội, thiên hướng ổn định/biên độ hẹp; ratio < 1: Put Gamma trội, rủi ro biến động/trượt giá cao. Đây là heuristic theo quy ước Call+/Put−, không xác nhận dealer positioning. Gamma Flip / Zero Gamma được tính một lần bằng BSM repricing. GEX coverage: ${(c.gexCoverage*100).toFixed(1)}% (${c.gexKnown}/${c.totalContracts} contracts hợp lệ).</p></section>`;
+    const gexHtml=c.gexLevels.length?c.gexLevels.map((x,i)=>{const pos=x.gex>=0,ratio=Math.max(2,Math.abs(x.gex)/maxGex*100);return `<div class="kl-gex-row ${pos?'is-positive':'is-negative'}"><span class="kl-rank">${String(i+1).padStart(2,'0')}</span><strong class="kl-strike">${fmt(x.strike,2)}</strong><span class="kl-track"><i style="width:${ratio.toFixed(1)}%"></i></span><b class="kl-gex-value">${x.gex>=0?'+':'−'}${compact(Math.abs(x.gex))}</b><span class="kl-side">${pos?'NET +':'NET −'}</span></div>`}).join(''):`<div class="kl-empty">${c.gexMissing>0?`Đang thiếu Gamma/IV hoặc OI ở ${c.gexMissing} contracts · GEX coverage ${(c.gexCoverage*100).toFixed(1)}%.`: 'Chưa có GEX khác 0 để xếp hạng.'}</div>`;
+    el.innerHTML=`<div class="kl-summary-grid">${cardsHtml}</div><section class="kl-gex-panel"><div class="kl-gex-heading"><div><h4>GEX ladder <span>01—10</span></h4><p>Xếp theo |Net GEX| sau khi loại CW và PW · GEX walls, không loại OI walls</p></div>${status}</div><div class="kl-gex-list">${gexHtml}</div><p class="kl-footnote">Net GEX theo strike = Call GEX (+) + Put GEX (−). CW là Net GEX dương lớn nhất; PW là Net GEX âm có trị tuyệt đối lớn nhất. Call/Put OI Walls được tính độc lập từ OI. GEX Ratio = Σ Call GEX / |Σ Put GEX|. Ratio > 1: Call Gamma trội, thiên hướng ổn định/biên độ hẹp; ratio < 1: Put Gamma trội, rủi ro biến động/trượt giá cao. Đây là heuristic theo quy ước Call+/Put−, không xác nhận dealer positioning. Gamma Flip / Zero Gamma được tính một lần bằng BSM repricing. GEX coverage: ${(c.gexCoverage*100).toFixed(1)}% (${c.gexKnown}/${c.totalContracts} contracts hợp lệ) · Gamma từ Binance ${c.gammaProviderKnown}, tự tính BSM từ IV ${c.gammaDerivedKnown}, thiếu ${c.gexMissing}.</p></section>`;
   }
 
   function renderExposure(s){
@@ -643,7 +676,7 @@
       marker(c.gexCallWall?.strike,'is-gex-call-wall','CW · MAX +GEX'),
       marker(c.gexPutWall?.strike,'is-gex-put-wall','PW · MAX −GEX')
     ].join('');
-    const status=!c.complete?'PARTIAL CHAIN':metricKey==='gamma'&&!c.gexComplete?'GEX COVERAGE INCOMPLETE':'FULL CHAIN';
+    const status=!c.complete?'PARTIAL CHAIN':metricKey==='gamma'&&c.gexProvisional?'GEX PROVISIONAL':metricKey==='gamma'&&!c.gexComplete?'GEX COVERAGE INCOMPLETE':'FULL CHAIN';
     el.innerHTML=`<div class="exposure-plot" role="img" aria-label="Bilateral ${metricKey.toUpperCase()} exposure by strike. Puts extend left, Calls extend right.">
       <div class="exposure-axis-head"><span>STRIKE</span><span>PUTS ←</span><span></span><span>→ CALLS</span></div>
       <div class="exposure-rows">${rows}${lines}</div>
@@ -701,7 +734,7 @@
 
   function updateChainMeta(s){
     const c=calc(s),el=$(`so-${s.cfg.key}-chain-meta`);if(!el)return;
-    el.innerHTML=`<span>Expiry: <b>${esc(s.expiry||'—')}</b></span><span>Contracts: <b>${s.contracts.length||s.quotes.size}</b></span><span>Quotes: <b>${s.quotes.size}/${s.contracts.length||s.quotes.size}</b></span><span>OI available: <b>${c.oiKnown}</b></span><span>OI unavailable / pending: <b>${c.oiMissing}</b></span><span>Full chain: <b>${c.complete?'Loaded':s.hydrating?'Loading…':'Partial'}</b></span><span>Last quote update: <b>${s.oiLastUpdate?new Date(s.oiLastUpdate).toLocaleTimeString('vi-VN'):'—'}</b></span>`;
+    el.innerHTML=`<span>Expiry: <b>${esc(s.expiry||'—')}</b></span><span>Contracts: <b>${s.contracts.length||s.quotes.size}</b></span><span>Quotes: <b>${s.quotes.size}/${s.contracts.length||s.quotes.size}</b></span><span>OI available: <b>${c.oiKnown}</b></span><span>OI unavailable / pending: <b>${c.oiMissing}</b></span><span>GEX: <b>${c.gexKnown}/${c.totalContracts} · ${c.gammaProviderKnown} provider Gamma + ${c.gammaDerivedKnown} BSM/IV</b></span><span>Full chain: <b>${c.complete?'Loaded':s.hydrating?'Loading…':'Partial'}</b></span><span>Last quote update: <b>${s.oiLastUpdate?new Date(s.oiLastUpdate).toLocaleTimeString('vi-VN'):'—'}</b></span>`;
     const multiplier=[...s.quotes.values()].find(x=>x.multiplier!==null && x.multiplier>0)?.multiplier??null;
     const mult=$(`so-${s.cfg.key}-multiplier`),toolbarMult=$(`so-${s.cfg.key}-contract-multiplier`);
     if(mult)mult.textContent=multiplier?`${fmt(multiplier,0)} shares`:'—';
@@ -712,6 +745,7 @@
         ['REST SOURCE','chain-symbols + get-option-quote'],
         ['CONTRACT MULTIPLIER',multiplier?`${fmt(multiplier,0)} shares`:'Chưa có quote multiplier'],
         ['OI COVERAGE',`${c.oiKnown}/${c.totalContracts} contracts có OI`],
+        ['GEX COVERAGE',`${(c.gexCoverage*100).toFixed(1)}% · ${c.gammaProviderKnown} Gamma provider · ${c.gammaDerivedKnown} Gamma tự tính BSM · ${c.gexMissing} chưa tính được`],
         ['MISSING DATA',`${c.oiMissing} thiếu OI · ${c.multiplierMissing} thiếu multiplier`],
         ['SPOT WEBSOCKET',s.socket&&s.socket.readyState===WebSocket.OPEN?'Connected':'Connecting / closed']
       ];
@@ -851,9 +885,9 @@
       putOIWall:c.oiComplete&&c.putOIWall?{strike:c.putOIWall.strike,oi:c.putOIWall.putOI}:null,
       gexCallWall:c.gexCallWall?{strike:c.gexCallWall.strike,gex:c.gexCallWall.gex}:null,
       gexPutWall:c.gexPutWall?{strike:c.gexPutWall.strike,gex:c.gexPutWall.gex}:null,
-      gexComplete:c.gexComplete,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexCoverage:c.gexCoverage,
+      gexAvailable:c.gexAvailable,gexComplete:c.gexComplete,gexProvisional:c.gexProvisional,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gammaProviderKnown:c.gammaProviderKnown,gammaDerivedKnown:c.gammaDerivedKnown,gexCoverage:c.gexCoverage,
       gammaFlip:c.gammaFlipComplete?c.gammaFlip:null,gammaFlipMethod:'Gamma Flip / Zero Gamma · BSM repricing · fixed OI/IV · r=q=0 · expiry 16:00 America/New_York · bisection-refined Net GEX zero-cross',maxPain:c.maxPain?{strike:c.maxPain.strike,payout:c.maxPain.payout}:null,gexRatio:c.gexRatio,gexRatioState:c.gexRatioState,gexRatioBias:c.gexRatioBias,callGexTotal:c.callGexTotal,putGexAbsTotal:c.putGexAbsTotal,complete:c.complete,oiComplete:c.oiComplete,maxPainComplete:c.maxPainComplete,
-      gexLevels:c.gexLevels.map((x,i)=>({rank:i+1,strike:x.strike,gex:x.gex})),oiWall:c.oiWall?{strike:c.oiWall.strike,oi:c.oiWall.oi}:null,
+      gexLevels:c.gexLevels.map((x,i)=>({rank:i+1,strike:x.strike,gex:x.gex})),gexMethod:{providerGamma:c.gammaProviderKnown,bsmDerivedGamma:c.gammaDerivedKnown},oiWall:c.oiWall?{strike:c.oiWall.strike,oi:c.oiWall.oi}:null,
       dist:c.dist.map(x=>({strike:x.strike,callOI:x.callOI,putOI:x.putOI,callVol:x.callVol,putVol:x.putVol,gex:c.gexComplete?x.gex:null,callGex:c.gexComplete?x.callGex:null,putGex:c.gexComplete?x.putGex:null}))};
   }
 
@@ -863,5 +897,5 @@
   window.stockOptionsCrossAssetStop=crossAssetStop;
   window.stockOptionsCrossAssetSnapshot=crossAssetSnapshot;
   window.stockOptionsCrossAssetSetExpiry=crossAssetSetExpiry;
-  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>[s.cfg.symbol,{expiry:s.expiry,quotes:s.quotes.size,contracts:s.contracts.length,complete:s.chainComplete,hydrating:s.hydrating,displayStrikes:s.displayStrikes,oi:[...s.quotes.values()].filter(q=>q.openInterest!==null).length,price:s.price}]));
+  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,quotes:s.quotes.size,contracts:s.contracts.length,complete:s.chainComplete,hydrating:s.hydrating,displayStrikes:s.displayStrikes,oi:[...s.quotes.values()].filter(q=>q.openInterest!==null).length,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,gexCoverage:c.gexCoverage,gexMissing:c.gexMissing,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,gexRatio:c.gexRatio,price:s.price}] }));
 })();

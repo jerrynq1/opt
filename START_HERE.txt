@@ -31,21 +31,25 @@ CÀI TRÊN IPHONE (PWA)
 PWA lưu app shell và tài nguyên tĩnh để hỗ trợ tải lại giao diện khi mất mạng sau lần mở online đầu tiên. Giá thị trường, Binance Worker và cTrader vẫn cần kết nối mạng; dữ liệu giao dịch không được cache offline.
 
 ETF OPTIONS → CFD LEVEL MAPPING
-- Each source level (Call/Put OI Walls, CW/PW GEX Walls, one Vol Trigger / Zero Gamma level, Max Pain and every GEX rank) has an independent CFD mapping.
+- Each source level (Call/Put OI Walls, CW/PW GEX Walls, one Gamma Flip / Zero Gamma level, Max Pain and every GEX rank) has an independent CFD mapping.
 - The initial mapping uses the ETF spot and cTrader chart price available when that level is first received.
 - Later ETF/CFD spot ticks do not move an existing mapped level.
 - When a source level value changes, only that level is recalculated with the current spot ratio; unchanged levels remain at their previous CFD prices.
 - Strike rows used by heatmap/bubbles are mapped individually and remain fixed while OI/GEX/volume intensity can refresh.
 - Mappings persist in local storage per ETF source, CFD target and expiry, including across page reloads. Switching expiry loads or creates the mapping for that expiry.
 
-VOL TRIGGER / ZERO GAMMA
-Trong QuantLab, Vol Trigger được dùng làm tên hiển thị cho cùng một mức Zero Gamma / Gamma Flip (không tính thêm một proxy/provider level riêng).
-- Với mỗi mức giá underlying giả định S, tính lại BSM Gamma của từng hợp đồng từ IV, strike và DTE.
-- d1 = [ln(S/K) + 0.5 × σ² × T] / (σ × sqrt(T)) khi r = q = 0.
-- Γ(S) = exp(-0.5 × d1²) / [S × σ × sqrt(2πT)].
-- Net GEX(S) = Σ[s_i × Γ_i(S) × OI_i × multiplier_i × S² × 0.01], với s_i = +1 cho Call và −1 cho Put.
-- Zero Gamma là nghiệm S* khiến Net GEX(S*) = 0. Quét dải giá giả định, tìm từng lần đổi dấu và refine bằng bisection; nếu có nhiều nghiệm thì chọn nghiệm gần Spot hiện tại nhất.
-- DTE được tính tới 16:00 America/New_York của ngày đáo hạn. IV/OI/multiplier được giữ cố định trong mỗi lần repricing; mô hình hiện dùng r = 0 và q = 0.
-- Cần full expiry với OI, multiplier, IV và thời gian đáo hạn hợp lệ. Nếu thiếu dữ liệu hoặc không có zero-cross trong dải quét, level để unavailable thay vì tạo proxy.
-- Call-positive / Put-negative là giả định mô hình dealer inventory, không thể xác minh chỉ từ public OI. Gamma được BSM tính lại; live Gamma trong quote không được dùng làm Gamma ở mọi spot giả định.
-- Thuật ngữ lưu ý: một số nguồn, trong đó có tài liệu SpotGamma, phân biệt Zero Gamma với Volatility Trigger proprietary. Trong workspace này, Vol Trigger là alias do người dùng chọn cho Zero Gamma.
+GEX THEO STRIKE VÀ GAMMA FLIP / ZERO GAMMA
+- GEX tại Spot = s_i × Gamma_i × OI_i × multiplier_i × Spot² × 0.01, với s_i = +1 cho Call và −1 cho Put.
+- Nếu Binance có Gamma hợp lệ trong quote, QuantLab dùng Gamma đó (chuẩn hóa Gamma option về giá trị không âm, sau đó áp dấu theo Call/Put).
+- Nếu Binance không trả Gamma nhưng có IV, strike, Spot và DTE hợp lệ, QuantLab tự tính Gamma bằng Black–Scholes với r = 0, q = 0. Đây là fallback để vẫn tính CW/PW, GEX 1–10, GEX Ratio và Exposure từ Option Chain.
+- Nếu contract có OI = 0, đóng góp GEX bằng 0 và không cần Gamma/multiplier. Contract có OI > 0 cần multiplier cùng Gamma provider hoặc IV hợp lệ để được tính.
+- Key Levels có thể hiển thị GEX tạm tính trong lúc chain đang hydrate; chỉ đánh dấu full coverage khi toàn bộ expiry đã tải và mọi contract có đóng góp OI-weighted đều tính được. Cross-Asset chỉ đưa GEX levels lên chart CFD khi GEX coverage đầy đủ.
+- Gamma Flip / Zero Gamma được tính bằng cách giữ OI, IV, multiplier và DTE cố định; thay đổi giá underlying giả định, tính lại BSM Gamma từng contract, sau đó tìm Net GEX zero-cross. Nếu có nhiều nghiệm, chọn nghiệm gần Spot hiện tại nhất.
+- DTE tính tới 16:00 America/New_York của ngày đáo hạn. Mô hình Gamma Flip dùng r = 0, q = 0, quét nhiều mức giá và refine nghiệm bằng bisection.
+- Nếu thiếu OI, IV, multiplier hoặc không có zero-cross trong dải quét, level tương ứng được báo unavailable thay vì tự tạo giá trị giả.
+- Call-positive / Put-negative là giả định dấu mô hình để ước lượng exposure; public OI không xác minh dealer đang long hay short Gamma.
+
+MAX PAIN
+- Với từng giá settlement ứng viên K trong đúng expiry, tính tổng payout nội tại: Σ[Call OI × multiplier × max(K − strike, 0)] + Σ[Put OI × multiplier × max(strike − K, 0)].
+- Chọn strike có tổng payout nhỏ nhất. Nếu nhiều strike đồng hạng, hiển thị các strike đồng hạng và dùng strike thấp nhất làm đại diện.
+- Chỉ tính khi toàn expiry đã tải, OI đầy đủ và mọi contract có OI > 0 có multiplier hợp lệ. Không cộng volume hoặc premium vào Max Pain.
