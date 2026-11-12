@@ -22,7 +22,7 @@ const snap = (overrides={}) => ({
   callOIWall:{strike:652,oi:50}, putOIWall:{strike:640,oi:40},
   gexCallWall:{strike:662,gex:500},gexPutWall:{strike:660,gex:-300},
   gammaFlip:655, gexRatio:1.63, gexRatioState:'ready',gexRatioBias:'call-dominant',callGexTotal:1.63,putGexAbsTotal:1, maxPain:{strike:650,payout:900},
-  gexLevels:[{rank:1,strike:658,gex:120},{rank:2,strike:656,gex:-90}],
+  gexLevels:[{rank:1,strike:658,gex:120},{rank:2,strike:657,gex:-90}],
   ...overrides
 });
 
@@ -62,23 +62,50 @@ test('first mapping converts OI walls, GEX walls and ladder levels as separate f
   assert.ok(m.mappingSignature.includes('652'));
 });
 
-test('GEX ladder excludes only Gamma walls and retains OI wall strikes', () => {
+test('indicator GEX ladder excludes CW/PW, both OI Walls, Max Pain, ties and Gamma Flip', () => {
+  const levels=[
+    {strike:662,gex:9000}, // GEX CW
+    {strike:660,gex:-8000}, // GEX PW
+    {strike:652,gex:700}, // Call OI Wall
+    {strike:640,gex:-600}, // Put OI Wall
+    {strike:650,gex:550}, // Max Pain
+    {strike:651,gex:540}, // tied Max Pain
+    {strike:655,gex:530}, // Gamma Flip
+    {strike:658,gex:500},
+    {strike:657,gex:450},
+    {strike:656,gex:400},
+    {strike:654,gex:350},
+    {strike:653,gex:300}
+  ];
   const mapped=math.buildMappedMap(snap({
+    dist:levels.map(x=>({...x,callOI:10,putOI:5})),
     gexCallWall:{strike:662,gex:9000},
     gexPutWall:{strike:660,gex:-8000},
-    gexLevels:[
-      {rank:1,strike:662,gex:9000}, // GEX CW
-      {rank:2,strike:660,gex:-8000}, // GEX PW
-      {rank:3,strike:652,gex:700}, // Call OI Wall must stay eligible
-      {rank:4,strike:640,gex:-600}, // Put OI Wall must stay eligible
-      {rank:5,strike:658,gex:500}
-    ]
+    maxPain:{strike:650,tiedStrikes:[650,651],payout:120},
+    gammaFlip:655,
+    gexLevels:levels.map((x,i)=>({rank:i+1,...x}))
   }),652,4545,null,1500);
-  assert.deepEqual(mapped.gexLevels.map(x=>x.strike),[652,640,658]);
-  assert.deepEqual(mapped.gexLevels.map(x=>x.rank),[1,2,3]);
-  assert.ok(!mapped.gexLevels.some(x=>x.strike===mapped.gexCallWall.sourceLevel));
-  assert.ok(!mapped.gexLevels.some(x=>x.strike===mapped.gexPutWall.sourceLevel));
+  assert.deepEqual(Array.from(mapped.gexLevels, x=>x.strike),[658,657,656,654,653]);
+  assert.deepEqual(Array.from(mapped.gexLevels, x=>x.rank),[1,2,3,4,5]);
+  const forbidden=[652,640,662,660,650,651,655];
+  assert.ok(mapped.gexLevels.every(x=>!forbidden.some(y=>math.sameLevel(x.strike,y))));
+  assert.deepEqual(Array.from(mapped.gexExcludedStrikes),forbidden);
 });
+test('GEX level keeps its own mapping when rank changes after another Key Level is excluded', () => {
+  const firstSnap=snap({dist:[
+    {strike:662,gex:1000},{strike:660,gex:900},{strike:658,gex:800},{strike:656,gex:700}
+  ],gexLevels:[{rank:1,strike:662,gex:1000},{rank:2,strike:660,gex:900},{rank:3,strike:658,gex:800},{rank:4,strike:656,gex:700}],
+    gexCallWall:{strike:670,gex:1200},gexPutWall:{strike:640,gex:-1100},
+    callOIWall:null,putOIWall:null,maxPain:null,gammaFlip:null});
+  const first=math.buildMappedMap(firstSnap,652,4545,null,1000);
+  const strike658=first.gexLevels.find(x=>x.sourceLevel===658);
+  const secondSnap={...firstSnap,updatedAt:2000,callOIWall:{strike:662,oi:300}};
+  const second=math.buildMappedMap(secondSnap,700,5000,first,2000);
+  const after=second.gexLevels.find(x=>x.sourceLevel===658);
+  assert.equal(after.rank,2,'658 moves up after 662 is excluded as an OI wall');
+  assert.equal(after.target,strike658.target,'same source strike retains its previously locked CFD level');
+});
+
 test('live ETF and CFD price ticks do not move unchanged source levels', () => {
   const first=math.buildMappedMap(snap(),652,4545,null,1000);
   const laterSnapshot=snap({updatedAt:2000,dist:[
@@ -99,13 +126,24 @@ test('live ETF and CFD price ticks do not move unchanged source levels', () => {
 test('only source levels whose values changed are recalculated at the new live ratio', () => {
   const first=math.buildMappedMap(snap(),652,4545,null,1000);
   const updated=math.buildMappedMap(snap({
+    dist:[
+      {strike:652,callOI:1,putOI:1,gex:90},
+      {strike:653,callOI:70,putOI:10,gex:700},
+      {strike:640,callOI:2,putOI:41,gex:-200},
+      {strike:663,callOI:3,putOI:4,gex:600},
+      {strike:660,callOI:5,putOI:8,gex:-200},
+      {strike:651,callOI:6,putOI:7,gex:150},
+      {strike:656,callOI:4,putOI:9,gex:-120},
+      {strike:659,callOI:3,putOI:2,gex:300},
+      {strike:657,callOI:2,putOI:1,gex:100}
+    ],
     callOIWall:{strike:653,oi:70},
     putOIWall:{strike:640,oi:41},
     gexCallWall:{strike:663,gex:600},
     gexPutWall:{strike:660,gex:-200},
     gammaFlip:656,
     maxPain:{strike:651,payout:950},
-    gexLevels:[{rank:1,strike:659,gex:300},{rank:2,strike:656,gex:-120}]
+    gexLevels:[{rank:1,strike:659,gex:300},{rank:2,strike:656,gex:-120},{rank:3,strike:657,gex:100}]
   }),660,4600,first,2500);
   const ratio=4600/660;
   assert.equal(updated.callOIWall.target,653*ratio);
@@ -115,7 +153,8 @@ test('only source levels whose values changed are recalculated at the new live r
   assert.equal(updated.gammaFlip.target,656*ratio,'changed Zero Gamma / Vol Trigger remaps once');
   assert.equal(updated.maxPain.target,651*ratio);
   assert.equal(updated.gexLevels[0].target,659*ratio);
-  assert.equal(updated.gexLevels[1].target,first.gexLevels[1].target,'unchanged GEX rank 2 remains fixed');
+  assert.equal(updated.gexLevels[1].sourceLevel,657);
+  assert.equal(updated.gexLevels[1].target,first.gexLevels.find(x=>x.sourceLevel===657).target,'unchanged source strike keeps mapping when rank changes');
   assert.equal(updated.dist[0].target,first.dist[0].target,'the individual strike heatmap row remains fixed');
   assert.equal(updated.lastLevelChangeAt,2500);
 });

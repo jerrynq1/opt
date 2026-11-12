@@ -13,7 +13,7 @@ function loadStockOptionsHelpers() {
   );
   source = source.replace(
     '  buildViews();\n  window.stockOptionsSetActive=setActive;',
-    '  window.__stockOptionsTest={normaliseQuote,mergeLiveQuote,calc,strikeSymbols,renderExposure,renderLevels,renderChain,quoteCell,gammaFlipOf,maxPainOf,bsmGamma,resolveGamma,gammaFlipInputKey,yearsToExpiry,expiryAtUsCloseUtc,quoteRowsFromReply,effectiveMultiplier,mergeQuoteSnapshot,quoteNeedsAnalyticsRetry};\n  return;\n  buildViews();\n  window.stockOptionsSetActive=setActive;'
+    '  window.__stockOptionsTest={normaliseQuote,mergeLiveQuote,calc,strikeSymbols,renderExposure,renderLevels,renderChain,quoteCell,gammaFlipOf,maxPainOf,bsmGamma,resolveGamma,gammaFlipInputKey,yearsToExpiry,expiryAtUsCloseUtc,quoteRowsFromReply,effectiveMultiplier,mergeQuoteSnapshot,quoteNeedsAnalyticsRetry,collectGexLadderExclusions,isExcludedGexStrike};\n  return;\n  buildViews();\n  window.stockOptionsSetActive=setActive;'
   );
   const elements = new Map();
   const document = { getElementById(id) {
@@ -166,7 +166,7 @@ test('Max Pain is computed from the complete expiry and OI-weighted intrinsic pa
   assert.equal(result.maxPain.payout, 200);
 });
 
-test('OI Walls rank by OI while CW/PW rank by signed Net GEX and GEX 1-10 excludes only CW/PW', () => {
+test('OI Walls rank by OI, CW/PW rank by Net GEX, and GEX 1-10 excludes every duplicate Key Level', () => {
   const entries = [
     ['call-oi', 'C', 120, 500, 0.001],   // biggest Call OI, but not biggest positive Net GEX
     ['put-oi',  'P', 125, 600, 0.001],   // biggest Put OI, but not biggest negative Net GEX
@@ -194,9 +194,22 @@ test('OI Walls rank by OI while CW/PW rank by signed Net GEX and GEX 1-10 exclud
   const ladderStrikes = Array.from(result.gexLevels, x=>x.strike);
   assert.ok(!ladderStrikes.includes(105), 'GEX CW excluded from ladder');
   assert.ok(!ladderStrikes.includes(110), 'GEX PW excluded from ladder');
-  assert.ok(ladderStrikes.includes(120), 'Call OI Wall is not excluded merely for being an OI Wall');
-  assert.ok(ladderStrikes.includes(125), 'Put OI Wall is not excluded merely for being an OI Wall');
-  assert.deepEqual(ladderStrikes.slice(0,2), [115,100], 'remaining strikes sorted by absolute Net GEX');
+  assert.ok(!ladderStrikes.includes(120), 'Call OI Wall excluded from GEX ladder');
+  assert.ok(!ladderStrikes.includes(125), 'Put OI Wall excluded from GEX ladder');
+  assert.ok(!ladderStrikes.includes(result.maxPain.strike), 'Max Pain strike excluded from GEX ladder');
+  assert.deepEqual(ladderStrikes, [115,100,130], 'remaining strikes ranked by absolute Net GEX');
+});
+
+test('GEX exclusion set deduplicates CW, PW, OI Walls, every tied Max Pain strike and Gamma Flip', () => {
+  const excluded=helpers.collectGexLadderExclusions({
+    callOIWall:{strike:120},putOIWall:{strike:125},
+    gexCallWall:{strike:105},gexPutWall:{strike:110},
+    maxPain:{strike:115,tiedStrikes:[115,116,117]},gammaFlip:118
+  });
+  assert.deepEqual(Array.from(excluded, x=>x.strike),[120,125,105,110,115,116,117,118]);
+  assert.ok(helpers.isExcludedGexStrike(116,excluded));
+  assert.ok(helpers.isExcludedGexStrike(118.00001,excluded),'near-identical strike/zero-gamma overlap is excluded');
+  assert.ok(!helpers.isExcludedGexStrike(119,excluded));
 });
 
 test('GEX preview stays provisional when one contract lacks both provider Gamma and IV', () => {

@@ -38,9 +38,23 @@
     return target*(strike/source);
   }
   function rankGexLevels(dist,count=10,excludedStrikes=[]){
-    const excluded=new Set((Array.isArray(excludedStrikes)?excludedStrikes:[]).map(v=>num(v)).filter(v=>v!==null).map(v=>v.toFixed(6)));
-    return (Array.isArray(dist)?dist:[]).filter(x=>Number.isFinite(+x.gex)&&Math.abs(+x.gex)>0&&!excluded.has((num(x.strike)??NaN).toFixed(6)))
+    const excluded=(Array.isArray(excludedStrikes)?excludedStrikes:[]).map(v=>typeof v==='object'&&v!==null?num(v.strike):num(v)).filter(v=>v!==null);
+    return (Array.isArray(dist)?dist:[]).filter(x=>Number.isFinite(+x.gex)&&Math.abs(+x.gex)>0&&
+      !excluded.some(level=>Math.abs((num(x.strike)??NaN)-level)<=1e-4))
       .slice().sort((a,b)=>Math.abs(+b.gex)-Math.abs(+a.gex)).slice(0,Math.max(0,Math.min(10,+count||0)));
+  }
+  function excludedKeyLevelStrikes(snapshot={}){
+    const values=[];
+    const add=(value)=>{const n=num(value);if(n!==null&&n>0&&!values.some(x=>Math.abs(x-n)<=1e-4))values.push(n);};
+    add(snapshot.callOIWall?.strike??snapshot.callWall?.strike);
+    add(snapshot.putOIWall?.strike??snapshot.putWall?.strike);
+    add(snapshot.oiWall?.strike);
+    add(snapshot.gexCallWall?.strike);
+    add(snapshot.gexPutWall?.strike);
+    add(snapshot.maxPain?.strike);
+    for(const strike of (Array.isArray(snapshot.maxPain?.tiedStrikes)?snapshot.maxPain.tiedStrikes:[]))add(strike);
+    add(snapshot.gammaFlip);
+    return values;
   }
   function sameLevel(a,b){
     const x=num(a),y=num(b);
@@ -81,27 +95,44 @@
     const gammaFlipSource=snapshot.gammaFlip;
     const gammaFlip=track(gammaFlipSource==null?null:mapLevel(gammaFlipSource,prev?.gammaFlip,sourcePrice,targetPrice,mappedAt,{sourceValue:gammaFlipSource,method:snapshot.gammaFlipMethod||'BSM repricing · Net GEX zero-cross'}),'GAMMA FLIP / ZERO GAMMA');
     const maxPain=track(snapshot.maxPain?mapLevel(snapshot.maxPain.strike,prev?.maxPain,sourcePrice,targetPrice,mappedAt,{...snapshot.maxPain,strike:snapshot.maxPain.strike}):null,'MAX PAIN');
-    const oldGex=new Map((prev?.gexLevels||[]).map((g,i)=>[Number(g.rank)||i+1,g]));
-    // GEX 1–10 excludes only the two Net-GEX Gamma Walls (CW/PW), never OI walls.
-    const gammaWallStrikes=[snapshot.gexCallWall?.strike,snapshot.gexPutWall?.strike];
-    const eligibleGex=snapshot.gexComplete!==false?(snapshot.gexLevels||[]).filter(g=>!gammaWallStrikes.some(w=>sameLevel(w,g.strike))):[];
-    const gexLevels=eligibleGex.slice(0,10).map((g,i)=>{const rank=i+1;return track(mapLevel(g.strike,oldGex.get(rank),sourcePrice,targetPrice,mappedAt,{...g,rank,strike:g.strike}),`GEX ${rank}`)}).filter(Boolean);
+    // Keep a level's prior mapping by source strike, not by its ladder rank.
+    // Removing duplicate Key Levels may shift ranks without changing that level's price.
+    const oldGex=new Map((prev?.gexLevels||[]).map(g=>[String(num(g.sourceLevel??g.strike)),g]));
+    const excludedGexStrikes=excludedKeyLevelStrikes(snapshot);
+    // Build the ladder from the full strike distribution, then exclude every other
+    // plotted price level before taking the strongest ten remaining Net-GEX strikes.
+    let gexUniverse;
+    if(Array.isArray(snapshot.gexRankedCandidates)&&snapshot.gexRankedCandidates.length){
+      gexUniverse=snapshot.gexRankedCandidates;
+    }else{
+      // Compatibility with snapshots made before full ranked candidates were exposed:
+      // merge all available rows by strike so filtering a previous top-10 never leaves gaps.
+      const byStrike=new Map();
+      for(const row of [...(snapshot.dist||[]),...(snapshot.gexLevels||[])]){
+        const strike=num(row?.strike);if(!(strike>0))continue;
+        const key=strike.toFixed(6),old=byStrike.get(key);
+        if(!old||(!Number.isFinite(+old.gex)&&Number.isFinite(+row.gex)))byStrike.set(key,row);
+      }
+      gexUniverse=[...byStrike.values()];
+    }
+    const eligibleGex=snapshot.gexComplete!==false?rankGexLevels(gexUniverse,10,excludedGexStrikes):[];
+    const gexLevels=eligibleGex.map((g,i)=>{const rank=i+1,previous=oldGex.get(String(num(g.strike)));return track(mapLevel(g.strike,previous,sourcePrice,targetPrice,mappedAt,{...g,rank,strike:g.strike}),`GEX ${rank}`)}).filter(Boolean);
     const changed=changedCount>0;
     const mappedCount=dist.length+[callOIWall,putOIWall,gexCallWall,gexPutWall,gammaFlip,maxPain].filter(x=>x?.target!==null&&x?.target!==undefined).length+gexLevels.filter(x=>x.target!==null).length;
     const pendingCount=mappedDist.filter(x=>x&&!Number.isFinite(x.target)).length+[callOIWall,putOIWall,gexCallWall,gexPutWall,gammaFlip,maxPain].filter(x=>x&&x.target==null).length+gexLevels.filter(x=>x.target==null).length;
-    const mappingSignature=JSON.stringify({dist:dist.map(r=>[r.strike,r.sourceLevel,r.target]),callOIWall:callOIWall&&[callOIWall.sourceLevel,callOIWall.target],putOIWall:putOIWall&&[putOIWall.sourceLevel,putOIWall.target],gexCallWall:gexCallWall&&[gexCallWall.sourceLevel,gexCallWall.target],gexPutWall:gexPutWall&&[gexPutWall.sourceLevel,gexPutWall.target],gammaFlip:gammaFlip&&[gammaFlip.sourceLevel,gammaFlip.target],maxPain:maxPain&&[maxPain.sourceLevel,maxPain.target],gex:gexLevels.map(g=>[g.rank,g.sourceLevel,g.target])});
+    const mappingSignature=JSON.stringify({dist:dist.map(r=>[r.strike,r.sourceLevel,r.target]),callOIWall:callOIWall&&[callOIWall.sourceLevel,callOIWall.target],putOIWall:putOIWall&&[putOIWall.sourceLevel,putOIWall.target],gexCallWall:gexCallWall&&[gexCallWall.sourceLevel,gexCallWall.target],gexPutWall:gexPutWall&&[gexPutWall.sourceLevel,gexPutWall.target],gammaFlip:gammaFlip&&[gammaFlip.sourceLevel,gammaFlip.target],maxPain:maxPain&&[maxPain.sourceLevel,maxPain.target],gexExcluded:excludedGexStrikes,gex:gexLevels.map(g=>[g.rank,g.sourceLevel,g.target])});
     const target=num(targetPrice),source=num(sourcePrice);
     return Object.freeze({source:snapshot.key||snapshot.symbol||'',symbol:snapshot.symbol||'',target:TARGET[snapshot.key]||pair(),expiry:snapshot.expiry||'',mappingSignature,
       // These spot anchors describe the most recent level-change mapping only; they are not live inputs to existing levels.
       sourcePrice:changed?source:(prev?.sourcePrice??source),targetPrice:changed?target:(prev?.targetPrice??target),
       ratio:lastRatio, lastRatio, lastLevelChangeAt:changed?mappedAt:(prev?.lastLevelChangeAt??mappedAt),
       changedCount:(prev?.changedCount||0)+changedCount,mappedCount,pendingCount,complete:!!snapshot.complete,gexComplete:!!snapshot.gexComplete,coverage:num(snapshot.coverage),gexCoverage:num(snapshot.gexCoverage),updatedAt:snapshot.updatedAt||null,
-      dist:Object.freeze(dist),callOIWall,putOIWall,gexCallWall,gexPutWall,gammaFlip,maxPain,gexRatio:num(snapshot.gexRatio),gexRatioState:snapshot.gexRatioState||null,gexRatioBias:snapshot.gexRatioBias||null,callGexTotal:num(snapshot.callGexTotal),putGexAbsTotal:num(snapshot.putGexAbsTotal),gexLevels:Object.freeze(gexLevels)});
+      dist:Object.freeze(dist),callOIWall,putOIWall,gexCallWall,gexPutWall,gammaFlip,maxPain,gexRatio:num(snapshot.gexRatio),gexRatioState:snapshot.gexRatioState||null,gexRatioBias:snapshot.gexRatioBias||null,callGexTotal:num(snapshot.callGexTotal),putGexAbsTotal:num(snapshot.putGexAbsTotal),gexLevels:Object.freeze(gexLevels),gexExcludedStrikes:Object.freeze(excludedGexStrikes)});
   }
   function buildLockedMap(snapshot,sourcePrice,targetPrice,lockedAt=Date.now()){
     return buildMappedMap(snapshot,sourcePrice,targetPrice,null,lockedAt);
   }
-  window.crossAssetMapMath=Object.freeze({mapStrike,rankGexLevels,buildLockedMap,buildMappedMap,sameLevel});
+  window.crossAssetMapMath=Object.freeze({mapStrike,rankGexLevels,excludedKeyLevelStrikes,buildLockedMap,buildMappedMap,sameLevel});
   function activeIndicator(){
     try{return typeof ACT!=='undefined'?ACT.find(a=>a&&a.key==='xmap')||null:null}catch{return null;}
   }
@@ -306,7 +337,7 @@
     if(P.gammaFlip&&s.gammaFlip?.target!=null){const p=s.gammaFlip.target;drawLine(cs.priceToCoordinate(p),col(6,'#43c7e8'),'GAMMA FLIP / ZERO GAMMA · BSM',p,w,h,1.8,[8,3]);}
     if(P.maxPain&&s.maxPain?.target!=null){const p=s.maxPain.target;if(p!=null)drawLine(cs.priceToCoordinate(p),col(7,'#b68cff'),'MAX PAIN',p,w,h,1.6,[10,4,2,4]);}
     if(P.gexCount>0){
-      const levels=Array.isArray(s.gexLevels)&&s.gexLevels.length?s.gexLevels:rankGexLevels(s.dist,10,[s.gexCallWall?.sourceLevel,s.gexPutWall?.sourceLevel]).map((r,i)=>({rank:i+1,strike:r.strike,gex:r.gex}));
+      const levels=Array.isArray(s.gexLevels)&&s.gexLevels.length?s.gexLevels:rankGexLevels(s.dist,10,excludedKeyLevelStrikes({callOIWall:s.callOIWall,putOIWall:s.putOIWall,gexCallWall:s.gexCallWall,gexPutWall:s.gexPutWall,maxPain:s.maxPain,gammaFlip:s.gammaFlip?.sourceLevel})).map((r,i)=>({rank:i+1,strike:r.strike,gex:r.gex}));
       levels.slice(0,P.gexCount).forEach((g,i)=>{const p=g.target;if(p==null)return;const color=(g.gex||0)>=0?col(0,'#35d59a'):col(1,'#ec557c');drawLine(cs.priceToCoordinate(p),color,`GEX ${g.rank||i+1}`,p,w,h,i<3?1.7:1.1,[3,4]);});
     }
     if(P.bubbles){
