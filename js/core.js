@@ -19,7 +19,7 @@ const allTfs=()=>[...TFS,...CTF.map(s=>[tfName(s),s])].sort((a,b)=>a[1]-b[1]);
 loadCtf();
 let C={sym:ld("tp_sym","NAS100"),tf:+ld("tp_tf",900)};
 if(!okTf(C.tf))C.tf=900;
-let P={theme:ld("gx-theme","")||ld("tp_theme","")||(matchMedia("(prefers-color-scheme:dark)").matches?"dark":"light"),sc:ld("tp_sc","")==="1"};
+let P={theme:ld("gx-theme","")||ld("tp_theme","")||"dark",sc:ld("tp_sc","")==="1"};
 
 /* ================= LỖI cTrader -> tiếng Việt (kết nối + dữ liệu nằm ở ctrader.js) ================= */
 const why=e=>{

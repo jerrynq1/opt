@@ -23,7 +23,6 @@
     gld: {key:'gld', symbol:'GLD', assetCode:'EQ_GLD', name:'SPDR Gold Trust', root:'GLD'}
   };
   const sessions = {};
-  const intervals = ['5m','1h','1d','1w','1M'];
   const $ = id => document.getElementById(id);
   const num = x => {
     if(x === null || x === undefined || x === '') return null;
@@ -60,27 +59,6 @@
         <div class="opt-metric"><span>TOTAL VOLUME</span><strong>—</strong><small>Call + Put</small></div>
         <div class="opt-metric"><span>OI COVERAGE</span><strong>—</strong><small>Quote có OI / tổng contract</small></div>
       </div>
-      <div class="so-chart-grid">
-        <div class="card so-chart-card">
-          <div class="opt-card-title"><div><h3>${cfg.symbol} Candlestick Chart</h3><small id="${p}-chart-meta">Chờ Binance Equity Kline stream…</small></div>
-            <div class="so-tfs">${intervals.map((it,i)=>`<button type="button" class="tf${i===0?' on':''}" data-so-interval="${it}">${it}</button>`).join('')}</div>
-          </div>
-          <div class="so-chart-wrap"><div id="${p}-chart" class="so-chart"></div><div class="so-chart-empty" id="${p}-chart-empty">Đang chờ nến đầu tiên từ Binance. Stream Stocks gửi nến đang chạy; chưa có endpoint REST Kline lịch sử trong tài liệu Stocks API công khai.</div></div>
-          <div class="so-chart-foot"><span id="${p}-chart-ohlc">O — · H — · L — · C —</span><span id="${p}-chart-feed">Kline stream · ${cfg.symbol}</span></div>
-        </div>
-        <div class="card so-quote-card">
-          <div class="opt-card-title"><h3>Underlying Snapshot</h3><small>Binance Equity</small></div>
-          <div class="so-quote-price" id="${p}-price">—</div>
-          <div class="so-quote-change" id="${p}-change">Chưa có giá mới</div>
-          <div class="so-quote-list">
-            <div><span>Previous close</span><b id="${p}-prev">—</b></div>
-            <div><span>Market phase</span><b id="${p}-phase">—</b></div>
-            <div><span>Last update</span><b id="${p}-updated">—</b></div>
-            <div><span>Contract multiplier</span><b id="${p}-multiplier">—</b></div>
-          </div>
-          <p class="so-note">Giá underlying lấy từ stream riêng <code>${cfg.assetCode}@symbol_price</code>. Stock Options quote được lấy từ endpoint riêng của Binance và có thể bị delay tùy quyền dữ liệu.</p>
-        </div>
-      </div>
       <div class="card so-chain-toolbar">
         <div class="opt-toolbar">
           <div class="opt-control"><label for="${p}-expiry">EXPIRATION</label><select id="${p}-expiry"><option value="">Đang tải kỳ hạn…</option></select></div>
@@ -104,7 +82,7 @@
             </div>
             <div class="so-exposure-caption"><div><strong id="${p}-exposure-title">GAMMA EXPOSURE</strong><span id="${p}-exposure-subtitle">Calls → right · Puts ← left</span></div><small id="${p}-exposure-units">USD notional per 1% move</small></div>
             <div class="opt-gex-chart so-exposure" id="${p}-gex"><div class="opt-empty">Đang chờ Greeks/OI…</div></div>
-            <div class="so-exposure-legend"><span><i class="call"></i>CALL EXPOSURE</span><span><i class="put"></i>PUT EXPOSURE</span><span><i class="spot"></i>UNDERLYING SPOT</span></div>
+            <div class="so-exposure-legend"><span><i class="call"></i>CALL EXPOSURE</span><span><i class="put"></i>PUT EXPOSURE</span><span><i class="spot"></i>UNDERLYING SPOT</span><span><i class="call-wall"></i>CALL RESISTANCE</span><span><i class="put-wall"></i>PUT SUPPORT</span></div>
           </div>
           <p class="opt-mode-note" id="${p}-exposure-note">Call và Put được tách theo option side; OI không cho biết holder đang Long hay Short.</p>
         </div>
@@ -123,15 +101,20 @@
         </table></div>
       </div>
       <div class="card so-method-card"><div class="opt-card-title"><h3>Data Status & Methodology</h3><button class="btn ghost sm" type="button" id="${p}-method-toggle">Giải thích cách tính</button></div>
-        <div class="opt-meta" id="${p}-meta"></div>
+        <div class="opt-meta" id="${p}-meta">
+          <span class="opt-meta-item"><small>OPTIONS FEED</small><b>Binance Stock Options</b></span>
+          <span class="opt-meta-item"><small>SPOT REFERENCE</small><b>Binance Equity WebSocket</b></span>
+          <span class="opt-meta-item"><small>GREEKS MODEL</small><b>OI × Greek × multiplier</b></span>
+          <span class="opt-meta-item"><small>MISSING OI</small><b>Giữ null, không thay bằng 0</b></span>
+        </div>
         <div class="opt-method" id="${p}-method" hidden>
           <p><strong>Nguồn Option Chain:</strong> Binance Stock Options <code>option/chain-symbols</code> liệt kê OCC symbols theo ngày đáo hạn; <code>get-option-quote</code> trả Bid/Ask/Mid, volume, OI, multiplier, IV và Greeks.</p>
           <p><strong>Contract size:</strong> multiplier đọc từ từng option quote (mẫu GLD trong HAR là 100 shares/contract). Không hardcode OI và không thay <code>null</code> bằng 0.</p>
           <p><strong>GEX:</strong> Σ(Gamma × OI × multiplier × Spot² × 0.01), Call dương và Put âm. <strong>DEX:</strong> Σ(Delta × OI × multiplier × Spot). Vega và Theta tổng hợp từ Greek × OI × multiplier.</p>
           <p><strong>Key Levels:</strong> Call/Put OI Wall là strike có OI lớn nhất theo từng phía. Gamma Flip là điểm cumulative GEX đổi dấu. GEX 1–10 là các strike có trị tuyệt đối net GEX lớn nhất, xếp theo độ mạnh chứ không theo thứ tự giá. Max Pain là strike tối thiểu hóa intrinsic payout tính từ OI của toàn expiry.</p>
           <p><strong>Vol Trigger:</strong> chỉ hiện khi Binance hoặc nguồn dữ liệu tích hợp cung cấp trường Vol Trigger riêng. Không đồng nhất trường này với Gamma Flip. Với nguồn Binance hiện tại nếu không có trường riêng, dashboard sẽ ghi chưa có dữ liệu.</p>
+          <p><strong>Spot reference:</strong> Binance Equity WebSocket <code>${cfg.assetCode}@symbol_price</code> được dùng làm giá tham chiếu cho KPI, Exposure và các Key Levels.</p>
           <p><strong>Giới hạn:</strong> Binance trả <code>oi: null</code> cho một số hợp đồng. Các hợp đồng này được đánh dấu thiếu OI và bị loại khỏi exposure, nhưng vẫn hiển thị dữ liệu quote/Greeks còn lại. Endpoint quote có thể trả dữ liệu trễ; độ trễ phụ thuộc quyền dữ liệu tài khoản.</p>
-          <p><strong>Chart:</strong> Dùng Equity WebSocket <code>${cfg.symbol}@kline_INTERVAL</code> (5m, 1h, 1d, 1w, 1M). Luồng công khai được xác minh là cập nhật nến đang chạy, không bao gồm backfill lịch sử trong request capture hiện có. Biểu đồ sẽ bắt đầu có nến khi Binance gửi payload; không tự sinh dữ liệu lịch sử.</p>
           <p><strong>Không có trong nguồn hiện tại:</strong> option trade prints/flow tape và Vanna/Charm không nằm trong quote response được ghi nhận, nên dashboard không tự ước lượng hoặc hiển thị hai loại dữ liệu này như dữ liệu Binance.</p>
         </div>
       </div>`;
@@ -149,8 +132,7 @@
       sessions[cfg.key] = sessions[cfg.key] || {
         cfg, active:false, socket:null, reconnectTimer:null, pollTimer:null, statusTimer:null,
         expiry:null, expirations:[], contracts:[], contractSymbols:new Set(), quotes:new Map(), price:null, previousClose:null,
-        phase:'—', priceTime:0, interval:'5m', chart:null, candleSeries:null, volumeSeries:null,
-        lastCandle:null, candlesSeen:0, oiLastUpdate:0, quoteLoading:false, chartResize:null,
+        priceTime:0, oiLastUpdate:0, quoteLoading:false,
         quoteFeed:'delay', streamExpiry:null, streamNames:[], reconnectDelay:1000, requestId:1, chainLoadToken:0, crossAssetError:'',
         displayStrikes:readDisplayStrikes(cfg.key), chainComplete:false, hydrating:false, hydrateProgress:0, loadedExpiry:null
       };
@@ -162,18 +144,32 @@
     const isDirectPublic = method === 'GET' && DIRECT_PUBLIC_PATHS.some(prefix => path.startsWith(prefix));
     const options={method,headers:{'Accept':'application/json'}};
     if(body!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(body);}
-    const url = isDirectPublic ? (BINANCE_PUBLIC_BASE + path) : (ensureProxyConfigured(), API_PREFIX + path);
-    let response;
-    try{
-      response=await fetch(url,options);
-    }catch(e){
-      if(isDirectPublic) throw new Error('Binance không cho trình duyệt truy cập trực tiếp chain-symbols (CORS hoặc network). Đây là bước thử A; nếu tiếp tục lỗi sẽ chuyển sang Node.js proxy. Chi tiết: '+(e.message||e));
-      throw new Error('Không gọi được Binance proxy. Kiểm tra URL Cloudflare Worker trong js/stock-options-config.js. Chi tiết: '+(e.message||e));
+    const proxyUrl = API_BASE ? (API_PREFIX + path) : '';
+    let response=null, directProblem='';
+
+    if(isDirectPublic){
+      // Public chain metadata is attempted directly first. If the browser blocks
+      // Binance through CORS/network policy, retry through the configured narrow Worker.
+      try{
+        const direct=await fetch(BINANCE_PUBLIC_BASE + path,options);
+        if(direct.ok)response=direct;
+        else directProblem=`HTTP ${direct.status}: ${(await direct.text()).slice(0,160)}`;
+      }catch(e){directProblem=e.message||String(e);}
+      if(!response){
+        if(!proxyUrl)throw new Error(`Không gọi được Binance trực tiếp (${directProblem||'network/CORS'}). Chưa cấu hình Cloudflare Worker fallback trong js/stock-options-config.js.`);
+        try{response=await fetch(proxyUrl,options)}
+        catch(e){throw new Error(`Binance direct không khả dụng (${directProblem||'network/CORS'}); Worker fallback cũng lỗi (${e.message||e}). Kiểm tra mạng và URL Worker trong js/stock-options-config.js.`)}
+      }
+    }else{
+      ensureProxyConfigured();
+      try{response=await fetch(proxyUrl,options)}
+      catch(e){throw new Error('Không gọi được Binance proxy. Kiểm tra URL Cloudflare Worker trong js/stock-options-config.js. Chi tiết: '+(e.message||e))}
     }
+
     const text=await response.text();
     if(!response.ok){
       const message=`HTTP ${response.status}: ${text.slice(0,180)}`;
-      if(isDirectPublic) throw new Error('Binance direct chain-symbols bị từ chối: '+message);
+      if(isDirectPublic)throw new Error(`Binance direct không khả dụng (${directProblem||'network/CORS'}); Worker fallback trả ${message}. Kiểm tra Worker và Binance upstream.`);
       throw new Error(`Binance Worker ${message}`);
     }
     let json;
@@ -187,8 +183,13 @@
     const el=$(`${'so-'+s.cfg.key}-status`); if(!el)return;
     el.textContent=text; el.className='opt-status'+(kind?' '+kind:'');
   }
-  function showError(s,msg){const el=$(`so-${s.cfg.key}-error`);if(el){el.hidden=false;el.textContent=msg;}}
-  function clearError(s){const el=$(`so-${s.cfg.key}-error`);if(el){el.hidden=true;el.textContent='';}}
+  function showError(s,msg){
+    const el=$(`so-${s.cfg.key}-error`);if(!el)return;
+    const detail=String(msg??'Unknown error');
+    el.innerHTML=`<div class="opt-error-copy"><strong>Không tải được Option Chain</strong><span>Kiểm tra kết nối internet và URL Cloudflare Worker trong <code>js/stock-options-config.js</code>.</span></div><details class="opt-error-details"><summary>Chi tiết kỹ thuật</summary><p>${esc(detail)}</p></details>`;
+    el.hidden=false;
+  }
+  function clearError(s){const el=$(`so-${s.cfg.key}-error`);if(el){el.hidden=true;el.innerHTML='';}}
 
 
   function candidateDates(limit=18){
@@ -214,7 +215,7 @@
     await Promise.all(Array.from({length:4},worker));
     found.sort((a,b)=>a.date.localeCompare(b.date));
     s.expirations=found;
-    if(!found.length)throw new Error(`Không lấy được expiry ${cfg.symbol} trực tiếp từ Binance. ${firstError||'Không có contract trong các ngày đã kiểm tra.'}`);
+    if(!found.length)throw new Error(`Không tìm thấy expiry ${cfg.symbol}. Đã thử Binance REST và Worker dự phòng. ${firstError||'Không có contract trong các ngày đã kiểm tra.'}`);
     return found;
   }
 
@@ -505,9 +506,9 @@
     };
     const rows=visible.map((x,i)=>{
       const call=Math.abs(Number(x[config.callField])||0),put=Math.abs(Number(x[config.putField])||0);
-      const cw=call/max*100,pw=put/max*100;
+      const cw=call>0?Math.max(1,call/max*100):0,pw=put>0?Math.max(1,put/max*100):0;
       const rowClass=(Number.isFinite(s.price)&&Math.abs(x.strike-s.price)<=range/Math.max(visible.length-1,1)*.55)?' is-near-spot':'';
-      return `<div class="exposure-row${rowClass}" style="--row-i:${i}" data-strike="${x.strike}" title="Strike ${fmt(x.strike,2)} · Call ${compact(call)} · Put ${compact(put)}"><span class="exposure-strike">${fmt(x.strike,2)}</span><span class="exposure-put-track"><i style="width:${pw.toFixed(2)}%"></i></span><span class="exposure-zero"></span><span class="exposure-call-track"><i style="width:${cw.toFixed(2)}%"></i></span></div>`;
+      return `<div class="exposure-row${rowClass}" style="--row-i:${i}" data-strike="${x.strike}" title="Strike ${fmt(x.strike,2)} · Call ${compact(call)} · Put ${compact(put)}"><span class="exposure-strike">${fmt(x.strike,2)}</span><span class="exposure-put-track"><i data-exposure-value="${put}" style="width:${pw.toFixed(2)}%"></i></span><span class="exposure-zero"></span><span class="exposure-call-track"><i data-exposure-value="${call}" style="width:${cw.toFixed(2)}%"></i></span></div>`;
     }).join('');
     const lines=[
       marker(s.price,'is-spot','SPOT'),
@@ -577,60 +578,26 @@
     const mult=$(`so-${s.cfg.key}-multiplier`),toolbarMult=$(`so-${s.cfg.key}-contract-multiplier`);
     if(mult)mult.textContent=multiplier?`${fmt(multiplier,0)} shares`:'—';
     if(toolbarMult)toolbarMult.textContent=multiplier?`${fmt(multiplier,0)} shares`:'—';
-    const meta=$(`so-${s.cfg.key}-meta`);if(meta)meta.innerHTML=`<span>REST: chain-symbols + get-option-quote</span><span>Options feed: delayed / access-dependent</span><span>Multiplier from quote: ${multiplier??'—'}</span><span>${c.oiMissing} contracts without usable OI</span><span>${c.multiplierMissing} contracts without multiplier (excluded from exposure)</span><span>Underlying WS: ${s.socket&&s.socket.readyState===WebSocket.OPEN?'connected':'connecting / closed'}</span><span>Chart candles received: ${s.candlesSeen}</span>`;
+    const meta=$(`so-${s.cfg.key}-meta`);if(meta){
+      const items=[
+        ['OPTIONS FEED','Binance Stock Options · delayed / access-dependent'],
+        ['REST SOURCE','chain-symbols + get-option-quote'],
+        ['CONTRACT MULTIPLIER',multiplier?`${fmt(multiplier,0)} shares`:'Chưa có quote multiplier'],
+        ['OI COVERAGE',`${c.oiKnown}/${c.totalContracts} contracts có OI`],
+        ['MISSING DATA',`${c.oiMissing} thiếu OI · ${c.multiplierMissing} thiếu multiplier`],
+        ['SPOT WEBSOCKET',s.socket&&s.socket.readyState===WebSocket.OPEN?'Connected':'Connecting / closed']
+      ];
+      meta.innerHTML=items.map(([label,value])=>`<span class="opt-meta-item"><small>${esc(label)}</small><b>${esc(value)}</b></span>`).join('');
+    }
   }
 
-  function createChart(s){
-    const cfg=s.cfg,container=$(`so-${cfg.key}-chart`);
-    if(!container||s.chart||!window.LightweightCharts)return;
-    const css=getComputedStyle(document.documentElement),ink=css.getPropertyValue('--ink').trim()||'#f5f5f5',mut=css.getPropertyValue('--mut').trim()||'#999',line=css.getPropertyValue('--line').trim()||'#333';
-    const chart=LightweightCharts.createChart(container,{width:container.clientWidth||600,height:container.clientHeight||330,
-      layout:{background:{type:'solid',color:'rgba(0,0,0,0)'},textColor:ink,fontFamily:'Space Grotesk, sans-serif'},
-      grid:{vertLines:{color:line},horzLines:{color:line}},
-      rightPriceScale:{borderColor:line,scaleMargins:{top:.08,bottom:.08}},
-      timeScale:{borderColor:line,timeVisible:true,secondsVisible:false,rightOffset:5},
-      crosshair:{mode:LightweightCharts.CrosshairMode?.Normal??0,vertLine:{color:mut},horzLine:{color:mut}},
-      handleScroll:{mouseWheel:true,pressedMouseMove:true},handleScale:{mouseWheel:true,pinch:true}
-    });
-    const series=chart.addCandlestickSeries({upColor:'#22b58c',downColor:'#e45369',borderUpColor:'#22b58c',borderDownColor:'#e45369',wickUpColor:'#22b58c',wickDownColor:'#e45369',priceLineVisible:true});
-    s.chart=chart;s.candleSeries=series;
-    if(s.lastCandle){try{series.setData([s.lastCandle])}catch{}}
-    s.chartResize=()=>{if(!s.chart)return;const w=container.clientWidth,h=container.clientHeight;if(w&&h)s.chart.applyOptions({width:w,height:h});};
-    window.addEventListener('resize',s.chartResize);
-    try{chart.timeScale().fitContent()}catch{}
-  }
-
-  function updateCandle(s, payload){
-    const k=payload.k||payload;
-    const ts=num(k.t??k.time??payload.t);
-    const open=num(k.o??k.open),high=num(k.h??k.high),low=num(k.l??k.low),close=num(k.c??k.close),volume=num(k.v??k.volume);
-    if(ts===null||open===null||high===null||low===null||close===null)return;
-    const time=Math.floor(ts>1e12?ts/1000:ts);
-    const candle={time,open,high,low,close};
-    s.lastCandle=candle;
-    if(!s.chart)createChart(s);
-    if(s.candleSeries){try{s.candleSeries.update(candle)}catch(e){
-      // On a newly selected interval, discard the previous series timestamp before accepting a new stream.
-      try{s.candleSeries.setData([candle])}catch{}
-    }}
-    s.candlesSeen++;
-    const empty=$(`so-${s.cfg.key}-chart-empty`);if(empty)empty.hidden=true;
-    const meta=$(`so-${s.cfg.key}-chart-meta`);if(meta)meta.textContent=`Binance Equity Kline · ${s.interval} · ${new Date(time*1000).toLocaleString('vi-VN')}`;
-    const ohlc=$(`so-${s.cfg.key}-chart-ohlc`);if(ohlc)ohlc.textContent=`O ${fmt(open,2)} · H ${fmt(high,2)} · L ${fmt(low,2)} · C ${fmt(close,2)}${volume!==null?' · V '+compact(volume):''}`;
-  }
   function handlePrice(s, data){
     const rows=Array.isArray(data?.rates)?data.rates:Array.isArray(data)?data:[data];
     const hit=rows.find(x=>x && ((x.ac??x.assetCode)===s.cfg.assetCode||(x.s??x.symbol)===s.cfg.symbol));
     if(!hit)return;
     s.price=num(hit.p??hit.price??hit.c??hit.close);
     s.previousClose=num(hit.pc??hit.prevClose??hit.lrc??hit.lastRegularClose??hit.prc??hit.prevRegularClose);
-    s.phase=hit.mp||hit.marketPhase||s.phase;
     s.priceTime=num(hit.t??hit.time??hit.E??hit.eventTime)||Date.now();
-    const price=$(`so-${s.cfg.key}-price`),change=$(`so-${s.cfg.key}-change`),prev=$(`so-${s.cfg.key}-prev`),phase=$(`so-${s.cfg.key}-phase`),updated=$(`so-${s.cfg.key}-updated`);
-    if(price)price.textContent=fmt(s.price,2);
-    const diff=s.price!==null&&s.previousClose!==null?s.price-s.previousClose:null,p=diff!==null&&s.previousClose?diff/s.previousClose:null;
-    if(change){change.textContent=diff===null?'Chưa có giá đối chiếu':`${diff>=0?'+':''}${fmt(diff,2)} (${p===null?'—':(p*100).toFixed(2)+'%'})`;change.className='so-quote-change '+(diff===null?'':diff>=0?'pos-t':'neg-t');}
-    if(prev)prev.textContent=fmt(s.previousClose,2);if(phase)phase.textContent=esc(s.phase||'—');if(updated)updated.textContent=new Date(s.priceTime).toLocaleTimeString('vi-VN');
     renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderChain(s);
     try{if(typeof window.crossAssetMapDataUpdated==='function')window.crossAssetMapDataUpdated(s.cfg.key)}catch(e){}
   }
@@ -643,17 +610,16 @@
     s.socket=ws;
     ws.onopen=()=>{
       s.reconnectDelay=1000;
-      const params=[`${s.cfg.assetCode}@symbol_price`,`${s.cfg.symbol}@kline_${s.interval}`,`${s.cfg.symbol}@tradingStatus`,`${s.cfg.symbol}@tradability`];
+      const params=[`${s.cfg.assetCode}@symbol_price`];
       s.streamNames=params;
       if(s.expiry){const root=s.expirations.find(x=>x.date===s.expiry)?.root||s.cfg.root;const d=s.expiry.replace(/-/g,'');params.push(`${s.cfg.symbol}_${d}_${root}@optionChainQuoteDelayed`);s.streamNames=params;}
       ws.send(JSON.stringify({method:'SUBSCRIBE',params,id:s.requestId++}));
-      setStatus(s,`Connected · ${s.cfg.symbol} · ${s.interval}`,'ok');
+      setStatus(s,`Connected · ${s.cfg.symbol}`,'ok');
     };
     ws.onmessage=ev=>{
       let msg;try{msg=JSON.parse(ev.data)}catch{return;}
       const stream=String(msg.stream||''),data=msg.data??msg;
       if(stream.endsWith('@symbol_price')||stream==='price'||data.rates||data.ac)handlePrice(s,data);
-      else if(stream.includes('@kline_')||data.k||data.e==='kline')updateCandle(s,data);
       else if(stream.includes('@optionChainQuote')){
         const items=[data.q,data.t,data.g,data.v].find(Array.isArray)||data.data||data.quotes||data.list||data;
         mergeLiveQuote(s,items);
@@ -697,7 +663,6 @@
     if(s.active)return;
     s.active=true;
     clearError(s);
-    requestAnimationFrame(()=>{ if(s.active){ createChart(s); s.chartResize?.(); } });
     setStatus(s,'Đang kết nối Binance…','loading');
     try{
       const exps=await loadExpirations(s);
@@ -713,19 +678,6 @@
   function deactivate(s){
     s.active=false;closeSocket(s);
     if(s.pollTimer){clearInterval(s.pollTimer);s.pollTimer=null;}
-    if(s.chartResize){window.removeEventListener('resize',s.chartResize);s.chartResize=null;}
-    if(s.chart){try{s.chart.remove()}catch{}s.chart=null;s.candleSeries=null;}
-  }
-  function changeInterval(s,next){
-    if(!intervals.includes(next)||s.interval===next)return;
-    const old=`${s.cfg.symbol}@kline_${s.interval}`;s.interval=next;
-    const view=$(`v-${s.cfg.key}Options`);view?.querySelectorAll('[data-so-interval]').forEach(b=>b.classList.toggle('on',b.dataset.soInterval===next));
-    if(s.socket?.readyState===WebSocket.OPEN){s.socket.send(JSON.stringify({method:'UNSUBSCRIBE',params:[old],id:s.requestId++}));s.socket.send(JSON.stringify({method:'SUBSCRIBE',params:[`${s.cfg.symbol}@kline_${next}`],id:s.requestId++}));}
-    if(s.candleSeries){try{s.candleSeries.setData([])}catch{}}
-    s.lastCandle=null;s.candlesSeen=0;
-    const empty=$(`so-${s.cfg.key}-chart-empty`);if(empty)empty.hidden=false;
-    const meta=$(`so-${s.cfg.key}-chart-meta`);if(meta)meta.textContent=`Đang chờ ${next} candle từ Binance…`;
-    const feed=$(`so-${s.cfg.key}-chart-feed`);if(feed)feed.textContent=`Kline stream · ${s.cfg.symbol} · ${next}`;
   }
   function bindView(s){
     const p='so-'+s.cfg.key,view=$('v-'+s.cfg.key+'Options');if(!view||view.dataset.stockOptionsBound)return;
@@ -733,7 +685,6 @@
     $(`${p}-refresh`).onclick=()=>{clearError(s);refreshQuotes(s);};
     $(`${p}-expiry`).onchange=e=>{s.expiry=e.target.value;loadChain(s).catch(err=>{showError(s,err.message);setStatus(s,'Không tải được expiry','bad')});};
     const strikeSelect=$(`${p}-strike-count`);if(strikeSelect){strikeSelect.value=String(s.displayStrikes);strikeSelect.onchange=e=>{s.displayStrikes=e.target.value==='all'?'all':Math.max(5,+e.target.value||15);saveDisplayStrikes(s.cfg.key,s.displayStrikes);renderChain(s);};}
-    view.querySelectorAll('[data-so-interval]').forEach(b=>b.onclick=()=>changeInterval(s,b.dataset.soInterval));
     $(`${p}-method-toggle`).onclick=()=>{const box=$(`${p}-method`);box.hidden=!box.hidden;};
     $(`${p}-exposure-metric`).onchange=()=>renderExposure(s);
     $(`${p}-copy`).onclick=()=>{
@@ -781,5 +732,5 @@
   window.stockOptionsCrossAssetStop=crossAssetStop;
   window.stockOptionsCrossAssetSnapshot=crossAssetSnapshot;
   window.stockOptionsCrossAssetSetExpiry=crossAssetSetExpiry;
-  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>[s.cfg.symbol,{expiry:s.expiry,quotes:s.quotes.size,contracts:s.contracts.length,complete:s.chainComplete,hydrating:s.hydrating,displayStrikes:s.displayStrikes,oi:[...s.quotes.values()].filter(q=>q.openInterest!==null).length,price:s.price,interval:s.interval}]));
+  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>[s.cfg.symbol,{expiry:s.expiry,quotes:s.quotes.size,contracts:s.contracts.length,complete:s.chainComplete,hydrating:s.hydrating,displayStrikes:s.displayStrikes,oi:[...s.quotes.values()].filter(q=>q.openInterest!==null).length,price:s.price}]));
 })();

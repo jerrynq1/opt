@@ -19,3 +19,13 @@ LƯU Ý
 - Đây là workspace cá nhân chạy phía trình duyệt; không chia sẻ Client Secret hoặc Access Token.
 - NAS100/SP500 có thể cần map lại tên symbol theo broker.
 - ETF Options là dữ liệu QQQ/GLD, không phải order book trực tiếp của NAS100/XAUUSD.
+
+
+CÀI TRÊN IPHONE (PWA)
+1. Deploy website lên GitHub Pages hoặc hosting có HTTPS. Service Worker không hoạt động qua HTTP thông thường (ngoại trừ localhost).
+2. Mở URL website bằng Safari trên iPhone.
+3. Nhấn Chia sẻ → Thêm vào Màn hình chính → Thêm.
+4. Mở QuantLab từ icon trên màn hình chính để chạy chế độ standalone và dùng thanh tab dưới: QQQ, GLD, Chart, Indicators, Connection.
+5. Khi cập nhật source, mở mục Connection → Xoá cache & tải lại nếu thiết bị còn giữ phiên bản cũ.
+
+PWA lưu app shell và tài nguyên tĩnh để hỗ trợ tải lại giao diện khi mất mạng sau lần mở online đầu tiên. Giá thị trường, Binance Worker và cTrader vẫn cần kết nối mạng; dữ liệu giao dịch không được cache offline.

@@ -41,7 +41,20 @@ function themeChart(){
   if(agg.length)rebuild(false);
 }
 const vcol=(o,c)=>(c>=o?eff().up:eff().dn)+"55";
-function status(t,c){const e=$("st");e.textContent=t;e.className="pill "+(c||"")}
+function status(t,c){
+  const e=$("st");if(e){e.textContent=t;e.title=t;e.className="pill "+(c||"")}
+  const empty=$("chartEmptyState");
+  if(empty){
+    const hasBars=Array.isArray(agg)&&agg.length>0;
+    empty.hidden=hasBars;
+    if(!hasBars){
+      const ready=typeof ctReady==="function"&&ctReady();
+      const title=$("chartEmptyTitle"),detail=$("chartEmptyText");
+      if(title)title.textContent=ready?"Đang chờ dữ liệu nến từ cTrader":"Kết nối cTrader để tải dữ liệu chart";
+      if(detail)detail.textContent=ready?"Feed đã kết nối nhưng chưa có nến cho mã hoặc khung giờ đang chọn. Hãy kiểm tra symbol broker và trạng thái thị trường.":"Nhập Client ID, Client Secret và Access Token trong mục Kết nối cTrader. Khi feed có nến, biểu đồ sẽ tự xuất hiện.";
+    }
+  }
+}
 /* Tải M1 THEO NHU CẦU: mở chart chỉ tải ~1 ngày gần nhất, kéo chart sang trái tới đâu thì tải thêm nến cũ tới đó (fillLeft).
    Mốc thời gian ở đây là UTC (giây). m1Old = mốc cũ nhất đã hỏi server; m1Span = độ dài lần tải kế (1 -> 2 -> 4 -> 8 ngày). */
 /* ===== Chống đứng chart =====

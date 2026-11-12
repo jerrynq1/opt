@@ -18,7 +18,17 @@
 <link href="css/simple-workspace.css" rel="stylesheet"/>
 <link href="css/simple-options-polish.css" rel="stylesheet"/>
 <link href="css/ict-quantlab-theme.css" rel="stylesheet"/>
-<meta content="ICT QuantLab trading workspace for NAS100, SP500, XAUUSD and XAGUSD charts, QQQ/GLD ETF options, indicators and cTrader." name="description"/></head>
+<meta content="ICT QuantLab trading workspace for NAS100, SP500, XAUUSD and XAGUSD charts, QQQ/GLD ETF options, indicators and cTrader." name="description"/>
+<meta name="theme-color" content="#080d16"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="QuantLab"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="format-detection" content="telephone=no"/>
+<link rel="manifest" href="manifest.webmanifest"/>
+<link rel="apple-touch-icon" sizes="180x180" href="img/apple-touch-icon.png"/>
+<link rel="icon" type="image/png" sizes="192x192" href="img/pwa-192.png"/>
+<link href="css/pwa.css" rel="stylesheet"/></head>
 <body class="nt simple-ui"><div class="scrim" id="scrim"></div><aside aria-label="Main navigation" id="side">
 <div class="sh">
 <button aria-label="Thu gọn thanh bên" class="ib" id="tg" type="button"><svg fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewbox="0 0 24 24"><rect height="16" rx="3.5" width="18" x="3" y="4"></rect><path d="M9.5 4v16"></path></svg></button>
@@ -73,7 +83,7 @@
 <div class="xmap-legend"><span><i class="xmap-dot call"></i> Call volume</span><span><i class="xmap-dot put"></i> Put volume</span><span><i class="xmap-line call"></i> Call OI Wall</span><span><i class="xmap-line put"></i> Put OI Wall</span><span><i class="xmap-line flip"></i> Gamma Flip</span><span><i class="xmap-line pain"></i> Max Pain / GEX levels</span></div>
 <p class="xmap-disclaimer">Bubble là volume hợp đồng quyền chọn theo strike, không phải volume futures/CFD theo thời gian. Heatmap và levels là proxy từ ETF options, không phải order book/dealer positioning thực của NAS100/XAUUSD. Vol Trigger chỉ vẽ khi source cung cấp level riêng.</p>
 </section>
-<div class="card" id="chartCard"><div id="ohlc"></div><div id="legend"></div><div id="cw"><div id="chart"></div><div id="panes"></div></div>
+<div class="card" id="chartCard"><div id="ohlc"></div><div id="legend"></div><div id="cw"><div id="chart"></div><div id="panes"></div></div><div class="chart-empty-state" id="chartEmptyState" role="status" aria-live="polite"><div class="chart-empty-mark" aria-hidden="true">⌁</div><div class="chart-empty-copy"><strong id="chartEmptyTitle">Kết nối cTrader để tải dữ liệu chart</strong><p id="chartEmptyText">Nhập Client ID, Client Secret và Access Token trong mục Kết nối cTrader. Sau khi feed có nến, biểu đồ sẽ tự xuất hiện.</p><button class="btn sm" type="button" data-go="conn">Mở kết nối cTrader</button></div></div>
 <div id="clk"><button aria-expanded="false" aria-haspopup="dialog" id="clkB" title="Đổi múi giờ hiển thị" type="button"><span id="clkT">--:--:--</span><small id="clkZ"></small><span aria-hidden="true">▾</span></button></div>
 <div aria-label="Múi giờ" id="tzp" role="dialog"></div>
 </div>
@@ -82,6 +92,10 @@
 <div class="card"><h2>Đang dùng trên chart</h2><div id="actList"></div></div>
 <div class="card" style="margin-top:14px"><div class="bar" style="margin-bottom:12px"><h2 style="margin:0">Kho indicator</h2><div class="tfs" id="indF"></div></div><div class="grid" id="indGrid"></div></div>
 </section><section class="view" id="v-conn"><div class="workspace-page-head"><div><span class="eyebrow">DATA SOURCE / CONNECTION</span><h1>Kết nối <em>cTrader</em></h1><p>Kết nối tài khoản Demo hoặc Live để lấy giá và dữ liệu nến cho bốn thị trường.</p></div><span class="page-tag">OPEN API</span></div>
+<div class="card pwa-install-card" id="pwaInstallCard" style="max-width:760px;margin:0 0 14px">
+<div class="pwa-install-head"><span class="pwa-install-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 17v3h14v-3"/></svg></span><div><span class="eyebrow">IOS / PROGRESSIVE WEB APP</span><h2>Cài QuantLab lên iPhone</h2><p class="msg">Mở workspace như một ứng dụng riêng, toàn màn hình với thanh điều hướng ở cạnh dưới.</p></div></div>
+<div class="pwa-install-actions"><button class="btn" id="pwaInstallButton" type="button">Hướng dẫn cài iPhone</button><span class="pwa-install-note" id="pwaInstallStatus">Cần mở website bằng HTTPS và Safari để thêm vào Màn hình chính.</span></div>
+</div>
 <div class="card" id="ctCard" style="max-width:560px">
 <h2>Kết nối cTrader Open API</h2>
 <p class="msg" style="margin:0 0 6px">Nhập thông tin ứng dụng cTrader Open API của bạn (Client ID, Client Secret lấy ở trang Applications của Spotware; Access Token lấy bằng OAuth cho tài khoản cần dùng). Trình duyệt nối thẳng tới <code>live/demo.ctraderapi.com:5036</code>, không qua worker.</p>
@@ -123,5 +137,15 @@
 <div class="tpo-profile-foot" id="tpoProfileFoot">Nguồn dữ liệu sẽ hiển thị tại đây.</div>
 </div>
 <div class="card tpo-settings-card" id="tpoSettings"></div>
-</section><section class="view" id="v-cs"><div id="csBody"></div></section></div></div></div><script src="js/core.js"></script><script src="js/symbols.js"></script><script src="js/timezone.js"></script><script src="js/ctrader.js"></script><script src="js/chart.js"></script><script src="js/candle-style.js"></script><script src="js/indicators-defs.js"></script><script src="js/indicators-custom.js"></script><script src="js/pine-indicators-defs.js"></script><script src="js/indicators-engine.js"></script><script src="js/connection-ui.js"></script><script src="js/stock-options-config.js"></script><script src="js/stock-options.js"></script><script src="js/cross-asset-map.js"></script><script src="js/init.js"></script><script src="js/drawings-core.js"></script><script src="js/market-model-indicators.js"></script><script src="js/volume-profile.js"></script><script src="js/hvn-profile.js"></script><script src="js/killzones.js"></script><script src="js/ict-2022.js"></script><script src="js/crt.js"></script><script src="js/tpo.js"></script><script src="js/goldbach.js"></script><script src="js/qt.js"></script><script src="js/orderflow-footprint.js"></script><script src="js/orderflow-bigtrade.js"></script><script src="js/orderflow-statistic.js"></script><script src="js/orderflow-absorption.js"></script><script src="js/orderflow-dom.js"></script><script src="js/drawings-interact.js"></script><script src="js/mobile.js"></script><script src="js/paper-trading.js"></script><script src="js/tpo-advanced.js"></script></body>
+</section><section class="view" id="v-cs"><div id="csBody"></div></section></div></div></div>
+<nav aria-label="Điều hướng chính" class="mobile-bottom-nav" id="mobileBottomNav"></nav>
+<dialog aria-labelledby="pwaDialogTitle" class="pwa-dialog" id="pwaHelpDialog">
+<div class="pwa-dialog-head"><span class="pwa-dialog-mark">Q<span>·</span></span><button aria-label="Đóng" class="pwa-dialog-close" data-pwa-close type="button">×</button></div>
+<h2 id="pwaDialogTitle">Thêm QuantLab vào Màn hình chính</h2>
+<p class="pwa-dialog-intro">Trong Safari trên iPhone:</p>
+<ol class="pwa-steps"><li><span>1</span><div><b>Nhấn nút Chia sẻ</b><small>Biểu tượng hình vuông có mũi tên hướng lên ở thanh công cụ Safari.</small></div></li><li><span>2</span><div><b>Chọn “Thêm vào MH chính”</b><small>Nếu chưa thấy, kéo danh sách thao tác xuống dưới.</small></div></li><li><span>3</span><div><b>Nhấn “Thêm”</b><small>QuantLab sẽ xuất hiện như một ứng dụng trên màn hình iPhone.</small></div></li></ol>
+<p class="pwa-dialog-foot">Mở QuantLab từ icon vừa thêm để dùng chế độ toàn màn hình và thanh tab phía dưới.</p>
+<button class="btn pwa-dialog-done" data-pwa-close type="button">Đã hiểu</button>
+</dialog>
+<script src="js/core.js"></script><script src="js/symbols.js"></script><script src="js/timezone.js"></script><script src="js/ctrader.js"></script><script src="js/chart.js"></script><script src="js/candle-style.js"></script><script src="js/indicators-defs.js"></script><script src="js/indicators-custom.js"></script><script src="js/pine-indicators-defs.js"></script><script src="js/indicators-engine.js"></script><script src="js/connection-ui.js"></script><script src="js/stock-options-config.js"></script><script src="js/stock-options.js"></script><script src="js/cross-asset-map.js"></script><script src="js/init.js"></script><script src="js/drawings-core.js"></script><script src="js/market-model-indicators.js"></script><script src="js/volume-profile.js"></script><script src="js/hvn-profile.js"></script><script src="js/killzones.js"></script><script src="js/ict-2022.js"></script><script src="js/crt.js"></script><script src="js/tpo.js"></script><script src="js/goldbach.js"></script><script src="js/qt.js"></script><script src="js/orderflow-footprint.js"></script><script src="js/orderflow-bigtrade.js"></script><script src="js/orderflow-statistic.js"></script><script src="js/orderflow-absorption.js"></script><script src="js/orderflow-dom.js"></script><script src="js/drawings-interact.js"></script><script src="js/mobile.js"></script><script src="js/tpo-advanced.js"></script><script src="js/pwa.js"></script></body>
 </html>

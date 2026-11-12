@@ -43,18 +43,26 @@ IC.ind='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=
 IC.qqqOptions='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18V6M4 18h16"/><path d="m7 15 3-4 3 2 5-7"/><circle cx="18" cy="6" r="1.5"/></svg>';
 IC.gldOptions='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17M3.5 12h17"/><path d="m8 8 8 8m0-8-8 8"/></svg>';
 const V=[["chart","Chart"],["qqqOptions","QQQ Options"],["gldOptions","GLD Options"],["ind","Kho Indicator"],["conn","Kết nối cTrader"]];
+// Mobile navigation follows the iOS watchlist pattern: QQQ, GLD, primary Chart, Indicators, Connection.
+const MOBILE_V=[["qqqOptions","QQQ","QQQ Options"],["gldOptions","GLD","GLD Options"],["chart","Chart","Chart"],["ind","Indicators","Kho Indicator"],["conn","Connection","Kết nối cTrader"]];
 let cur="chart";
+function renderMobileNav(v){
+  const nav=$("mobileBottomNav");if(!nav)return;
+  nav.innerHTML=MOBILE_V.map(([k,label,title])=>`<button class="mobile-tab${k===v?" on":""}${k==="chart"?" is-center":""}" data-v="${k}" type="button" title="${title}" aria-label="${title}"${k===v?' aria-current="page"':''}><span class="mobile-tab-icon">${IC[k]}</span><span class="mobile-tab-label">${label}</span></button>`).join("");
+}
 function show(v){
   cur=v;document.body.dataset.v=v;const titles={chart:"Chart",qqqOptions:"QQQ Options",gldOptions:"GLD Options",ind:"Kho Indicator",conn:"Kết nối cTrader"};if($("workspaceTitle"))$("workspaceTitle").textContent=titles[v]||v;
   if(typeof stockOptionsSetActive==="function")stockOptionsSetActive(v==="qqqOptions"||v==="gldOptions"?v:null);
   V.forEach(([k])=>$("v-"+k).classList.toggle("on",k===v));
-  $("nav").innerHTML=V.map(([k,n])=>`${k==="chart"?'<div class="nav-sep" role="separator"><span>MARKET</span></div>':''}<button class="sb${k===v?" on":""}" data-v="${k}" title="${n}"><span class="ic">${IC[k]}</span><span class="lb">${n}</span></button>`).join("");
+  $("nav").innerHTML=V.map(([k,n])=>`${k==="chart"?'<div class="nav-sep" role="separator"><span>MARKET</span></div>':''}<button class="sb${k===v?" on":""}" data-v="${k}" title="${n}" type="button"${k===v?' aria-current="page"':''}><span class="ic">${IC[k]}</span><span class="lb">${n}</span></button>`).join("");
+  renderMobileNav(v);
   if(v==="ind"){buildInd()}
   if(v==="conn")fillConn();
   document.body.classList.remove("so");
   try{history.replaceState(null,"","#"+v)}catch(e){}
 }
 $("nav").onclick=e=>{const b=e.target.closest("[data-v]");if(b)show(b.dataset.v)};
+$("mobileBottomNav")?.addEventListener("click",e=>{const b=e.target.closest("[data-v]");if(b)show(b.dataset.v)});
 const mob=()=>matchMedia("(max-width:760px)").matches;
 function setSide(){document.body.classList.toggle("sc",!mob()&&P.sc)}
 const tgl=()=>{if(mob())document.body.classList.toggle("so");else{P.sc=!P.sc;sv("tp_sc",P.sc?"1":"0");setSide()}};

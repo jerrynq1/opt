@@ -1,0 +1,81 @@
+/* ICT QuantLab PWA shell + iOS-style bottom navigation */
+.mobile-bottom-nav{display:none}
+.pwa-install-card{position:relative;overflow:hidden;background:linear-gradient(135deg,rgba(19,43,61,.96),rgba(12,21,34,.98))!important;border-color:#25445a!important}
+.pwa-install-card:after{content:"";position:absolute;right:-60px;top:-95px;width:240px;height:240px;border-radius:50%;background:radial-gradient(circle,rgba(101,214,232,.13),transparent 68%);pointer-events:none}
+.pwa-install-head{display:flex;align-items:center;gap:14px;position:relative;z-index:1}
+.pwa-install-icon{display:grid;place-items:center;flex:none;width:48px;height:48px;border:1px solid rgba(101,214,232,.32);border-radius:14px;background:rgba(101,214,232,.1);color:#8be5ed}
+.pwa-install-icon svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.pwa-install-head .eyebrow{font:10px var(--mono);letter-spacing:1.2px;color:#70b8c8}
+.pwa-install-head h2{margin:3px 0 2px;color:#e7f2fa;font:600 17px var(--display)}
+.pwa-install-head p{margin:0;color:#8ea3b8;font:11px/1.5 var(--font)}
+.pwa-install-actions{display:flex;align-items:center;gap:13px;flex-wrap:wrap;margin:15px 0 0 62px;position:relative;z-index:1}
+.pwa-install-actions .btn{min-height:36px}
+.pwa-install-note{color:#718ba2;font:10px/1.5 var(--font)}
+.pwa-dialog{width:min(420px,calc(100vw - 28px));max-width:none;padding:22px;border:1px solid #294257;border-radius:18px;background:#0d1724;color:#e5edf7;box-shadow:0 24px 80px #000a}
+.pwa-dialog::backdrop{background:rgba(1,6,12,.72);backdrop-filter:blur(5px)}
+.pwa-dialog-head{display:flex;align-items:center;justify-content:space-between}
+.pwa-dialog-mark{display:grid;place-items:center;width:35px;height:35px;border:1px solid #31536b;border-radius:10px;background:#142a3a;color:#dffaff;font:700 20px var(--display)}
+.pwa-dialog-mark span{color:var(--cyan)}
+.pwa-dialog-close{width:32px;height:32px;border:1px solid #263950;border-radius:9px;background:#111e2e;color:#9eb0c2;font-size:21px;cursor:pointer}
+.pwa-dialog h2{margin:17px 0 5px;color:#eaf3fa;font:600 19px/1.25 var(--display)}
+.pwa-dialog-intro{margin:0 0 14px;color:#91a5b9;font-size:12px}
+.pwa-steps{display:grid;gap:12px;margin:0;padding:0;list-style:none}
+.pwa-steps li{display:flex;align-items:flex-start;gap:11px}
+.pwa-steps li>span{display:grid;place-items:center;flex:none;width:25px;height:25px;border-radius:8px;background:#163347;color:#8fe7ef;font:600 11px var(--mono)}
+.pwa-steps li div{display:grid;gap:3px;min-width:0}
+.pwa-steps b{font:600 12px var(--font);color:#dce8f2}
+.pwa-steps small{font:10px/1.5 var(--font);color:#8196aa}
+.pwa-dialog-foot{margin:15px 0;color:#8298ad;font:10px/1.55 var(--font)}
+.pwa-dialog-done{width:100%;min-height:38px}
+
+@media(max-width:760px), (hover:none) and (pointer:coarse) and (max-width:1024px){
+  /* Native-app feel: no slide-out sidebar or duplicate hamburger navigation. */
+  body.simple-ui{min-height:100dvh;padding-bottom:0;overscroll-behavior-y:none}
+  body.simple-ui #side{display:none!important}
+  body.simple-ui .main{margin-left:0!important;min-width:0;width:100%}
+  body.simple-ui .mobile-menu,#tg2{display:none!important}
+  body.simple-ui .scrim{display:none!important}
+  body.simple-ui .topbar{display:flex;height:calc(55px + env(safe-area-inset-top,0px));min-height:55px;padding:env(safe-area-inset-top,0px) 15px 0;top:0;z-index:40;background:rgba(8,13,22,.94);border-bottom:1px solid rgba(44,66,87,.68);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+  body.simple-ui .topbar-left{gap:0}
+  body.simple-ui .topbar-page small{font-size:8px;letter-spacing:1.25px;color:#71879d}
+  body.simple-ui .topbar-page strong{font-size:14px}
+  body.simple-ui .topbar-right{display:none}
+  body.simple-ui .wrap{padding:13px 11px calc(112px + env(safe-area-inset-bottom,0px))}
+  .mobile-bottom-nav{position:fixed;z-index:100;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));align-items:end;gap:2px;min-height:calc(68px + env(safe-area-inset-bottom,0px));padding:7px 7px calc(7px + env(safe-area-inset-bottom,0px));border-top:1px solid rgba(41,59,78,.85);background:rgba(6,11,18,.96);backdrop-filter:blur(24px) saturate(1.2);-webkit-backdrop-filter:blur(24px) saturate(1.2);box-shadow:0 -9px 28px rgba(0,0,0,.2)}
+  .mobile-tab{position:relative;display:flex;min-width:0;min-height:52px;align-items:center;justify-content:flex-end;flex-direction:column;gap:4px;padding:0 1px 1px;border:0;border-radius:12px;background:transparent;color:#718198;cursor:pointer;-webkit-tap-highlight-color:transparent;touch-action:manipulation;transition:color .16s,transform .16s}
+  .mobile-tab-icon{width:27px;height:25px;display:grid;place-items:center;color:currentColor;transition:transform .16s,background .16s,box-shadow .16s}
+  .mobile-tab-icon svg{width:24px;height:24px;display:block;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .mobile-tab-label{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:inherit;font:500 9px/1.2 var(--font);letter-spacing:.05px}
+  .mobile-tab.on{color:#e7f5fb}
+  .mobile-tab.on .mobile-tab-icon{color:var(--cyan)}
+  .mobile-tab.on .mobile-tab-label{color:#d9f2f6;font-weight:700}
+  .mobile-tab.is-center{gap:3px;transform:translateY(-5px);color:#8ea5b8}
+  .mobile-tab.is-center .mobile-tab-icon{width:48px;height:43px;margin-top:-11px;border:1px solid rgba(101,214,232,.45);border-radius:15px;background:linear-gradient(145deg,#1b5264,#123246 76%);color:#bff8fc;box-shadow:0 6px 20px rgba(40,170,190,.2),inset 0 1px 0 rgba(255,255,255,.12)}
+  .mobile-tab.is-center .mobile-tab-icon svg{width:26px;height:26px;stroke-width:1.9}
+  .mobile-tab.is-center .mobile-tab-label{color:#9bb6c6;font-weight:600}
+  .mobile-tab.is-center.on .mobile-tab-icon{border-color:#78e4ed;background:linear-gradient(145deg,#287d8c,#17475c);color:#fff;box-shadow:0 0 0 3px rgba(101,214,232,.09),0 7px 24px rgba(40,190,210,.28)}
+  .mobile-tab:active{transform:scale(.96)}
+  .mobile-tab.is-center:active{transform:translateY(-5px) scale(.96)}
+  #chartCard{height:calc(100dvh - 310px);min-height:340px}
+  .pwa-install-card{padding:15px!important}
+  .pwa-install-head{align-items:flex-start;gap:10px}
+  .pwa-install-icon{width:42px;height:42px;border-radius:12px}
+  .pwa-install-head h2{font-size:15px}
+  .pwa-install-actions{margin:13px 0 0;align-items:flex-start;flex-direction:column;gap:7px}
+  .pwa-install-actions .btn{width:100%}
+}
+@media(max-width:480px){
+  body.simple-ui .topbar{padding-left:13px;padding-right:13px}
+  body.simple-ui .wrap{padding-left:9px;padding-right:9px;padding-bottom:calc(108px + env(safe-area-inset-bottom,0px))}
+  #chartCard{height:calc(100dvh - 320px);min-height:320px}
+  .mobile-bottom-nav{gap:0;padding-left:4px;padding-right:4px}
+  .mobile-tab-label{font-size:8.5px}
+  .mobile-tab.is-center .mobile-tab-icon{width:46px;height:41px}
+}
+@media(display-mode:standalone){
+  body.simple-ui .topbar{background:rgba(8,13,22,.98)}
+  .mobile-bottom-nav{background:rgba(6,11,18,.98)}
+}
+@media(prefers-reduced-motion:reduce){
+  .mobile-tab,.mobile-tab-icon{transition:none!important}
+}

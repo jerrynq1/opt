@@ -13,11 +13,16 @@ function loadStockOptionsHelpers() {
   );
   source = source.replace(
     '  buildViews();\n  window.stockOptionsSetActive=setActive;',
-    '  window.__stockOptionsTest={normaliseQuote,mergeLiveQuote,calc,strikeSymbols};\n  return;\n  buildViews();\n  window.stockOptionsSetActive=setActive;'
+    '  window.__stockOptionsTest={normaliseQuote,mergeLiveQuote,calc,strikeSymbols,renderExposure};\n  return;\n  buildViews();\n  window.stockOptionsSetActive=setActive;'
   );
+  const elements = new Map();
+  const document = { getElementById(id) {
+    if (!elements.has(id)) elements.set(id, { id, value: 'gamma', innerHTML: '', textContent: '' });
+    return elements.get(id);
+  }};
   const window = {};
-  vm.runInNewContext(source, { window, location: { port: '8787' } }, { filename: 'stock-options.js' });
-  return window.__stockOptionsTest;
+  vm.runInNewContext(source, { window, document, location: { port: '8787' }, console }, { filename: 'stock-options.js' });
+  return { ...window.__stockOptionsTest, elements };
 }
 
 const helpers = loadStockOptionsHelpers();
@@ -214,4 +219,32 @@ test('Option Chain strike selector requests only the nearest N strikes first', (
 test('Option Chain All selection keeps every listed contract', () => {
   const list = [{os:'QQQ261110C00080000'},{os:'QQQ261110P00080000'},{os:'QQQ261110C00090000'}];
   assert.deepEqual(helpers.strikeSymbols(list, {price:85, displayStrikes:'all'}), list.map(x=>x.os));
+});
+
+
+test('bilateral exposure renderer outputs visible nonzero Call and Put bar widths',()=>{
+  const render=helpers.renderExposure;
+  const quotes=new Map([
+    ['c1',{optionSymbol:'c1',side:'C',strike:99,multiplier:100,openInterest:30,volume:1,gamma:.12,delta:.6,vega:.3,theta:-.1}],
+    ['p1',{optionSymbol:'p1',side:'P',strike:99,multiplier:100,openInterest:20,volume:1,gamma:.1,delta:-.4,vega:.2,theta:-.08}],
+    ['c2',{optionSymbol:'c2',side:'C',strike:100,multiplier:100,openInterest:50,volume:1,gamma:.2,delta:.55,vega:.4,theta:-.12}],
+    ['p2',{optionSymbol:'p2',side:'P',strike:100,multiplier:100,openInterest:45,volume:1,gamma:.17,delta:-.45,vega:.35,theta:-.1}],
+    ['c3',{optionSymbol:'c3',side:'C',strike:101,multiplier:100,openInterest:20,volume:1,gamma:.08,delta:.5,vega:.25,theta:-.08}]
+  ]);
+  const session={cfg:{key:'qqq'},price:100,contracts:Array.from(quotes.keys(),os=>({os})),quotes,chainComplete:true};
+  render(session);
+  const html=helpers.elements.get('so-qqq-gex').innerHTML;
+  assert.match(html,/exposure-put-track/);
+  assert.match(html,/exposure-call-track/);
+  const widths=[...html.matchAll(/style="width:([0-9.]+)%"/g)].map(m=>Number(m[1]));
+  assert.ok(widths.length>=6);
+  assert.ok(widths.some(x=>x>0&&x<=100),'Call/Put widths must be visible and normalized');
+  assert.match(html,/SPOT/);
+});
+
+
+test('public chain-symbol requests have a configured Worker fallback for browser CORS failures', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../js/stock-options.js'), 'utf8');
+  assert.match(source, /if\(!response\)\{[\s\S]*?if\(!proxyUrl\)[\s\S]*?fetch\(proxyUrl,options\)/);
+  assert.match(source, /Worker fallback cũng lỗi/);
 });

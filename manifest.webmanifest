@@ -1,0 +1,19 @@
+{
+  "id": "./",
+  "name": "ICT QuantLab — Trading Workspace",
+  "short_name": "QuantLab",
+  "description": "QQQ and GLD Options, candlestick charts, Orderflow and Market Model indicators, and cTrader connection.",
+  "start_url": "./#chart",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#080d16",
+  "theme_color": "#080d16",
+  "categories": ["finance", "productivity", "utilities"],
+  "icons": [
+    {"src": "img/pwa-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "img/pwa-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "img/pwa-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}

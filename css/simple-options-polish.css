@@ -12,17 +12,11 @@
 .stock-options-view .so-kpis .opt-metric>span{display:block;font-size:9px;line-height:1.35;letter-spacing:.11em;color:#8399b1;font-weight:700}
 .stock-options-view .so-kpis .opt-metric>strong{display:block;margin:7px 0 3px;font:700 20px/1.15 'Space Grotesk',sans-serif;color:#e5effa;font-variant-numeric:tabular-nums;white-space:normal;overflow-wrap:anywhere}
 .stock-options-view .so-kpis .opt-metric>small{display:block;font-size:10px;line-height:1.45;color:#7f91a8;white-space:normal;overflow-wrap:anywhere}
-.stock-options-view .so-chart-grid{grid-template-columns:minmax(0,1.7fr) minmax(235px,.8fr);gap:12px}
 .stock-options-view .card{border-color:#203249;background:linear-gradient(150deg,rgba(14,24,38,.98),rgba(10,17,28,.99));box-shadow:0 8px 28px rgba(0,0,0,.13)}
 .stock-options-view .opt-card-title{align-items:flex-start;gap:10px;min-width:0}
 .stock-options-view .opt-card-title>div{min-width:0}
 .stock-options-view .opt-card-title h3{font:650 13px/1.35 'Space Grotesk',sans-serif;color:#e0eaf6;letter-spacing:-.01em}
 .stock-options-view .opt-card-title small{display:block;margin-top:4px;color:#8195ad;font-size:10px;line-height:1.45;white-space:normal;overflow-wrap:anywhere}
-.stock-options-view .so-chart-wrap{height:320px;border-color:#21374e;background:#09121e}
-.stock-options-view .so-quote-price{font:700 29px/1.1 'Space Grotesk',sans-serif;color:#e5f1fb;font-variant-numeric:tabular-nums}
-.stock-options-view .so-quote-list>div{align-items:flex-start;gap:12px;font-size:10px;line-height:1.45}
-.stock-options-view .so-quote-list>div span{flex:1;min-width:0;color:#8296ad}
-.stock-options-view .so-quote-list>div b{flex:0 1 auto;max-width:60%;white-space:normal;overflow-wrap:anywhere;color:#d8e5f3}
 .stock-options-view .so-chain-toolbar{padding:13px 15px;margin-bottom:12px}
 .stock-options-view .opt-toolbar{align-items:flex-end;gap:12px;margin:0}
 .stock-options-view .opt-control{min-width:142px;gap:6px}
@@ -88,9 +82,9 @@
 .stock-options-view .so-method-card .opt-method{color:#8ea2b8}
 .stock-options-view .so-method-card .opt-method p{line-height:1.65}
 @media(min-width:1450px){.stock-options-view .so-kpis{grid-template-columns:repeat(6,minmax(0,1fr))}}
-@media(max-width:1100px){.stock-options-view .so-chart-grid,.stock-options-view .so-exposure-grid{grid-template-columns:1fr}.stock-options-view .so-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media(max-width:760px){.stock-options-view .so-head{align-items:flex-start}.stock-options-view .so-head h2{font-size:22px}.stock-options-view .kl-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stock-options-view .kl-gex-list{grid-template-columns:1fr}.stock-options-view .so-chart-wrap{height:285px}.stock-options-view .opt-card-title{flex-wrap:wrap}}
-@media(max-width:520px){.stock-options-view .so-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.stock-options-view .so-kpis .opt-metric{padding:9px}.stock-options-view .so-kpis .opt-metric>strong{font-size:17px}.stock-options-view .kl-summary-grid{grid-template-columns:1fr 1fr;gap:7px}.stock-options-view .kl-card{padding:9px}.stock-options-view .kl-value{font-size:19px}.stock-options-view .kl-gex-row{grid-template-columns:22px 68px minmax(22px,1fr) 58px 39px;gap:5px}.stock-options-view .so-chain-toolbar{padding:11px}.stock-options-view .opt-control,.stock-options-view .opt-control select{width:100%;min-width:0}.stock-options-view .so-chart-wrap{height:250px}}
+@media(max-width:1100px){.stock-options-view .so-exposure-grid{grid-template-columns:1fr}.stock-options-view .so-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:760px){.stock-options-view .so-head{align-items:flex-start}.stock-options-view .so-head h2{font-size:22px}.stock-options-view .kl-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stock-options-view .kl-gex-list{grid-template-columns:1fr}.stock-options-view .opt-card-title{flex-wrap:wrap}}
+@media(max-width:520px){.stock-options-view .so-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.stock-options-view .so-kpis .opt-metric{padding:9px}.stock-options-view .so-kpis .opt-metric>strong{font-size:17px}.stock-options-view .kl-summary-grid{grid-template-columns:1fr 1fr;gap:7px}.stock-options-view .kl-card{padding:9px}.stock-options-view .kl-value{font-size:19px}.stock-options-view .kl-gex-row{grid-template-columns:22px 68px minmax(22px,1fr) 58px 39px;gap:5px}.stock-options-view .so-chain-toolbar{padding:11px}.stock-options-view .opt-control,.stock-options-view .opt-control select{width:100%;min-width:0}}
 
 /* Explicit block semantics prevent option labels, values and notes from collapsing into one line. */
 .stock-options-view .opt-metric{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:3px;min-width:0}
@@ -102,3 +96,34 @@
 .stock-options-view .so-chain-table td.strike{width:82px;min-width:82px}
 .stock-options-view .so-chain-table thead tr:first-child th[rowspan="2"]{width:82px;min-width:82px}
 .stock-options-view .so-chain-table thead tr:nth-child(2) th{min-width:72px}
+
+
+/* UI audit fixes: prevent mobile option controls and the OI chart legend from colliding. */
+.stock-options-view .opt-card-title small.opt-chart-meta{
+  display:flex;
+  flex:0 1 auto;
+  align-items:center;
+  justify-content:flex-end;
+  flex-wrap:wrap;
+  gap:7px 12px;
+  min-width:0;
+  margin:0;
+  line-height:1.5;
+}
+.stock-options-view .opt-chart-meta .opt-legend-item{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.stock-options-view .opt-chart-meta b{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+@media(max-width:760px){
+  .stock-options-view .opt-card-title:has(.opt-chart-meta){align-items:flex-start;flex-direction:column;gap:7px}
+  .stock-options-view .opt-card-title small.opt-chart-meta{justify-content:flex-start;width:100%;}
+}
+@media(max-width:520px){
+  .stock-options-view .opt-toolbar{
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    align-items:start;
+    gap:10px 8px;
+  }
+  .stock-options-view .opt-toolbar .opt-control{display:flex;width:auto;min-width:0;flex:initial;}
+  .stock-options-view .opt-toolbar .opt-control select{display:block;width:100%;min-width:0;max-width:none;}
+  .stock-options-view .opt-toolbar .opt-source{grid-column:1/-1;width:auto;min-width:0;margin:0;}
+}

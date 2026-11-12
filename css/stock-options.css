@@ -5,24 +5,6 @@
 .so-head h2 span{color:var(--acc);font-size:15px;font-weight:700}
 .so-head .msg{max-width:780px;margin:0}
 .so-kpis{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:14px}
-.so-chart-grid{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(250px,.8fr);gap:14px;margin-bottom:14px}
-.so-chart-card,.so-quote-card{min-width:0}
-.so-chart-card .opt-card-title{align-items:center;flex-wrap:wrap}
-.so-chart-card .opt-card-title>div:first-child{min-width:145px}
-.so-tfs{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
-.so-tfs .tf{font-size:11px;padding:5px 9px}
-.so-chart-wrap{height:340px;position:relative;min-width:0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:rgba(0,0,0,.04)}
-.so-chart{position:absolute;inset:0}
-.so-chart-empty{position:absolute;inset:0;display:grid;place-items:center;padding:25px;text-align:center;color:var(--mut);font-size:11px;line-height:1.6;pointer-events:none;background:rgba(10,10,15,.035)}
-.so-chart-empty[hidden]{display:none}
-.so-chart-foot{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--mut);font-size:10px;margin-top:9px;font-variant-numeric:tabular-nums}
-.so-quote-price{font:800 31px Sora,"Space Grotesk",sans-serif;font-variant-numeric:tabular-nums;margin:9px 0 2px}
-.so-quote-change{font-size:12px;font-weight:700;margin-bottom:16px}
-.so-quote-list{display:flex;flex-direction:column;gap:0;border-top:1px solid var(--line)}
-.so-quote-list>div{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:11px}
-.so-quote-list span{color:var(--mut)}.so-quote-list b{font-variant-numeric:tabular-nums;text-align:right}
-.so-note{font-size:10px;line-height:1.55;color:var(--mut);margin:12px 0 0}
-.so-note code{color:var(--acc)}
 .so-chain-toolbar{margin-bottom:14px}
 .so-chain-toolbar .opt-toolbar{margin-bottom:4px}
 .so-chain-meta{display:flex;flex-wrap:wrap;gap:8px 20px;padding:8px 0 0;color:var(--mut);font-size:10px}
@@ -45,6 +27,6 @@
 .so-chain-table td:nth-child(1),.so-chain-table td:nth-child(13){color:var(--mut)}
 .so-method-card{margin-bottom:12px}
 .so-method-card .opt-method p{margin:0 0 8px}
-@media(max-width:1100px){.so-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.so-chart-grid{grid-template-columns:1fr}.so-exposure-grid{grid-template-columns:1fr}}
-@media(max-width:760px){.so-head h2{font-size:21px}.so-levels{grid-template-columns:repeat(2,minmax(0,1fr))}.so-chart-wrap{height:300px}.so-quote-price{font-size:26px}}
-@media(max-width:480px){.so-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.so-kpis .opt-metric{padding:10px}.so-kpis .opt-metric strong{font-size:16px}.so-levels{grid-template-columns:1fr 1fr}.so-chart-wrap{height:260px}.so-oi-row{grid-template-columns:54px minmax(60px,1fr) 52px;gap:6px}}
+@media(max-width:1100px){.so-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.so-exposure-grid{grid-template-columns:1fr}}
+@media(max-width:760px){.so-head h2{font-size:21px}.so-levels{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:480px){.so-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.so-kpis .opt-metric{padding:10px}.so-kpis .opt-metric strong{font-size:16px}.so-levels{grid-template-columns:1fr 1fr}.so-oi-row{grid-template-columns:54px minmax(60px,1fr) 52px;gap:6px}}

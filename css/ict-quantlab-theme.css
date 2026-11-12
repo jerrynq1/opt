@@ -89,7 +89,6 @@ body.simple-ui .so-head h2,body.simple-ui .workspace-page-head h1{font-family:va
 .stock-options-view .kl-gex-value{font:500 10px var(--mono)}
 .stock-options-view .so-chain-table th{font:500 10px var(--mono);letter-spacing:.5px}
 .stock-options-view .so-chain-table tbody td{font:10px/1.45 var(--mono)}
-.stock-options-view .so-quote-price{font:600 31px/1.1 var(--display)}
 .stock-options-view .so-quote-list>div,.stock-options-view .so-note{font-family:var(--font);line-height:1.55}
 .stock-options-view .opt-status{font:10px var(--mono);border-radius:7px}
 .stock-options-view .opt-status.loading:before{animation:opt-pulse 1s infinite}
@@ -121,21 +120,26 @@ body.simple-ui .so-head h2,body.simple-ui .workspace-page-head h1{font-family:va
 .stock-options-view .exposure-row{position:relative;z-index:1;display:grid;grid-template-columns:54px minmax(0,1fr) 1px minmax(0,1fr);align-items:center;min-width:0;gap:0;height:8px}
 .stock-options-view .exposure-row:nth-child(5n){border-bottom:1px solid rgba(96,121,151,.08)}
 .stock-options-view .exposure-strike{padding-right:8px;text-align:right;color:#60748d;font:7px/1 var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
-.stock-options-view .exposure-put-track,.stock-options-view .exposure-call-track{height:6px;display:flex;align-items:center;min-width:0;background:transparent;overflow:hidden}
+.stock-options-view .exposure-put-track,.stock-options-view .exposure-call-track{display:flex;width:100%;height:6px;align-items:center;min-width:0;box-sizing:border-box;background:transparent;overflow:hidden}
 .stock-options-view .exposure-put-track{justify-content:flex-end;padding-left:2px}
 .stock-options-view .exposure-call-track{justify-content:flex-start;padding-right:2px}
-.stock-options-view .exposure-put-track i,.stock-options-view .exposure-call-track i{display:block;height:5px;min-width:0;border-radius:1px;transform:scaleX(0);animation:exposure-grow .48s cubic-bezier(.2,.75,.25,1) both;animation-delay:calc(var(--row-i,0) * 7ms)}
+.stock-options-view .exposure-put-track i,.stock-options-view .exposure-call-track i{display:block;height:5px;min-width:0;border-radius:1px;opacity:1;transform:none;transition:width .16s ease-out}
 .stock-options-view .exposure-put-track i{transform-origin:right center;background:linear-gradient(270deg,#e8bd73 0%,#9e793e 60%,rgba(116,83,39,.3) 100%);box-shadow:0 0 8px rgba(232,189,115,.08)}
 .stock-options-view .exposure-call-track i{transform-origin:left center;background:linear-gradient(90deg,#55c9df 0%,#2f91b0 62%,rgba(35,87,113,.18) 100%);box-shadow:0 0 8px rgba(101,214,232,.09)}
 .stock-options-view .exposure-zero{align-self:stretch;width:1px;background:repeating-linear-gradient(to bottom,rgba(101,214,232,.55) 0 4px,transparent 4px 8px)}
 .stock-options-view .exposure-row.is-near-spot .exposure-strike{color:#d2e0ed}
 .stock-options-view .exposure-row.is-near-spot{background:rgba(101,214,232,.025)}
-.stock-options-view .exposure-marker{position:absolute;z-index:4;left:54px;right:0;top:var(--marker-y);height:0;border-top:1px dashed var(--marker-color);pointer-events:none;opacity:0;animation:exposure-marker-in .3s ease .12s forwards}
+.stock-options-view .exposure-marker{position:absolute;z-index:4;left:54px;right:0;top:var(--marker-y);height:0;border-top:1px dashed var(--marker-color);pointer-events:none;opacity:1}
 .stock-options-view .exposure-marker span{position:absolute;right:0;top:-10px;padding:2px 5px;background:rgba(9,15,24,.92);font:7px var(--mono);letter-spacing:.5px;color:var(--marker-color);white-space:nowrap}
 .stock-options-view .exposure-marker b{font-weight:500;color:#e3edf7}
 .stock-options-view .exposure-marker.is-spot{--marker-color:#d6e3ed;border-top-style:dotted}
 .stock-options-view .exposure-marker.is-call-wall{--marker-color:#65d6e8}
 .stock-options-view .exposure-marker.is-put-wall{--marker-color:#e8bd73}
+/* Put the wall labels on opposite sides of the axis so overlapping strikes remain legible. */
+.stock-options-view .exposure-marker.is-call-wall span{left:4px;right:auto;top:-11px}
+.stock-options-view .exposure-marker.is-put-wall span{right:4px;top:1px}
+.stock-options-view .exposure-marker.is-spot span{right:4px;top:-11px}
+
 .stock-options-view .exposure-bottom{display:flex;justify-content:space-between;gap:8px;padding:9px 1px 0;color:#596e85;font:8px var(--mono);letter-spacing:.35px}
 .stock-options-view .so-exposure-legend{display:flex;align-items:center;gap:15px;flex-wrap:wrap;padding:9px 14px 11px;border-top:1px solid #1b2a3c;background:#0b1420;color:#8093a8;font:8px var(--mono);letter-spacing:.65px}
 .stock-options-view .so-exposure-legend span{display:inline-flex;align-items:center;gap:6px}
@@ -143,6 +147,8 @@ body.simple-ui .so-head h2,body.simple-ui .workspace-page-head h1{font-family:va
 .stock-options-view .so-exposure-legend i.call{background:#55c9df}
 .stock-options-view .so-exposure-legend i.put{background:#e8bd73}
 .stock-options-view .so-exposure-legend i.spot{height:1px;width:10px;background:#d6e3ed}
+.stock-options-view .so-exposure-legend i.call-wall{height:1px;width:10px;background:#65d6e8}
+.stock-options-view .so-exposure-legend i.put-wall{height:1px;width:10px;background:#e8bd73}
 .stock-options-view .exposure-empty{min-height:220px;display:grid;place-content:center;gap:7px;text-align:center;color:#71859b}
 .stock-options-view .exposure-empty b{font:600 13px var(--display);color:#cbd8e6}
 .stock-options-view .exposure-empty span{font:10px/1.5 var(--font)}
@@ -155,8 +161,6 @@ body.simple-ui .so-head h2,body.simple-ui .workspace-page-head h1{font-family:va
 .stock-options-view .so-greeks-card .opt-greek-line b{font:600 17px var(--display);text-align:left;color:#dce8f5}
 .stock-options-view .so-greeks-card .opt-footnote{grid-column:1/-1;margin:2px 0 0}
 @media(max-width:760px){.stock-options-view .so-greeks-card .opt-greeks{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@keyframes exposure-grow{from{transform:scaleX(0);opacity:.35}to{transform:scaleX(1);opacity:1}}
-@keyframes exposure-marker-in{to{opacity:1}}
 
 /* Motion follows the original ICT QuantLab view transition and compact hover rhythm. */
 body.simple-ui .sb,body.simple-ui .theme-toggle,body.simple-ui .btn,body.simple-ui .opt-status,body.simple-ui .tf{transition-duration:.16s}
@@ -185,3 +189,68 @@ body.simple-ui .sb,body.simple-ui .theme-toggle,body.simple-ui .btn,body.simple-
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
 }
+
+
+/* Chart empty state: keep the workspace informative before the first cTrader bar arrives. */
+#chartCard{position:relative;isolation:isolate}
+.chart-empty-state{
+  position:absolute;z-index:4;inset:58px 18px 54px;
+  display:flex;align-items:center;justify-content:center;gap:15px;
+  padding:24px;text-align:left;pointer-events:none;
+}
+.chart-empty-state[hidden]{display:none!important}
+.chart-empty-mark{
+  display:grid;place-items:center;flex:none;width:48px;height:48px;
+  border:1px solid rgba(101,214,232,.24);border-radius:14px;
+  background:rgba(101,214,232,.07);color:var(--cyan);
+  font:500 30px/1 var(--display);
+}
+.chart-empty-copy{max-width:390px;min-width:0}
+.chart-empty-copy strong{display:block;color:var(--text);font:600 15px/1.4 var(--display)}
+.chart-empty-copy p{margin:5px 0 12px;color:var(--muted);font-size:11px;line-height:1.6}
+.chart-empty-copy .btn{pointer-events:auto}
+@media(max-width:520px){
+  .chart-empty-state{inset:48px 8px 46px;flex-direction:column;text-align:center;gap:10px;padding:12px}
+  .chart-empty-mark{width:42px;height:42px;font-size:26px}
+  .chart-empty-copy strong{font-size:13px}
+  .chart-empty-copy p{font-size:10px}
+}
+
+
+/* Keep long cTrader diagnostics inside the feed pill instead of stretching the toolbar. */
+body.simple-ui .toolbar-status{min-width:128px;max-width:260px;}
+body.simple-ui #st{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+@media(max-width:1100px){body.simple-ui .toolbar-status{max-width:210px;min-width:0}}
+@media(max-width:760px){body.simple-ui .toolbar-status{max-width:180px;min-width:0}}
+
+body.simple-ui #st{max-width:260px}
+
+
+/* UI audit: keep Aggregate Greeks readable and make the source/methodology card useful before a feed connects. */
+.stock-options-view .so-greeks-card .opt-greeks{grid-template-columns:repeat(2,minmax(0,1fr));align-content:start;}
+.stock-options-view .so-greeks-card .opt-empty{grid-column:1/-1;display:grid;place-items:center;min-height:138px;width:100%;white-space:nowrap;}
+.stock-options-view .so-method-card .opt-meta{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:10px 0 2px;}
+.stock-options-view .so-method-card .opt-meta-item{display:flex;flex-direction:column;justify-content:center;gap:5px;min-width:0;padding:10px 11px;border:1px solid rgba(55,83,111,.52);border-radius:9px;background:rgba(10,22,36,.62);}
+.stock-options-view .so-method-card .opt-meta-item small{color:#70869e;font:8px/1.3 var(--mono);letter-spacing:.09em;}
+.stock-options-view .so-method-card .opt-meta-item b{color:#c8d9e8;font:600 10px/1.45 var(--font);overflow-wrap:anywhere;}
+@media(max-width:760px){.stock-options-view .so-method-card .opt-meta{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:390px){.stock-options-view .so-method-card .opt-meta-item{padding:8px}.stock-options-view .so-method-card .opt-meta-item b{font-size:9px;}}
+
+/* Final responsive containment: the feed pill must fit its flex item, and indicator cards must fit narrow phones. */
+body.simple-ui .toolbar-status{min-width:0;}
+body.simple-ui #st{width:100%;max-width:100%;min-width:0;}
+@media(max-width:520px){
+  #v-ind #indGrid{grid-template-columns:minmax(0,1fr);}
+  #v-ind #indGrid>.card{min-width:0;width:100%;}
+}
+
+/* Keep connection errors understandable without turning the Options header into a long red log line. */
+.stock-options-view .opt-errors:not([hidden]){display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:start;gap:7px 14px;padding:11px 13px;line-height:1.45;}
+.stock-options-view .opt-error-copy{display:grid;gap:3px;min-width:0;}
+.stock-options-view .opt-error-copy strong{font:650 11px/1.35 var(--display);color:#ff9aa9;}
+.stock-options-view .opt-error-copy span{font:10px/1.5 var(--font);color:#ce8d9a;overflow-wrap:anywhere;}
+.stock-options-view .opt-error-copy code{font:9px var(--mono);color:#f0b6c0;}
+.stock-options-view .opt-error-details{align-self:center;min-width:0;max-width:100%;color:#d29aa4;font-size:9px;}
+.stock-options-view .opt-error-details summary{cursor:pointer;white-space:nowrap;color:#e6a3af;}
+.stock-options-view .opt-error-details p{max-width:min(720px,70vw);margin:7px 0 0;color:#d4a0a8;line-height:1.5;overflow-wrap:anywhere;}
+@media(max-width:520px){.stock-options-view .opt-errors:not([hidden]){grid-template-columns:minmax(0,1fr);}.stock-options-view .opt-error-details{justify-self:start;}.stock-options-view .opt-error-details p{max-width:100%;}}
