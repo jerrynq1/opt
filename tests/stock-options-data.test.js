@@ -13,7 +13,7 @@ function loadStockOptionsHelpers() {
   );
   source = source.replace(
     '  buildViews();\n  window.stockOptionsSetActive=setActive;',
-    '  window.__stockOptionsTest={normaliseQuote,mergeLiveQuote,calc,strikeSymbols,renderExposure,renderLevels,gammaFlipOf,maxPainOf,bsmGamma,resolveGamma,gammaFlipInputKey,yearsToExpiry,expiryAtUsCloseUtc};\n  return;\n  buildViews();\n  window.stockOptionsSetActive=setActive;'
+    '  window.__stockOptionsTest={normaliseQuote,mergeLiveQuote,calc,strikeSymbols,renderExposure,renderLevels,gammaFlipOf,maxPainOf,bsmGamma,resolveGamma,gammaFlipInputKey,yearsToExpiry,expiryAtUsCloseUtc,quoteRowsFromReply,effectiveMultiplier,mergeQuoteSnapshot,quoteNeedsAnalyticsRetry};\n  return;\n  buildViews();\n  window.stockOptionsSetActive=setActive;'
   );
   const elements = new Map();
   const document = { getElementById(id) {
@@ -56,9 +56,9 @@ test('partial option-chain updates using p refresh last price without clearing O
 
 test('a missing multiplier does not silently default to 100 for exposure', () => {
   const session = {
-    price: 100, contracts: [{ os: 'GLD261110P00100000' }],
-    quotes: new Map([['GLD261110P00100000', {
-      optionSymbol: 'GLD261110P00100000', side: 'P', strike: 100,
+    price: 100, contracts: [{ os: 'GLD1261110P00100000' }],
+    quotes: new Map([['GLD1261110P00100000', {
+      optionSymbol: 'GLD1261110P00100000', side: 'P', strike: 100,
       multiplier: null, openInterest: 20, volume: 0,
       gamma: 0.2, delta: -0.4, vega: 0.1, theta: -0.2
     }]])
@@ -216,6 +216,13 @@ test('GEX preview stays provisional when one contract lacks both provider Gamma 
   assert.equal(result.gammaFlip,null);
 });
 
+test('zero provider Gamma falls back to BSM IV instead of creating a false zero-GEX strike', () => {
+  const q={optionSymbol:'QQQ261120C00100000',side:'C',strike:100,multiplier:100,openInterest:10,iv:.25,gamma:0};
+  const resolved=helpers.resolveGamma(q,100,0.02);
+  assert.ok(resolved.gamma>0);
+  assert.equal(resolved.source,'bsm-iv');
+});
+
 test('GEX is derived from Option Chain IV when Binance omits per-strike Gamma', () => {
   const expiry='2026-12-18', now=Date.parse('2026-11-12T12:00:00Z'), spot=100;
   const rows=[
@@ -253,7 +260,7 @@ test('Key Levels render GEX walls and ladder from derived IV Gamma without provi
   assert.match(html,/PW · GEX PUT WALL/);
   assert.match(html,/GEX ladder/);
   assert.doesNotMatch(html,/Chưa có dữ liệu GEX theo strike/);
-  assert.match(html,/tự tính BSM từ IV 4/);
+  assert.match(html,/BSM\/IV 4/);
 });
 
 
@@ -416,6 +423,15 @@ test('Max Pain stays unavailable when any contract in a completed chain has miss
   assert.equal(result.maxPain, null);
 });
 
+test('Max Pain is unavailable when every contract has zero OI instead of fabricating the lowest strike', () => {
+  const dist=[
+    {strike:90,callPainOI:0,putPainOI:0},
+    {strike:100,callPainOI:0,putPainOI:0},
+    {strike:110,callPainOI:0,putPainOI:0}
+  ];
+  assert.equal(helpers.maxPainOf(dist),null);
+});
+
 test('Max Pain stays unavailable when a complete chain has missing contract multipliers', () => {
   const session = {
     price: 100, chainComplete: true,
@@ -432,6 +448,85 @@ test('Max Pain stays unavailable when a complete chain has missing contract mult
   assert.equal(result.maxPain, null);
 });
 
+
+
+test('calc does not throw when rendering full-chain coverage diagnostics', () => {
+  const contracts=[{os:'QQQ261120C00095000'},{os:'QQQ261120C00100000'},{os:'QQQ261120P00105000'}];
+  const quotes=new Map([
+    ['c95',{optionSymbol:'QQQ261120C00095000',side:'C',strike:95,multiplier:100,openInterest:10,iv:.25,gamma:null,volume:0}],
+    ['c100',{optionSymbol:'QQQ261120C00100000',side:'C',strike:100,multiplier:100,openInterest:10,iv:.25,gamma:null,volume:0}],
+    ['p105',{optionSymbol:'QQQ261120P00105000',side:'P',strike:105,multiplier:100,openInterest:12,iv:.27,gamma:null,volume:0}]
+  ]);
+  const result=helpers.calc({price:100,expiry:'2026-11-20',chainComplete:true,contracts,contractSymbols:new Set(contracts.map(x=>x.os)),quotes},Date.parse('2026-11-12T12:00:00Z'));
+  assert.equal(result.oiComplete,true);
+  assert.equal(result.gexComplete,true);
+  assert.equal(result.oiMissingSamples.length,0);
+  assert.equal(result.gammaDerivedKnown,3);
+  assert.ok(result.gexCallWall);
+  assert.equal(result.maxPainComplete,true);
+  assert.ok(result.maxPain);
+});
+
+test('standard QQQ and GLD OCC contracts can use disclosed 100-share multiplier fallback; adjusted roots cannot', () => {
+  const qqq=helpers.effectiveMultiplier({optionSymbol:'QQQ261120C00100000',multiplier:null});
+  const gld=helpers.effectiveMultiplier({optionSymbol:'GLD261120P00100000',multiplier:null});
+  assert.equal(qqq.value,100);assert.equal(qqq.source,'standard-100-assumption');
+  assert.equal(gld.value,100);assert.equal(gld.source,'standard-100-assumption');
+  assert.equal(helpers.effectiveMultiplier({optionSymbol:'QQQ1261120C00100000',multiplier:null}).value,null);
+});
+
+test('Binance nested quote reply shapes are recursively extracted', () => {
+  const rows=helpers.quoteRowsFromReply({success:true,data:{result:{quotes:[{os:'QQQ261120C00100000',oi:'10'},{os:'QQQ261120P00100000',oi:'12'}]}}});
+  assert.equal(rows.length,2);
+  assert.equal(helpers.normaliseQuote(rows[0]).openInterest,10);
+});
+
+test('normalizer falls through null OI aliases and accepts nested contract quote fields', () => {
+  const q=helpers.normaliseQuote({os:'QQQ261120C00100000',oi:null,data:{openInterest:'345',multiplier:'100',markIV:'0.31'},greeks:{gamma:'0.04'}});
+  assert.equal(q.openInterest,345);
+  assert.equal(q.multiplier,100);
+  assert.equal(q.iv,.31);
+  assert.equal(q.gamma,.04);
+});
+
+test('chain-symbol contract metadata fills fields omitted as null by the quote response', () => {
+  const meta=helpers.normaliseQuote({os:'GLD261120P00200000',oi:77,m:100,iv:.28});
+  const quote=helpers.normaliseQuote({os:'GLD261120P00200000',oi:null,m:null,iv:null,ga:.05,last:'2.1'});
+  const enriched=helpers.mergeQuoteSnapshot(meta,quote);
+  assert.equal(enriched.openInterest,77);
+  assert.equal(enriched.multiplier,100);
+  assert.equal(enriched.iv,.28);
+  assert.equal(enriched.gamma,.05);
+  assert.equal(enriched.last,2.1);
+});
+
+test('partial live update with explicit null OI, IV and multiplier preserves previous valid analytics', () => {
+  const symbol='QQQ261120C00100000';
+  const initial=helpers.normaliseQuote({os:symbol,t:'call',m:100,oi:250,iv:.3,ga:.04});
+  const session={contracts:[{os:symbol}],contractSymbols:new Set([symbol]),quotes:new Map([[symbol,initial]]),price:100,oiLastUpdate:0};
+  helpers.mergeLiveQuote(session,{os:symbol,oi:null,iv:null,m:null,p:'4.2'});
+  const updated=session.quotes.get(symbol);
+  assert.equal(updated.openInterest,250);
+  assert.equal(updated.iv,.3);
+  assert.equal(updated.multiplier,100);
+  assert.equal(updated.last,4.2);
+});
+
+test('quote with a payload but missing OI is marked for analytics retry, not mistaken for complete data', () => {
+  const symbol='QQQ261120C00100000';
+  const session={quotes:new Map([[symbol,{optionSymbol:symbol,side:'C',strike:100,openInterest:null,multiplier:100,gamma:.1,iv:.3}]])};
+  assert.equal(helpers.quoteNeedsAnalyticsRetry(session,symbol),true);
+  session.quotes.set(symbol,{...session.quotes.get(symbol),openInterest:10});
+  assert.equal(helpers.quoteNeedsAnalyticsRetry(session,symbol),false);
+});
+
+test('positive-OI contract with provider Gamma but missing IV is retried for Zero Gamma repricing', () => {
+  const symbol='QQQ261120C00100000';
+  const session={quotes:new Map([[symbol,{optionSymbol:symbol,side:'C',strike:100,openInterest:10,multiplier:100,gamma:.1,iv:null}]])};
+  assert.equal(helpers.quoteNeedsAnalyticsRetry(session,symbol),true);
+  session.quotes.set(symbol,{...session.quotes.get(symbol),iv:.28});
+  assert.equal(helpers.quoteNeedsAnalyticsRetry(session,symbol),false);
+});
 
 test('Option Chain strike selector requests only the nearest N strikes first', () => {
   const list = [
