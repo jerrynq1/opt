@@ -23,7 +23,7 @@
 .xmap-dot{display:inline-block;width:8px;height:8px;border-radius:50%}
 .xmap-dot.call{background:#35e59a}.xmap-dot.put{background:#ff536b}
 .xmap-line{display:inline-block;width:15px;border-top:2px dashed}
-.xmap-line.call{border-color:#ff5c8a}.xmap-line.put{border-color:#35d6b0}.xmap-line.flip{border-color:#ffc857}
+.xmap-line.call{border-color:#ff5c8a}.xmap-line.put{border-color:#35d6b0}.xmap-line.cw{border-color:#65d6e8;border-top-style:solid}.xmap-line.pw{border-color:#e8bd73;border-top-style:solid}.xmap-line.flip{border-color:#ffc857}
 .xmap-disclaimer{margin:0;color:var(--mut);font-size:10px;line-height:1.4}
 @media(max-width:650px){.xmap-panel{padding:10px}.xmap-controls>label:not(.xmap-check):not(.xmap-opacity){min-width:calc(50% - 8px);flex:1}.xmap-controls .btn{flex:1}.xmap-legend{gap:7px}}
 

@@ -54,10 +54,15 @@ test('ICT QuantLab theme and bilateral Exposure panel are loaded after the works
   assert.match(theme,/@keyframes fade/);
   assert.match(theme,/exposure-put-track i[^}]*opacity:1;transform:none/);
   assert.match(stock,/exposure-axis-head/);
-  assert.match(stock,/CALL RESISTANCE/);
-  assert.match(stock,/PUT SUPPORT/);
+  assert.match(stock,/CALL OI WALL/);
+  assert.match(stock,/PUT OI WALL/);
+  assert.match(stock,/CW · MAX \+GEX/);
+  assert.match(stock,/PW · MAX −GEX/);
   assert.match(stock,/so-exposure-dots/);
   assert.match(stock,/MAX_ROWS=44/);
+  assert.match(stock,/callOIWall,putOIWall,gexCallWall,gexPutWall/);
+  const defs=read('js/indicators-custom.js');
+  assert.match(defs,/\[\"gexWalls\",\"CW \/ PW · Net GEX Walls\"/);
 });
 
 
@@ -140,10 +145,14 @@ test('live Options metadata keeps the same styled chips after quotes load', () =
 test('Exposure legend explains both directional wall markers and separates their labels', () => {
   const stock = read('js/stock-options.js');
   const theme = read('css/ict-quantlab-theme.css');
-  assert.match(stock, /CALL RESISTANCE/);
-  assert.match(stock, /PUT SUPPORT/);
+  assert.match(stock, /CALL OI WALL/);
+  assert.match(stock, /PUT OI WALL/);
+  assert.match(stock, /CW · MAX \+GEX/);
+  assert.match(stock, /PW · MAX −GEX/);
   assert.match(theme, /exposure-marker\.is-call-wall span\{left:4px;right:auto/);
   assert.match(theme, /exposure-marker\.is-put-wall span\{right:4px;top:1px/);
+  assert.match(theme, /exposure-marker\.is-gex-call-wall/);
+  assert.match(theme, /exposure-marker\.is-gex-put-wall/);
 });
 
 test('Options network errors show a concise summary and escaped technical detail', () => {

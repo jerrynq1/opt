@@ -35,6 +35,8 @@
 .stock-options-view .kl-card{--kl-accent:#70cbd9;--kl-tint:rgba(112,203,217,.1);min-width:0;padding:11px 12px 10px;border:1px solid rgba(55,83,111,.62);border-left:2px solid var(--kl-accent);border-radius:10px;background:linear-gradient(145deg,var(--kl-tint),rgba(10,20,32,.94) 58%);}
 .stock-options-view .kl-call{--kl-accent:#49d6bd;--kl-tint:rgba(73,214,189,.11)}
 .stock-options-view .kl-put{--kl-accent:#ed8193;--kl-tint:rgba(237,129,147,.10)}
+.stock-options-view .kl-gex-call{--kl-accent:#65d6e8;--kl-tint:rgba(101,214,232,.11)}
+.stock-options-view .kl-gex-put{--kl-accent:#e8bd73;--kl-tint:rgba(232,189,115,.11)}
 .stock-options-view .kl-flip{--kl-accent:#74baff;--kl-tint:rgba(116,186,255,.10)}
 .stock-options-view .kl-vol{--kl-accent:#e8bb72;--kl-tint:rgba(232,187,114,.10)}
 .stock-options-view .kl-pain{--kl-accent:#b7a6ff;--kl-tint:rgba(183,166,255,.10)}

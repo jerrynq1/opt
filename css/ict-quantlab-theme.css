@@ -135,9 +135,13 @@ body.simple-ui .so-head h2,body.simple-ui .workspace-page-head h1{font-family:va
 .stock-options-view .exposure-marker.is-spot{--marker-color:#d6e3ed;border-top-style:dotted}
 .stock-options-view .exposure-marker.is-call-wall{--marker-color:#65d6e8}
 .stock-options-view .exposure-marker.is-put-wall{--marker-color:#e8bd73}
+.stock-options-view .exposure-marker.is-gex-call-wall{--marker-color:#65d6e8;border-top-style:solid}
+.stock-options-view .exposure-marker.is-gex-put-wall{--marker-color:#e8bd73;border-top-style:solid}
 /* Put the wall labels on opposite sides of the axis so overlapping strikes remain legible. */
 .stock-options-view .exposure-marker.is-call-wall span{left:4px;right:auto;top:-11px}
 .stock-options-view .exposure-marker.is-put-wall span{right:4px;top:1px}
+.stock-options-view .exposure-marker.is-gex-call-wall span{left:35%;right:auto;top:-11px}
+.stock-options-view .exposure-marker.is-gex-put-wall span{right:35%;top:1px}
 .stock-options-view .exposure-marker.is-spot span{right:4px;top:-11px}
 
 .stock-options-view .exposure-bottom{display:flex;justify-content:space-between;gap:8px;padding:9px 1px 0;color:#596e85;font:8px var(--mono);letter-spacing:.35px}
@@ -149,6 +153,8 @@ body.simple-ui .so-head h2,body.simple-ui .workspace-page-head h1{font-family:va
 .stock-options-view .so-exposure-legend i.spot{height:1px;width:10px;background:#d6e3ed}
 .stock-options-view .so-exposure-legend i.call-wall{height:1px;width:10px;background:#65d6e8}
 .stock-options-view .so-exposure-legend i.put-wall{height:1px;width:10px;background:#e8bd73}
+.stock-options-view .so-exposure-legend i.gex-call-wall{height:2px;width:10px;background:#65d6e8}
+.stock-options-view .so-exposure-legend i.gex-put-wall{height:2px;width:10px;background:#e8bd73}
 .stock-options-view .exposure-empty{min-height:220px;display:grid;place-content:center;gap:7px;text-align:center;color:#71859b}
 .stock-options-view .exposure-empty b{font:600 13px var(--display);color:#cbd8e6}
 .stock-options-view .exposure-empty span{font:10px/1.5 var(--font)}

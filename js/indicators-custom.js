@@ -373,7 +373,7 @@ IND.ict22={
 */
 IND.xmap={
   n:"ETF Options Liquidity Map",t:"of",ver:1,
-  d:"Chiếu heatmap OI/GEX, volume bubbles, OI walls, Gamma Flip, Max Pain và GEX 1–10 từ QQQ → NAS100 hoặc GLD → XAUUSD. Cần thêm indicator này vào chart và bật bằng nút mắt. Vol Trigger chỉ hiện khi nguồn dữ liệu cung cấp mức riêng; không tự thay thế bằng Gamma Flip.",
+  d:"Chiếu heatmap OI/GEX, volume bubbles, Call/Put OI Walls (OI-only), CW/PW (Net GEX walls), Gamma Flip / Zero Gamma (BSM repricing), Max Pain, GEX Ratio và GEX 1–10 từ QQQ → NAS100 hoặc GLD → XAUUSD. Call/Put OI Walls được tính độc lập theo OI lớn nhất từng phía. CW là strike có Net GEX dương lớn nhất; PW là strike có Net GEX âm lớn nhất theo trị tuyệt đối. GEX 1–10 loại riêng CW/PW, không loại OI Walls. Từng level được quy đổi và lưu riêng; giá ETF/CFD chạy không làm level dịch chuyển. Chỉ khi giá trị level nguồn thay đổi, riêng level đó mới tự động được quy đổi lại theo tỷ lệ spot tại thời điểm phát hiện thay đổi. GEX walls, GEX ladder và GEX Ratio chỉ hiển thị khi toàn expiry có đủ OI, multiplier, gamma và spot; Gamma Flip / Zero Gamma cần thêm IV và DTE hợp lệ, được tính bằng Black–Scholes repricing với IV/DTE cố định, r=q=0 và tìm Net GEX zero-cross. GEX Ratio = tổng Call GEX / |tổng Put GEX|; >1 là Call Gamma trội (thiên hướng ổn định/biên độ hẹp), <1 là Put Gamma trội (rủi ro biến động/trượt giá cao). Đây là heuristic theo quy ước Call+/Put−, không xác nhận dealer positioning.",
   p:[
     ["source","Nguồn ETF","qqq","s",{g:"Nguồn dữ liệu",o:[["qqq","QQQ → NAS100"],["gld","GLD → XAUUSD"]]}],
     ["metric","Heatmap theo","gex","s",{g:"Heatmap",o:[["gex","Net GEX"],["oi","Open Interest"],["vol","Volume"]]}],
@@ -381,15 +381,15 @@ IND.xmap={
     ["opacity","Độ mờ heatmap",0.48,"n",{min:0.1,max:0.9,step:0.05}],
     ["bubbles","Hiện volume bubbles",true,"b",{g:"Volume bubbles"}],
     ["bubbleCount","Số bubble tối đa",36,"i",{min:5,max:100,step:1}],
-    ["walls","Call / Put OI Walls",true,"b",{g:"Key levels"}],
-    ["flip","Gamma Flip",true,"b"],
-    ["volTrigger","Vol Trigger (nếu feed có)",true,"b"],
+    ["walls","Call / Put OI Walls (OI-only)",true,"b",{g:"Key levels"}],
+    ["gexWalls","CW / PW · Net GEX Walls",true,"b"],
+    ["gammaFlip","Gamma Flip / Zero Gamma (BSM repricing)",true,"b"],
     ["maxPain","Max Pain",true,"b"],
     ["gexCount","Số level GEX 1–10 (0 = tắt)",10,"i",{min:0,max:10,step:1}],
     ["showSourceTag","Nhãn nguồn dữ liệu trên chart",true,"b"]
   ],
-  c:["#35b6ff","#ec557c","#35e59a","#ff536b","#ff5c8a","#35d6b0","#ffc857","#b68cff","#43c7e8","#a7d96b"],
-  L:["Heatmap dương / OI","Heatmap âm","Call bubble","Put bubble","Call OI Wall","Put OI Wall","Gamma Flip","Max Pain","Vol Trigger","GEX 1–10"],
+  c:["#35b6ff","#ec557c","#35e59a","#ff536b","#ff5c8a","#35d6b0","#ffc857","#b68cff","#43c7e8","#a7d96b","#65d6e8","#e8bd73"],
+  L:["Heatmap dương / OI","Heatmap âm","Call bubble","Put bubble","Call OI Wall","Put OI Wall","Gamma Flip / Zero Gamma · BSM","Max Pain","GEX 1–10","CW · Max +Net GEX","PW · Max |−Net GEX|"],
   lab:p=>`${p.source==='gld'?'GLD → XAUUSD':'QQQ → NAS100'} · ${String(p.metric||'gex').toUpperCase()} · GEX ${p.gexCount??10}/10`,
   f:()=>[]
 };

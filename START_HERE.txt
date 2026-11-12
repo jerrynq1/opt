@@ -29,3 +29,23 @@ CÀI TRÊN IPHONE (PWA)
 5. Khi cập nhật source, mở mục Connection → Xoá cache & tải lại nếu thiết bị còn giữ phiên bản cũ.
 
 PWA lưu app shell và tài nguyên tĩnh để hỗ trợ tải lại giao diện khi mất mạng sau lần mở online đầu tiên. Giá thị trường, Binance Worker và cTrader vẫn cần kết nối mạng; dữ liệu giao dịch không được cache offline.
+
+ETF OPTIONS → CFD LEVEL MAPPING
+- Each source level (Call/Put OI Walls, CW/PW GEX Walls, one Vol Trigger / Zero Gamma level, Max Pain and every GEX rank) has an independent CFD mapping.
+- The initial mapping uses the ETF spot and cTrader chart price available when that level is first received.
+- Later ETF/CFD spot ticks do not move an existing mapped level.
+- When a source level value changes, only that level is recalculated with the current spot ratio; unchanged levels remain at their previous CFD prices.
+- Strike rows used by heatmap/bubbles are mapped individually and remain fixed while OI/GEX/volume intensity can refresh.
+- Mappings persist in local storage per ETF source, CFD target and expiry, including across page reloads. Switching expiry loads or creates the mapping for that expiry.
+
+VOL TRIGGER / ZERO GAMMA
+Trong QuantLab, Vol Trigger được dùng làm tên hiển thị cho cùng một mức Zero Gamma / Gamma Flip (không tính thêm một proxy/provider level riêng).
+- Với mỗi mức giá underlying giả định S, tính lại BSM Gamma của từng hợp đồng từ IV, strike và DTE.
+- d1 = [ln(S/K) + 0.5 × σ² × T] / (σ × sqrt(T)) khi r = q = 0.
+- Γ(S) = exp(-0.5 × d1²) / [S × σ × sqrt(2πT)].
+- Net GEX(S) = Σ[s_i × Γ_i(S) × OI_i × multiplier_i × S² × 0.01], với s_i = +1 cho Call và −1 cho Put.
+- Zero Gamma là nghiệm S* khiến Net GEX(S*) = 0. Quét dải giá giả định, tìm từng lần đổi dấu và refine bằng bisection; nếu có nhiều nghiệm thì chọn nghiệm gần Spot hiện tại nhất.
+- DTE được tính tới 16:00 America/New_York của ngày đáo hạn. IV/OI/multiplier được giữ cố định trong mỗi lần repricing; mô hình hiện dùng r = 0 và q = 0.
+- Cần full expiry với OI, multiplier, IV và thời gian đáo hạn hợp lệ. Nếu thiếu dữ liệu hoặc không có zero-cross trong dải quét, level để unavailable thay vì tạo proxy.
+- Call-positive / Put-negative là giả định mô hình dealer inventory, không thể xác minh chỉ từ public OI. Gamma được BSM tính lại; live Gamma trong quote không được dùng làm Gamma ở mọi spot giả định.
+- Thuật ngữ lưu ý: một số nguồn, trong đó có tài liệu SpotGamma, phân biệt Zero Gamma với Volatility Trigger proprietary. Trong workspace này, Vol Trigger là alias do người dùng chọn cho Zero Gamma.
