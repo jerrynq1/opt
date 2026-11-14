@@ -80,3 +80,48 @@ assert.equal(noZeroBinMesh.spotX, 0, 'Spot axis coordinate is computed between t
 assert.equal(chart3d.resolveSpotVertex(noZeroBinMesh.vertices[0], noZeroBinMesh)?.spotSource, 'interpolated', 'Spot point interpolates only when valid buckets bracket zero');
 
 console.log('Stock Options 3D Greek/Surface tests: passed');
+
+
+// A single selected expiry (including 0DTE) is a valid 3D strike profile.
+// It must render as a curve at the real DTE rather than requiring a second expiry.
+const singleExpiryDataset = {
+  spot: 100, bins: Array.from({ length: 17 }, (_, i) => -20 + i * 2.5),
+  metric: 'gex', config: { kind: 'signed', label: 'GEX' },
+  rows: [{ expiry: '2026-01-02', dte: 0, complete: true,
+    cells: Array.from({ length: 17 }, (_, i) => ({ value: (i - 8) * (i - 8) - 24, coverage: 1, usableCount: 12, contractCount: 12 })) }]
+};
+const singleMesh = chart3d.makeMesh(singleExpiryDataset);
+assert.equal(singleMesh.rows.length, 1, 'selected 0DTE contains one real expiry');
+assert.equal(singleMesh.singleExpiry, true, 'renderer identifies a single expiry');
+assert.equal(singleMesh.renderMode, 'single-expiry-profile', 'one expiry is rendered as a profile, not a fake area mesh');
+assert.equal(singleMesh.faces.length, 0, 'no synthetic faces are created for a single expiry');
+assert.equal(singleMesh.renderable, true, 'a valid single-expiry strike profile remains renderable');
+assert.equal(singleMesh.validPointCount, 17, 'all valid moneyness buckets are retained');
+assert.equal(singleMesh.profileSegmentCount, 16, 'adjacent strike buckets form a 3D profile line');
+assert.equal(singleMesh.axisMaxDte, 1, 'single 0DTE uses a readable 0..1D display span');
+assert.equal(singleMesh.vertices[0][0].y, -1, 'exact 0DTE profile lies at the expiry axis origin');
+assert.equal(chart3d.resolveSpotVertex(singleMesh.vertices[0], singleMesh)?.spotSource, 'observed', 'Spot marker is resolvable on the single-expiry profile');
+
+const fractional0dteMesh = chart3d.makeMesh({
+  spot: 100, bins: [-5, 0, 5], metric: 'iv', config: { kind: 'rate' },
+  rows: [{ expiry: '2026-01-02', dte: 0.25, cells: [{ value: 0.25 }, { value: 0.24 }, { value: 0.26 }] }]
+});
+assert.equal(fractional0dteMesh.axisMaxDte, 1, 'fractional 0DTE gets a 0..1D axis span');
+assert.equal(fractional0dteMesh.vertices[0][0].y, -0.5, '0.25D remains at its exact position on the 0..1D axis');
+assert.deepEqual(fractional0dteMesh.dteTicks, [0, 0.25, 1], 'single-expiry Y ticks label 0DTE, actual DTE and 1D boundary');
+
+const singleSparseMesh = chart3d.makeMesh({
+  spot: 100, bins: [-10, -5, 0, 5, 10], metric: 'iv', config: { kind: 'rate' },
+  rows: [{ expiry: '2026-01-02', dte: 0.25, cells: [
+    { value: 0.25 }, { value: 0.24 }, { value: null }, { value: 0.26 }, { value: 0.27 }
+  ] }]
+});
+assert.equal(singleSparseMesh.renderable, true, 'single expiry can render separate valid segments without joining across missing buckets');
+assert.equal(singleSparseMesh.profileSegmentCount, 2, 'profile lines do not bridge a missing moneyness bucket');
+assert.equal(singleSparseMesh.vertices[0][2].z, null, 'missing strike remains a gap');
+
+const singleEmptyMesh = chart3d.makeMesh({
+  spot: 100, bins: [-5, 0, 5], metric: 'iv', config: { kind: 'rate' },
+  rows: [{ expiry: '2026-01-02', dte: 0, cells: [{ value: null }, { value: null }, { value: null }] }]
+});
+assert.equal(singleEmptyMesh.renderable, false, 'one expiry with no valid values still shows empty state');

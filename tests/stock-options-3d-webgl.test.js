@@ -13,7 +13,7 @@ test('pinned Three.js loads before the QuantLab 3D adapter and is cacheable by P
   const three = html.indexOf('https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js');
   const adapter = html.indexOf('js/stock-options-3d.js');
   assert.ok(three >= 0 && adapter > three, 'Three.js script must precede 3D adapter');
-  assert.match(sw, /ict-quantlab-shell-v37/);
+  assert.match(sw, /ict-quantlab-shell-v38/);
   assert.match(sw, /cdn\\\.jsdelivr\\\.net/);
 });
 
@@ -51,4 +51,12 @@ test('Spot is marked on the mesh with a gold ATM ridge and labeled underlying pr
   assert.match(renderer, /SPOT \$\$\{fmt\(mesh\.spot, 2\)\}/);
   assert.match(renderer, /resolveSpotVertex/);
   assert.match(renderer, /spotIndex/);
+});
+
+test('single-expiry WebGL mode draws an observed 3D profile line instead of an empty-mesh warning', () => {
+  assert.match(renderer, /SINGLE EXPIRY/);
+  assert.match(renderer, /NO SYNTHETIC EXPIRY/);
+  assert.match(renderer, /if \(mesh\.singleExpiry\)/);
+  assert.match(renderer, /profileLine/);
+  assert.match(renderer, /if \(indices\.length >= 3\)/);
 });
