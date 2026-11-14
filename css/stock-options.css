@@ -32,3 +32,43 @@
 @media(max-width:480px){.so-kpis{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.so-kpis .opt-metric{padding:10px}.so-kpis .opt-metric strong{font-size:16px}.so-levels{grid-template-columns:1fr 1fr}.so-oi-row{grid-template-columns:54px minmax(60px,1fr) 52px;gap:6px}}
 
 .so-chain-table tbody td.opt-assumed-zero{color:#8293a8;font-style:italic;text-decoration:underline dotted rgba(130,147,168,.45);text-underline-offset:2px}
+
+/* ================= ANALYSIS SCOPE (multi-expiry GEX) ================= */
+.so-scope-card{margin-bottom:14px;padding:16px 18px}
+.so-scope-title{font:800 17px Sora,"Space Grotesk",sans-serif;letter-spacing:.02em;margin:0 0 12px}
+.so-scope-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.so-scope-opt{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;min-height:64px;padding:12px 10px;border:1px solid var(--line);border-radius:14px;background:transparent;color:var(--ink);font:inherit;text-align:center;cursor:pointer;transition:border-color .15s,background .15s}
+.so-scope-opt b{font-size:15px;font-weight:700}
+.so-scope-opt small{font-size:11px;color:var(--mut)}
+.so-scope-opt:hover{border-color:var(--win)}
+.so-scope-opt.is-active{border-color:var(--win);box-shadow:0 0 0 1px var(--win) inset;background:rgba(75,224,168,.06)}
+.so-scope-opt:focus-visible{outline:2px solid var(--win);outline-offset:2px}
+.so-scope-badge{display:inline-block;font-style:normal;font-size:10px;font-weight:700;line-height:1;padding:4px 9px;border-radius:999px;color:var(--win);background:rgba(75,224,168,.14)}
+.so-scope-opt .so-scope-badge{margin-bottom:2px}
+.so-scope-status{min-height:0;margin-top:10px;font-size:11px;color:var(--mut)}
+.so-scope-status:empty{display:none}
+.so-breakdown-card{margin-bottom:14px}
+.so-breakdown-card[hidden]{display:none!important}
+.so-breakdown-summary{display:flex;flex-wrap:wrap;gap:6px 20px;margin:0 0 10px;font-size:11px;color:var(--mut)}
+.so-breakdown-summary b{color:var(--ink)}
+.so-breakdown-table{width:100%;min-width:640px;border-collapse:collapse;font-size:11px;font-variant-numeric:tabular-nums}
+.so-breakdown-table th{text-align:left;font-size:10px;color:var(--mut);font-weight:600;padding:6px 8px;border-bottom:1px solid var(--line)}
+.so-breakdown-table td{padding:7px 8px;border-bottom:1px solid rgba(128,128,128,.12)}
+.so-breakdown-table tr.is-selected td{background:rgba(75,224,168,.05)}
+.so-share{display:inline-block;vertical-align:middle;width:64px;height:6px;border-radius:3px;background:var(--inp);overflow:hidden;margin-right:6px}
+.so-share i{display:block;height:100%;background:var(--win)}
+@media(min-width:760px){.so-scope-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+
+/* ---- hardening: keep Scope / breakdown / key-level layout stable on iOS and under later theme sheets ---- */
+.stock-options-view .so-scope-title{font:800 17px Sora,"Space Grotesk",sans-serif;letter-spacing:.02em;color:var(--ink);margin:0 0 12px}
+.stock-options-view .so-scope-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.stock-options-view .so-scope-opt{-webkit-appearance:none;appearance:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:100%;min-height:64px;padding:12px 10px;margin:0;border:1px solid var(--line);border-radius:14px;background:transparent;color:var(--ink);font:inherit;text-align:center;cursor:pointer}
+.stock-options-view .so-scope-opt b{display:block;font-size:15px;font-weight:700;color:var(--ink)}
+.stock-options-view .so-scope-opt small{display:block;font-size:11px;color:var(--mut)}
+.stock-options-view .so-scope-opt.is-active{border-color:var(--win);box-shadow:0 0 0 1px var(--win) inset;background:rgba(75,224,168,.06)}
+.stock-options-view .so-scope-status{margin-top:10px;font-size:11px;line-height:1.45;color:var(--mut)}
+.stock-options-view .so-breakdown-summary{font-size:11px}
+.stock-options-view .so-breakdown-table td,.stock-options-view .so-breakdown-table th{white-space:nowrap}
+.stock-options-view .kl-card-top{flex-wrap:wrap}
+.stock-options-view .kl-card-top .kl-label{flex:1 1 100%}
+@media(min-width:760px){.stock-options-view .so-scope-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.stock-options-view .kl-card-top .kl-label{flex:1 1 auto}}
