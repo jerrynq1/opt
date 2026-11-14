@@ -839,7 +839,7 @@ test('Vanna/Charm coverage shows partial model inputs instead of reporting full 
   assert.ok(Number.isFinite(result.charmExposure));
 });
 
-test('Vanna/Charm Exposure renderer emits visible signed bar width, value, coverage and honest labels', () => {
+test('Vanna/Charm Exposure renderer uses exact GEX/DEX bilateral layout and keeps model signs in tooltips', () => {
   const quotes=new Map([
     ['c',{optionSymbol:'QQQ261218C00100000',side:'C',strike:100,multiplier:100,openInterest:20,volume:1,iv:.28}],
     ['p',{optionSymbol:'QQQ261218P00100000',side:'P',strike:100,multiplier:100,openInterest:30,volume:1,iv:.28}],
@@ -855,15 +855,21 @@ test('Vanna/Charm Exposure renderer emits visible signed bar width, value, cover
     metric.value=selected;
     helpers.renderExposure(session);
     const html=htmlEl.innerHTML;
-    assert.match(html,/exposure-signed-track/);
-    assert.match(html,/--signed-width:(?!0\.00)[0-9.]+%/);
-    assert.match(html,/exposure-signed-value/);
-    assert.match(html,/OI-weighted model Greek sensitivity/);
+    assert.match(html,/class=\"exposure-plot\"/);
+    assert.match(html,/class=\"exposure-axis-head\"/);
+    assert.match(html,/class=\"exposure-rows\"/);
+    assert.match(html,/exposure-put-track/);
+    assert.match(html,/exposure-zero/);
+    assert.match(html,/exposure-call-track/);
+    assert.match(html,/Call signed [+-−].*Put signed [+-−]/);
     assert.match(html,/MODEL COVERAGE/);
+    assert.doesNotMatch(html,/exposure-row-signed|exposure-signed-track|is-signed-exposure/);
     assert.doesNotMatch(html,/Net Vanna|Net Charm/);
     const title=helpers.elements.get('so-qqq-exposure-title').textContent;
-    assert.match(title,/OI-WEIGHTED MODEL SENSITIVITY/);
+    assert.equal(title,selected==='vanna'?'VANNA EXPOSURE':'CHARM EXPOSURE');
+    const subtitle=helpers.elements.get('so-qqq-exposure-subtitle').textContent;
+    assert.match(subtitle,/Call .* → right · Put .* ← left/);
   }
   const css=fs.readFileSync(path.join(__dirname,'..','css','stock-options.css'),'utf8');
-  assert.match(css,/exposure-signed-track i\{[^}]*width:var\(--signed-width,0%\)/);
+  assert.doesNotMatch(css,/exposure-signed-track|exposure-row-signed/);
 });

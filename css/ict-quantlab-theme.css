@@ -260,3 +260,49 @@ body.simple-ui #st{width:100%;max-width:100%;min-width:0;}
 .stock-options-view .opt-error-details summary{cursor:pointer;white-space:nowrap;color:#e6a3af;}
 .stock-options-view .opt-error-details p{max-width:min(720px,70vw);margin:7px 0 0;color:#d4a0a8;line-height:1.5;overflow-wrap:anywhere;}
 @media(max-width:520px){.stock-options-view .opt-errors:not([hidden]){grid-template-columns:minmax(0,1fr);}.stock-options-view .opt-error-details{justify-self:start;}.stock-options-view .opt-error-details p{max-width:100%;}}
+
+
+/* Searchable ATAS / QuantLab indicator library — compact terminal list, not cards. */
+#v-ind .ind-library-card{padding:17px 18px 8px;overflow:hidden}
+#v-ind .ind-library-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px}
+#v-ind .ind-library-head h2{font:600 16px var(--display);color:var(--text)}
+#v-ind .ind-library-head .msg{display:block;margin-top:3px;font-size:11px;color:var(--muted)}
+#v-ind .ind-result-count{font:10px var(--mono);letter-spacing:.5px;color:var(--cyan);white-space:nowrap}
+#v-ind .ind-search-wrap{display:flex;align-items:center;gap:10px;min-height:43px;padding:0 12px;border:1px solid var(--border-2);border-radius:9px;background:#09121e;color:var(--muted);transition:border-color .15s,box-shadow .15s}
+#v-ind .ind-search-wrap:focus-within{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(101,214,232,.10)}
+#v-ind .ind-search-wrap>span{font:22px/1 var(--font);color:var(--cyan)}
+#v-ind .ind-search-wrap input{flex:1;min-width:0;height:39px;padding:0;border:0!important;outline:0!important;box-shadow:none!important;background:transparent!important;font:12px var(--font);color:var(--text)}
+#v-ind .ind-search-wrap input::placeholder{color:#62758d}
+#v-ind .ind-search-wrap kbd{padding:3px 6px;border:1px solid #26384d;border-radius:4px;color:#647c95;font:9px var(--mono);letter-spacing:.8px}
+#v-ind .ind-filter-row{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 10px}
+#v-ind .ind-filter-row .tf{display:inline-flex;align-items:center;gap:7px;min-height:30px;padding:5px 9px;border:1px solid var(--border);border-radius:7px;background:#0b1522;color:#8296ad;font:10px var(--font)}
+#v-ind .ind-filter-row .tf.on{border-color:#36788a;background:#142a3a;color:#d9f6fb}
+#v-ind .ind-filter-row .tf small{color:var(--cyan);font:9px var(--mono)}
+#v-ind .ind-list{display:flex;flex-direction:column;border-top:1px solid var(--border)}
+#v-ind .ind-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:14px;padding:12px 3px;border-bottom:1px solid #1c2a3c;min-width:0}
+#v-ind .ind-row:hover{background:linear-gradient(90deg,rgba(70,173,194,.055),transparent 75%)}
+#v-ind .ind-row-main{min-width:0}
+#v-ind .ind-row-title{display:flex;flex-wrap:wrap;align-items:center;gap:7px}
+#v-ind .ind-row-title strong{font:600 12px var(--display);color:#e1ebf7}
+#v-ind .ind-source{padding:2px 5px;border:1px solid #23374e;border-radius:4px;color:#8197b0;font:9px var(--mono)}
+#v-ind .ind-status{padding:3px 6px;border:1px solid #2a4053;border-radius:4px;background:#111e2d;color:#95abc1;font:9px var(--mono)}
+#v-ind .ind-status.ready{border-color:#245b56;background:#102823;color:#6bd3aa}
+#v-ind .ind-status.existing{border-color:#28516a;background:#102435;color:#78c8e4}
+#v-ind .ind-status.proxy{border-color:#725c32;background:#2a2113;color:#e8bd73}
+#v-ind .ind-status.blocked{border-color:#344155;background:#121a27;color:#8292a8}
+#v-ind .ind-row p{margin:5px 0 0;color:#8da0b8;font:11px/1.5 var(--font);overflow-wrap:anywhere}
+#v-ind .ind-row-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:5px;color:#61768e;font:9px var(--mono)}
+#v-ind .ind-requirement{color:#d1a85f}
+#v-ind .ind-source-file{color:#536981}
+#v-ind .ind-row-action{display:flex;justify-content:flex-end;align-items:center}
+#v-ind .ind-row-action .btn{min-width:116px;white-space:nowrap;font-size:10px}
+#v-ind .ind-row-action .btn:disabled{opacity:.56;cursor:not-allowed;transform:none;box-shadow:none}
+#v-ind .ind-empty{padding:24px 8px;text-align:center;color:var(--muted);font-size:12px}
+@media(max-width:720px){
+  #v-ind .ind-library-card{padding:14px 12px 6px}
+  #v-ind .ind-row{grid-template-columns:minmax(0,1fr);gap:9px;padding:11px 2px}
+  #v-ind .ind-row-action{justify-content:flex-start}
+  #v-ind .ind-row-action .btn{min-width:130px}
+  #v-ind .ind-source-file{width:100%}
+  #v-ind .ind-search-wrap kbd{display:none}
+}

@@ -28,7 +28,7 @@ function normA(a){                                   // chuẩn hóa chỉ báo 
   if((d.ver||0)!==(a.ver||0)){a.c=[...d.c];a.ver=d.ver||0;delete a.w}
   else a.c=d.c.map((x,j)=>(a.c&&a.c[j])||x);
   return a}
-const ALLOWED_IND_GROUPS=new Set(["of","mm"]);
+const ALLOWED_IND_GROUPS=new Set(["of","mm","ov","osc"]);
 let ACT=[];try{const stored=JSON.parse(ld("tp_ind","[]"))||[];ACT=stored.filter(a=>a&&IND[a.key]&&ALLOWED_IND_GROUPS.has(IND[a.key].t)).map(normA);if(ACT.length!==stored.length)sv("tp_ind",JSON.stringify(ACT))}catch{}
 const saveInd=()=>sv("tp_ind",JSON.stringify(ACT));
 const isOn=a=>a.on&&(!a.vis||a.vis.includes(C.tf));
@@ -317,14 +317,47 @@ function openSet(id){
   draw();document.body.append(o);o.querySelector("[data-act=ok]").focus();
 }
 legend();
-let IF="all";
-const TL={of:"Orderflow",mm:"Market Model"};
+let IF="all", IND_SEARCH="";
+const TL={of:"Orderflow",mm:"Market Model",ov:"ATAS Technical",osc:"ATAS Technical"};
+const indTypeLabel=d=>d.cat==="at"||d.t==="ov"||d.t==="osc"?"ATAS Technical":(TL[d.t]||d.t||"Indicator");
+const indEscape=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const atasStatusLabel=x=>x?.conversion==="approx_proxy"?"Bản gần nhất / proxy":({ported:"Port OHLCV",existing:"Module có sẵn",needs_ticks:"Cần tick / trade",needs_depth:"Cần DOM / MBO",needs_external:"Cần feed ngoài",needs_session:"Cần lịch phiên",visual_only:"Tiện ích ATAS",pending:"Chưa port phép tính"}[x?.status]||"Chưa xác định");
+const atasStatusClass=x=>x?.conversion==="approx_proxy"?"proxy":x?.status==="ported"?"ready":x?.status==="existing"?"existing":"blocked";
 function buildInd(){
   const LS=ACT;
   $("actList").innerHTML=LS.length?LS.map(a=>{const d=IND[a.key];
-    return `<div class="f" style="grid-template-columns:1fr auto;gap:8px 12px" data-id="${a.id}"><div><b>${d.n}</b> <span class="msg">${TL[d.t]}</span><div class="bar" style="margin-top:6px">${d.p.filter(sp=>pshow(sp,a.p)&&(!["of","mm"].includes(d.t)||(sp[4]&&sp[4].mn))).map(sp=>`<label class="msg">${sp[1]} ${pin(sp,a.p[sp[0]],"ap_"+a.id+"_",sp[3]==="s"?"width:auto":sp[3]==="b"?"":"width:78px")}</label>`).join("")}${d.L.map((l,j)=>`<label class="msg">${l} <input type="color" data-c="${j}" value="${cres(a,j)}"></label>`).join("")}</div></div><div class="bar"><label class="msg">Hiện <input type="checkbox" data-on="1"${a.on?" checked":""}></label><button class="btn ghost sm" data-set="1">Cài đặt</button><button class="btn ghost sm" data-rm="1">Xóa</button></div></div>`}).join(""):`<div class="msg">Chưa có indicator nào. Chọn trong kho bên dưới.</div>`;
-  $("indGrid").innerHTML=Object.entries(IND).filter(([k,d])=>ALLOWED_IND_GROUPS.has(d.t)&&(IF==="all"||d.t===IF)).map(([k,d])=>`<div class="card"><h2>${d.n} <span class="pill">${TL[d.t]}</span></h2><p class="msg" style="margin:0 0 12px">${d.d}</p><button class="btn sm" data-add="${k}">+ Thêm vào chart</button></div>`).join("");
-  $("indF").innerHTML=[["all","Tất cả"],["of","Orderflow"],["mm","Market Model"]].map(([k,n])=>`<button class="tf${k===IF?" on":""}" data-f="${k}">${n}</button>`).join("");
+    return `<div class="f" style="grid-template-columns:1fr auto;gap:8px 12px" data-id="${a.id}"><div><b>${d.n}</b> <span class="msg">${indTypeLabel(d)}</span><div class="bar" style="margin-top:6px">${d.p.filter(sp=>pshow(sp,a.p)&&(!["of","mm"].includes(d.t)||(sp[4]&&sp[4].mn))).map(sp=>`<label class="msg">${sp[1]} ${pin(sp,a.p[sp[0]],"ap_"+a.id+"_",sp[3]==="s"?"width:auto":sp[3]==="b"?"":"width:78px")}</label>`).join("")}${d.L.map((l,j)=>`<label class="msg">${l} <input type="color" data-c="${j}" value="${cres(a,j)}"></label>`).join("")}</div></div><div class="bar"><label class="msg">Hiện <input type="checkbox" data-on="1"${a.on?" checked":""}></label><button class="btn ghost sm" data-set="1">Cài đặt</button><button class="btn ghost sm" data-rm="1">Xóa</button></div></div>`}).join(""):`<div class="msg">Chưa có indicator nào. Chọn trong kho bên dưới.</div>`;
+
+  const catalog=Array.isArray(window.ATAS_INDICATOR_CATALOG)?window.ATAS_INDICATOR_CATALOG:[];
+  const mappedKeys=new Set(catalog.map(x=>x.addKey).filter(Boolean));
+  const rows=catalog.map(x=>({
+    key:x.addKey||null, name:x.name, description:x.detail, sourceClass:x.sourceClass,
+    sourceFile:x.sourceFile, group:x.group||"technical", status:x.status,
+    conversion:x.conversion||"not_ported", requirement:x.requirement||"pending", source:"ATAS"
+  }));
+  // QuantLab-specific Orderflow / Market Model entries remain available alongside the ATAS catalogue.
+  Object.entries(IND).forEach(([key,d])=>{
+    if(!["of","mm"].includes(d.t)||mappedKeys.has(key))return;
+    rows.push({key,name:d.n,description:d.d,sourceClass:key,group:d.t==="of"?"orderflow":"market",status:"native",conversion:"native",requirement:"quantlab",source:"QuantLab"});
+  });
+  const q=IND_SEARCH.toLocaleLowerCase();
+  const filtered=rows.filter(x=>{
+    const groupOk=IF==="all"||(IF==="of"?x.group==="orderflow":IF==="mm"?x.group==="market":x.group==="technical"||x.group==="utility");
+    if(!groupOk)return false;
+    if(!q)return true;
+    return [x.name,x.description,x.sourceClass,x.sourceFile,x.group,x.source,atasStatusLabel(x)].join(" ").toLocaleLowerCase().includes(q);
+  });
+  const counts={all:rows.length,of:rows.filter(x=>x.group==="orderflow").length,mm:rows.filter(x=>x.group==="market").length,at:rows.filter(x=>x.group==="technical"||x.group==="utility").length};
+  $("indGrid").innerHTML=filtered.length?filtered.map(x=>{
+    const d=x.key&&IND[x.key], already=x.key&&ACT.some(a=>a.key===x.key);
+    const canAdd=!!d&&x.status!=="pending"&&x.status!=="needs_ticks"&&x.status!=="needs_depth"&&x.status!=="needs_external"&&x.status!=="needs_session"&&x.status!=="visual_only";
+    const badge=x.source==="QuantLab"?"QuantLab":atasStatusLabel(x);
+    const className=x.source==="QuantLab"?"native":atasStatusClass(x);
+    const req=x.requirement&&x.requirement!=="ohlcv"&&x.requirement!=="quantlab"?`<span class="ind-requirement">${indEscape(({ticks:"Cần tick / trade data",depth:"Cần full depth / MBO",oi:"Cần Open Interest",external:"Cần nguồn ngoài",external_symbol:"Cần symbol tham chiếu",account:"Cần account / portfolio data",breadth:"Cần market breadth",footprint:"Cần footprint / price-level volume",session:"Cần lịch phiên / timezone",visual:"UI / renderer riêng",pending:"Chưa có phép tính port"})[x.requirement]||x.requirement)}</span>`:"";
+    return `<article class="ind-row"><div class="ind-row-main"><div class="ind-row-title"><strong>${indEscape(x.name)}</strong><span class="ind-source">${indEscape(x.sourceClass)}</span><span class="ind-status ${className}">${indEscape(badge)}</span></div><p>${indEscape(x.description||"")}</p><div class="ind-row-meta"><span>${indEscape(x.group==="orderflow"?"Orderflow":x.group==="market"?"Market Model":x.group==="utility"?"Utility":"Technical")}</span>${req}<span class="ind-source-file">${indEscape(x.sourceFile||"QuantLab native")}</span></div></div><div class="ind-row-action">${canAdd?`<button class="btn sm" data-add="${indEscape(x.key)}"${already?" disabled":""}>${already?"Đã thêm":"+ Thêm vào chart"}</button>`:`<button class="btn ghost sm" disabled title="Indicator chưa có bản chạy phù hợp với dữ liệu hiện tại">${x.status==="visual_only"?"Tiện ích riêng":x.status==="pending"?"Chưa port": "Chưa đủ dữ liệu"}</button>`}</div></article>`;
+  }).join(""):`<div class="ind-empty">Không tìm thấy indicator phù hợp với từ khóa “${indEscape(IND_SEARCH)}”.</div>`;
+  $("indResultCount").textContent=`${filtered.length} / ${rows.length} indicators`;
+  $("indF").innerHTML=[["all","Tất cả",counts.all],["of","Orderflow",counts.of],["mm","Market Model",counts.mm],["at","Technical + Utility",counts.at]].map(([k,n,c])=>`<button class="tf${k===IF?" on":""}" data-f="${k}">${n}<small>${c}</small></button>`).join("");
 }
 $("v-ind").onclick=e=>{
   const t=e.target.closest("[data-add],[data-rm],[data-f],[data-set]");if(!t)return;
@@ -348,7 +381,9 @@ $("v-ind").onchange=e=>{
   else if(t.dataset.on){a.on=t.checked;saveInd();renderInd()}
 };
 $("v-ind").oninput=e=>{
-  const t=e.target,j=t.dataset.c;if(j===undefined)return;const a=ACT.find(x=>x.id===t.closest("[data-id]").dataset.id);if(!a)return;
+  const t=e.target;
+  if(t.id==="indSearch"){IND_SEARCH=t.value.trim();buildInd();return}
+  const j=t.dataset.c;if(j===undefined)return;const row=t.closest("[data-id]");if(!row)return;const a=ACT.find(x=>x.id===row.dataset.id);if(!a)return;
   a.c[+j]=t.value;saveInd();remTpl(a);if(IND[a.key].rc)rIndSoon();else applyColor(a,+j);try{window.crossAssetMapIndicatorSync?.()}catch{}legend();
 };
 document.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>show(b.dataset.go));
