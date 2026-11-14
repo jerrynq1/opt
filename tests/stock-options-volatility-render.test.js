@@ -9,15 +9,17 @@ function loadRenderer() {
   let source = fs.readFileSync(path.join(__dirname, '..', 'js', 'stock-options.js'), 'utf8');
   const marker = '  buildViews();\n  window.stockOptionsSetActive=setActive;';
   assert.ok(source.includes(marker), 'stock options test hook marker exists');
-  source = source.replace(marker, '  window.__renderVolSkewChart=renderVolSkewChart;\n  return;\n  buildViews();\n  window.stockOptionsSetActive=setActive;');
+  source = source.replace(marker, '  window.__renderVolSkewChart=renderVolSkewChart;\n  window.__renderVolTermChart=renderVolTermChart;\n  return;\n  buildViews();\n  window.stockOptionsSetActive=setActive;');
   const elements = new Map();
   const document = { getElementById(id) { if (!elements.has(id)) elements.set(id, { id, innerHTML: '', textContent: '' }); return elements.get(id); } };
   const window = { BINANCE_STOCK_PROXY: 'https://proxy.test', BINANCE_STOCK_SPOT_API: 'https://proxy.test' };
   vm.runInNewContext(source, { window, document, location: { port: '8787' }, console, Intl }, { filename: 'stock-options.js' });
-  return window.__renderVolSkewChart;
+  return { skew: window.__renderVolSkewChart, term: window.__renderVolTermChart };
 }
 
-const render = loadRenderer();
+const renderer = loadRenderer();
+const render = renderer.skew;
+const renderTerm = renderer.term;
 
 test('Volatility Skew renders Call and Put IV curves with Spot and 25-delta markers', () => {
   const html = render({
@@ -31,7 +33,10 @@ test('Volatility Skew renders Call and Put IV curves with Spot and 25-delta mark
     ],
     put25Strike: 95, put25IV: 0.27,
     call25Strike: 105, call25IV: 0.22,
-    atmIV: 0.205
+    atmIV: 0.205,
+    cleanPut25Strike: 95, cleanPut25IV: 0.27,
+    cleanCall25Strike: 105, cleanCall25IV: 0.22,
+    cleanAtmIV: 0.205
   }, 100);
   assert.match(html, /<svg/);
   assert.match(html, /<path d="M .*so-vol-skew-call/);
@@ -122,4 +127,35 @@ test('Clean/Raw toggle is present and Clean mode uses filtered IV fields by defa
   assert.doesNotMatch(raw, /LOESS/);
 });
 
+
+test('Clean and Raw modes share the same Y-axis range for honest visual comparison', () => {
+  const row = {
+    expiry: '2026-12-18', cleanIVCount: 4, rawSkewIVCount: 6,
+    skewCurve: [
+      { strike: 90, callIV: 0.62, putIV: 0.58, callCleanIV: null, putCleanIV: null },
+      { strike: 95, callIV: 0.31, putIV: 0.33, callCleanIV: 0.30, putCleanIV: 0.32 },
+      { strike: 100, callIV: 0.20, putIV: 0.21, callCleanIV: 0.20, putCleanIV: 0.21 },
+      { strike: 105, callIV: 0.27, putIV: 0.29, callCleanIV: 0.26, putCleanIV: 0.28 },
+      { strike: 110, callIV: 0.65, putIV: 0.61, callCleanIV: null, putCleanIV: null }
+    ]
+  };
+  const clean = render(row, 100, 1, 'clean');
+  const raw = render(row, 100, 1, 'raw');
+  const yTicks = html => [...html.matchAll(/<text x="[0-9.]+" y="[0-9.]+" text-anchor="end" class="so-vol-axis">([^<]+)<\/text>/g)].map(x => x[1]);
+  assert.deepEqual(yTicks(clean), yTicks(raw));
+});
+
 console.log('Stock Options Volatility Skew renderer tests: passed');
+
+
+test('IV Term Structure excludes single-sided ATM estimates', () => {
+  const html = renderTerm([
+    { expiry:'2026-11-20', dte:6, atmIV:0.21, atmSideCount:2 },
+    { expiry:'2026-11-27', dte:13, atmIV:0.24, atmSideCount:1 },
+    { expiry:'2026-12-04', dte:20, atmIV:0.26, atmSideCount:2 }
+  ]);
+  assert.match(html,/Two-sided ATM IV · 2 loaded expiries/);
+  assert.match(html,/2026-11-20/);
+  assert.match(html,/2026-12-04/);
+  assert.doesNotMatch(html,/2026-11-27/);
+});

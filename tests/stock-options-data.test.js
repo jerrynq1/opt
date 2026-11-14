@@ -27,6 +27,24 @@ function loadStockOptionsHelpers() {
 
 const helpers = loadStockOptionsHelpers();
 
+
+test('normalizer prefers mark IV and averages bid/ask IV only when mark IV is absent', () => {
+  const markPreferred=helpers.normaliseQuote({
+    os:'QQQ261120C00100000', iv:null, bidIV:'0.20', askIV:'0.24',
+    data:{markIV:'0.23'}
+  });
+  assert.equal(markPreferred.iv,0.23);
+  assert.equal(markPreferred.providerIVSource,'mark');
+  const bidAsk=helpers.normaliseQuote({
+    os:'QQQ261120C00100000', bidIV:'0.20', askIV:'0.24'
+  });
+  assert.equal(bidAsk.iv,0.22);
+  assert.equal(bidAsk.providerIVSource,'bid-ask-iv-mid');
+  const oneSided=helpers.normaliseQuote({os:'QQQ261120C00100000',bidIV:'0.20'});
+  assert.equal(oneSided.iv,0.20);
+  assert.equal(oneSided.providerIVSource,'bid-only');
+});
+
 test('Binance quote fields map last price, OI, Greeks and contract multiplier', () => {
   const q = helpers.normaliseQuote({
     os: 'GLD261110C00369000', t: 'call', sp: '369', m: '100',
@@ -695,4 +713,36 @@ test('public chain-symbol requests have a configured Worker fallback for browser
   const source = fs.readFileSync(path.join(__dirname, '../js/stock-options.js'), 'utf8');
   assert.match(source, /if\(!response\)\{[\s\S]*?if\(!proxyUrl\)[\s\S]*?fetchWithTimeout\(proxyUrl,options,REQUEST_TIMEOUT_MS,deadlineAt\)/);
   assert.match(source, /Worker fallback cũng lỗi/);
+});
+
+
+test('partial quote refresh preserves IV provenance and bid/ask IV metadata with the last valid IV', () => {
+  const previous = helpers.normaliseQuote({
+    os:'QQQ261120C00100000', iv:null, bidIV:'0.20', askIV:'0.24'
+  });
+  const merged = helpers.mergeQuoteSnapshot(previous, helpers.normaliseQuote({
+    os:'QQQ261120C00100000', iv:null, bidIV:null, askIV:null
+  }));
+  assert.equal(merged.iv,0.22);
+  assert.equal(merged.providerIVSource,'bid-ask-iv-mid');
+  assert.equal(merged.bidIV,0.20);
+  assert.equal(merged.askIV,0.24);
+});
+
+
+test('GEX DTE uses 16:15 ET for GLD/QQQ and 16:00 ET for standard equity options', () => {
+  const date='2026-12-18';
+  assert.equal(helpers.expiryAtUsCloseUtc(date,'GLD'),Date.parse('2026-12-18T21:15:00Z'));
+  assert.equal(helpers.expiryAtUsCloseUtc(date,'QQQ'),Date.parse('2026-12-18T21:15:00Z'));
+  assert.equal(helpers.expiryAtUsCloseUtc(date,'AAPL'),Date.parse('2026-12-18T21:00:00Z'));
+});
+
+
+test('normalizer skips zero IV placeholders and falls through to a valid nested mark IV', () => {
+  const q=helpers.normaliseQuote({
+    os:'QQQ261120C00100000', iv:0,
+    data:{markIV:'0.235'}
+  });
+  assert.equal(q.iv,0.235);
+  assert.equal(q.providerIVSource,'mark');
 });

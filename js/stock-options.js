@@ -528,13 +528,29 @@
     const oiParsed=pick('oi','openInterest','open_interest','openInterestQty','open_interest_qty','openInterestQuantity');
     const oi=oiParsed!==null&&oiParsed>=0?oiParsed:null;
     const multiplier=pick('m','multiplier','contractMultiplier','contract_multiplier','contractSize','contract_size');
+    // Mark IV is the preferred provider value. If it is absent, average bidIV/askIV
+    // when both exist; never silently prefer only bidIV just because it appeared first.
+    const pickPositivePriority=(...keys)=>{
+      for(const key of keys)for(const pack of packs){
+        const value=pack[key];if(value===null||value===undefined||value==='')continue;
+        const parsed=num(value);if(parsed!==null&&parsed>0)return parsed;
+      }
+      return null;
+    };
+    // Ignore zero/negative IV placeholders so a valid nested field or bid/ask IV
+    // can still be selected instead of silently suppressing the fallback.
+    const markIV=pickPositivePriority('iv','impliedVolatility','impliedVol','markIV','markIv','mark_iv');
+    const bidIV=pickPositivePriority('bidIV','bidIv','bid_iv');
+    const askIV=pickPositivePriority('askIV','askIv','ask_iv');
+    const providerIV=markIV!==null?markIV:(bidIV!==null&&askIV!==null?(bidIV+askIV)/2:(bidIV??askIV));
+    const providerIVSource=markIV!==null?'mark':(bidIV!==null&&askIV!==null?'bid-ask-iv-mid':bidIV!==null?'bid-only':askIV!==null?'ask-only':null);
     return {
       optionSymbol, name:pickText('n','name')||optionSymbol, side,
       expiration:pick('e','expiration','expiry'), strike:pick('sp','strikePrice','strike','k')??occStrike(optionSymbol),
       multiplier:multiplier!==null&&multiplier>0?multiplier:null,
       last:pick('p','l','lastPrice','last'), bid:pick('bp','bid'), ask:pick('ap','ask'), mid:pick('mp','mid'),
       volume:pick('v','volume'), openInterest:oi,
-      iv:pick('iv','impliedVolatility','impliedVol','markIV','markIv','mark_iv','bidIV','askIV'),
+      iv:providerIV, providerIVSource, bidIV, askIV,
       delta:pick('de','delta'), gamma:pick('ga','gamma'), theta:pick('th','theta'), vega:pick('ve','vega'),
       breakEven:pick('be','breakEven'), previousClose:pick('pcp','previousClose'), bidSize:pick('bs','bidSize'), askSize:pick('as','askSize'),
     };
@@ -564,7 +580,7 @@
     const merged={...previous,...incoming};
     // Binance may omit slowly changing fields in a refresh or send them as null.
     // Preserve the last valid OI/IV/multiplier/Greek rather than erasing analytics.
-    for(const field of ['openInterest','multiplier','iv','gamma','delta','theta','vega','strike','side','expiration']){
+    for(const field of ['openInterest','multiplier','iv','providerIVSource','bidIV','askIV','gamma','delta','theta','vega','strike','side','expiration']){
       if(incoming[field]===null||incoming[field]===undefined){
         if(previous[field]!==null&&previous[field]!==undefined)merged[field]=previous[field];
       }
@@ -834,16 +850,18 @@
   function ivSigma(value){
     let v=num(value);if(v===null||v<=0)return null;
     if(v>3)v/=100;
-    return v>=.01&&v<=5?v:null;
+    return v>0&&v<=5?v:null;
   }
-  function expiryAtUsCloseUtc(expiry){
+  function expiryAtUsCloseUtc(expiry,symbol=''){
     const date=String(expiry||'').slice(0,10),m=date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if(!m)return null;
-    const targetWall=Date.UTC(+m[1],+m[2]-1,+m[3],16,0,0); // 16:00 New York local time
+    const lateClose=/^(GLD|QQQ)$/i.test(String(symbol||''));
+    const closeHour=16,closeMinute=lateClose?15:0;
+    const targetWall=Date.UTC(+m[1],+m[2]-1,+m[3],closeHour,closeMinute,0); // GLD/QQQ late-close ETFs: 16:15 ET; standard equity: 16:00 ET
     try{
       const fmt=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
       let guess=targetWall;
-      // Solve UTC instant whose New York wall-clock time is 16:00; this handles EST/EDT.
+      // Solve UTC instant whose New York wall-clock time is the symbol-specific close; this handles EST/EDT.
       for(let i=0;i<4;i++){
         const parts=Object.fromEntries(fmt.formatToParts(new Date(guess)).map(x=>[x.type,x.value]));
         const represented=Date.UTC(+parts.year,+parts.month-1,+parts.day,+parts.hour,+parts.minute,+parts.second);
@@ -857,8 +875,8 @@
       return targetWall+5*60*60*1000;
     }
   }
-  function yearsToExpiry(expiry,now){
-    const end=expiryAtUsCloseUtc(expiry);
+  function yearsToExpiry(expiry,now,symbol=''){
+    const end=expiryAtUsCloseUtc(expiry,symbol);
     if(end===null)return null;
     const t=(end-now)/(365.25*86400000);
     return Number.isFinite(t)&&t>0?t:null;
@@ -887,12 +905,12 @@
   function gammaFlipInputKey(rows){
     return rows.map(q=>[q.optionSymbol||'',q.strike??'',q.side||'',q.openInterest??'',q.multiplier??'',q.iv??''].join(':')).join('|');
   }
-  function gammaFlipOf(rows,spot,expiry,now=Date.now()){
+  function gammaFlipOf(rows,spot,expiry,now=Date.now(),symbol=''){
     // Multi-expiry rows carry their own `_expiry`: every contract is repriced with its own DTE.
     const multi=rows.some(q=>q&&q._expiry);
-    const time=multi?1:yearsToExpiry(expiry,now);
+    const time=multi?1:yearsToExpiry(expiry,now,symbol);
     if(time===null)return {level:null,complete:false,reason:'Thiếu DTE hợp lệ',coverage:0};
-    const timeOf=q=>multi?yearsToExpiry(q._expiry,now):time;
+    const timeOf=q=>multi?yearsToExpiry(q._expiry,now,symbol):time;
     const valid=rows.filter(q=>Number.isFinite(q.strike)&&q.strike>0&&(q.side==='C'||q.side==='P'));
     const invalidCount=rows.length-valid.length;
     // Received contracts with null OI are treated as zero until Binance reports a value.
@@ -942,11 +960,13 @@
     }
     const orderedCrosses=crosses.sort((a,b)=>a-b);
     const level=spot>0&&orderedCrosses.length?orderedCrosses.slice().sort((a,b)=>Math.abs(a-spot)-Math.abs(b-spot))[0]:null;
-    return {level,crosses:orderedCrosses,complete:true,reason:!orderedCrosses.length?'Không có zero-cross trong dải giá giả định':!(spot>0)?'Cần Spot hiện tại để chọn zero-cross gần nhất':(multi?'Gamma Flip / Zero Gamma · BSM repricing · DTE riêng từng hợp đồng · OI/IV cố định · r=q=0 · 16:00 New York':'Gamma Flip / Zero Gamma · BSM repricing · OI/IV cố định · r=q=0 · 16:00 New York expiry · bisection-refined'),coverage,range:[lo,hi],timeToExpiry:multi?null:time};
+    const closeLabel=/^(GLD|QQQ)$/i.test(String(symbol||''))?'16:15':'16:00';
+    const methodLabel=multi?`Gamma Flip / Zero Gamma · BSM repricing · DTE riêng từng hợp đồng · OI/IV cố định · r=q=0 · ${closeLabel} New York`:`Gamma Flip / Zero Gamma · BSM repricing · OI/IV cố định · r=q=0 · ${closeLabel} New York expiry · bisection-refined`;
+    return {level,crosses:orderedCrosses,complete:true,reason:!orderedCrosses.length?'Không có zero-cross trong dải giá giả định':!(spot>0)?'Cần Spot hiện tại để chọn zero-cross gần nhất':methodLabel,coverage,range:[lo,hi],timeToExpiry:multi?null:time};
   }
   function calcSingle(s,now=Date.now(),opts={}){
     const rows=getRows(s),spot=s.price;
-    const time=yearsToExpiry(s.expiry,now);
+    const time=yearsToExpiry(s.expiry,now,s.cfg?.symbol);
     let callOI=0,putOI=0,oiKnown=0,oiMissing=0,oiAssumedZero=0,volumeKnown=0,volumeAssumedZero=0,ivKnown=0,ivMissing=0,multiplierMissing=0,multiplierAssumed=0,multiplierKnown=0,maxPainMultiplierMissing=0,callVol=0,putVol=0;
     let invalidContractCount=0;
     const oiMissingSamples=[],missingIVSamples=[],missingMultiplierSamples=[],missingGreekSamples=[];
@@ -980,7 +1000,7 @@
       if(ivSigma(q.iv)===null)ivMissing++;
       if(m===null)continue;
       if(spot!==null){
-        const resolved=resolveGamma(q,spot,q._expiry?yearsToExpiry(q._expiry,now):time);
+        const resolved=resolveGamma(q,spot,q._expiry?yearsToExpiry(q._expiry,now,s.cfg?.symbol):time);
         if(resolved.gamma!==null){
           const raw=resolved.gamma*oi*m*spot*spot*.01;
           const v=side==='P'?-raw:raw;
@@ -1031,7 +1051,7 @@
     const flipCacheKey=[s.expiry||'',...(opts.multi?['multi']:[]),gammaFlipInputKey(rows),rows.length,Math.floor(now/60000)].join('|');
     let flipCalc=s._gammaFlipCache?.key===flipCacheKey?s._gammaFlipCache.value:null;
     if(opts.skipFlip)flipCalc={level:null,crosses:[],complete:false,reason:'Bỏ qua trong bảng breakdown',coverage:0};
-    else if(!flipCalc){flipCalc=complete?gammaFlipOf(rows,spot,s.expiry,now):{level:null,crosses:[],complete:false,reason:'Full Option Chain chưa tải xong',coverage:0};try{s._gammaFlipCache={key:flipCacheKey,value:flipCalc}}catch{}}
+    else if(!flipCalc){flipCalc=complete?gammaFlipOf(rows,spot,s.expiry,now,s.cfg?.symbol):{level:null,crosses:[],complete:false,reason:'Full Option Chain chưa tải xong',coverage:0};try{s._gammaFlipCache={key:flipCacheKey,value:flipCalc}}catch{}}
     const gammaFlip=spot>0&&flipCalc.crosses?.length?flipCalc.crosses.slice().sort((a,b)=>Math.abs(a-spot)-Math.abs(b-spot))[0]:null;
     // GEX 1–10 is the next ten distinct strikes after excluding every plotted
     // price level: OI Walls, GEX CW/PW, Max Pain (including tied minima), and
@@ -1070,7 +1090,7 @@
   function scopeExpiries(s,now=Date.now()){
     const scope=s.scope||'selected';
     if(scope==='selected')return s.expiry?[s.expiry]:[];
-    const live=(s.expirations||[]).map(x=>x.date).filter(d=>yearsToExpiry(d,now)!==null).sort();
+    const live=(s.expirations||[]).map(x=>x.date).filter(d=>yearsToExpiry(d,now,s.cfg?.symbol)!==null).sort();
     if(scope==='0dte'){const today=isoTodayNY();return live.filter(d=>d===today);}
     if(scope==='weekly'){
       // One expiry per calendar week: the last listed one (normally Friday; Thursday around a Friday holiday).
@@ -1262,8 +1282,8 @@
   function volPoints(value){return value===null||!Number.isFinite(Number(value))?'—':`${value>0?'+':''}${(Number(value)*100).toFixed(2)} vol pts`;}
   function renderVolTermChart(rows){
     if(!rows||rows.length<2)return '<div class="so-vol-empty">Cần ít nhất 2 expiry đã tải. Chọn <b>Analysis Scope → Weekly</b> hoặc <b>All Expiries</b> phía trên để mở rộng Term Structure.</div>';
-    const valid=rows.filter(row=>row.atmIV!==null&&Number.isFinite(row.dte));
-    if(valid.length<2)return '<div class="so-vol-empty">Chưa đủ ATM IV ở ít nhất hai kỳ hạn để dựng Term Structure.</div>';
+    const valid=rows.filter(row=>row.atmIV!==null&&row.atmSideCount===2&&Number.isFinite(row.dte));
+    if(valid.length<2)return '<div class="so-vol-empty">Cần ít nhất 2 expiry có ATM IV được bracketed từ cả Call và Put để dựng Term Structure. Expiry single-side hoặc thiếu dữ liệu được loại khỏi đường.</div>';
     const w=620,h=190,pad={l:44,r:18,t:18,b:38};
     const minX=Math.min(...valid.map(x=>x.dte)),maxX=Math.max(...valid.map(x=>x.dte));
     const minY=Math.max(0,Math.min(...valid.map(x=>x.atmIV))-0.025),maxY=Math.max(...valid.map(x=>x.atmIV))+0.025;
@@ -1272,7 +1292,7 @@
     const points=valid.map(row=>`${x(row.dte).toFixed(1)},${y(row.atmIV).toFixed(1)}`).join(' ');
     const grid=[0,.5,1].map(f=>{const value=minY+(maxY-minY)*f,yy=y(value);return `<line x1="${pad.l}" y1="${yy}" x2="${w-pad.r}" y2="${yy}" class="so-vol-gridline"/><text x="${pad.l-8}" y="${yy+4}" text-anchor="end" class="so-vol-axis">${(value*100).toFixed(1)}%</text>`;}).join('');
     const marks=valid.map(row=>`<circle cx="${x(row.dte)}" cy="${y(row.atmIV)}" r="4" class="so-vol-point"><title>${esc(row.expiry)} · ${row.dte.toFixed(1)} DTE · ATM IV ${volFmt(row.atmIV)}</title></circle><text x="${x(row.dte)}" y="${h-12}" text-anchor="middle" class="so-vol-axis">${Math.round(row.dte)}d</text>`).join('');
-    return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="ATM implied volatility term structure">${grid}<polyline points="${points}" class="so-vol-line"/>${marks}</svg><div class="so-vol-chart-legend">ATM IV · ${valid.length} loaded expiries · x-axis: DTE</div>`;
+    return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="ATM implied volatility term structure">${grid}<polyline points="${points}" class="so-vol-line"/>${marks}</svg><div class="so-vol-chart-legend">Two-sided ATM IV · ${valid.length} loaded expiries · x-axis: DTE</div>`;
   }
   function renderVolSkewChart(row,spot,zoomFactor=1,mode='clean'){
     const curve=(Array.isArray(row?.skewCurve)?row.skewCurve:[])
@@ -1309,8 +1329,10 @@
     const visibleCurve=curve.filter(item=>item.strike>=minX-1e-8&&item.strike<=maxX+1e-8);
     const visibleCallRows=visibleCurve.filter(item=>Number.isFinite(item[callKey]));
     const visiblePutRows=visibleCurve.filter(item=>Number.isFinite(item[putKey]));
-    // Keep the Y axis fixed across Clean/Raw modes and zoom levels for honest comparison.
-    const ySource=cleanMode&&selectedAll.length?selectedAll:all;
+    // Keep the Y-axis scale fixed across Clean/Raw modes and zoom levels.
+    // Always derive its range from Raw observations; Clean must not visually
+    // exaggerate a filtered curve by silently rescaling the vertical axis.
+    const ySource=all;
     const minValue=Math.min(...ySource.map(item=>item.iv)),maxValue=Math.max(...ySource.map(item=>item.iv));
     const yPad=Math.max((maxValue-minValue)*.12,.025);
     const minY=Math.max(0,minValue-yPad),maxY=Math.max(minY+.03,maxValue+yPad);
@@ -1374,9 +1396,16 @@
       spotMark=`<line x1="${sx.toFixed(1)}" y1="${pad.t}" x2="${sx.toFixed(1)}" y2="${h-pad.b}" class="so-vol-skew-spot"/><text x="${sx.toFixed(1)}" y="${pad.t+11}" text-anchor="middle" class="so-vol-skew-spot-label">SPOT ${strikeFmt(spot)}</text>`;
     }
     const markers=[];
-    if(Number.isFinite(row?.put25Strike)&&Number.isFinite(row?.put25IV))markers.push({label:'25Δ P',strike:row.put25Strike,iv:row.put25IV,cls:'put'});
-    if(Number.isFinite(spot)&&Number.isFinite(row?.atmIV))markers.push({label:'ATM',strike:spot,iv:row.atmIV,cls:'atm'});
-    if(Number.isFinite(row?.call25Strike)&&Number.isFinite(row?.call25IV))markers.push({label:'25Δ C',strike:row.call25Strike,iv:row.call25IV,cls:'call'});
+    const markerValues=cleanMode?{
+      putStrike:row?.cleanPut25Strike,putIV:row?.cleanPut25IV,
+      atmIV:row?.cleanAtmIV,callStrike:row?.cleanCall25Strike,callIV:row?.cleanCall25IV
+    }:{
+      putStrike:row?.put25Strike,putIV:row?.put25IV,
+      atmIV:row?.atmIV,callStrike:row?.call25Strike,callIV:row?.call25IV
+    };
+    if(Number.isFinite(markerValues.putStrike)&&Number.isFinite(markerValues.putIV))markers.push({label:'25Δ P',strike:markerValues.putStrike,iv:markerValues.putIV,cls:'put'});
+    if(Number.isFinite(spot)&&Number.isFinite(markerValues.atmIV))markers.push({label:'ATM',strike:spot,iv:markerValues.atmIV,cls:'atm'});
+    if(Number.isFinite(markerValues.callStrike)&&Number.isFinite(markerValues.callIV))markers.push({label:'25Δ C',strike:markerValues.callStrike,iv:markerValues.callIV,cls:'call'});
     const markerSvg=markers.filter(marker=>marker.strike>=minX&&marker.strike<=maxX&&marker.iv>=minY&&marker.iv<=maxY).map(marker=>{
       const xx=x(marker.strike),yy=y(marker.iv);
       const anchor=xx>w*.78?'end':'start',dx=anchor==='end'?-8:8;
@@ -1395,7 +1424,7 @@
     }
     const svg=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Volatility skew: ${selectedMode} Call and Put IV line chart by strike" data-mode="${selectedMode}" data-x-min="${minX.toFixed(4)}" data-x-max="${maxX.toFixed(4)}">${grid}${xTicks}${spotMark}${callLine}${putLine}${markerSvg}</svg>`;
     const legend=`<div class="so-vol-skew-legend"><span><i class="so-vol-legend-call"></i> Call IV</span><span><i class="so-vol-legend-put"></i> Put IV</span><span><i class="so-vol-legend-spot"></i> Spot</span><small>${visibleCallRows.length}/${callRows.length} Call · ${visiblePutRows.length}/${putRows.length} Put in view · ${esc(row.expiry)}</small></div>`;
-    const cleanNotice=cleanMode?'<div class="so-vol-clean-note">Clean loại quote zero-bid, crossed book và spread quá rộng khi thanh khoản thấp; đường hiển thị dùng LOESS cục bộ. KPI ATM/RR/BF vẫn tính từ IV gốc.</div>':'';
+    const cleanNotice=cleanMode?'<div class="so-vol-clean-note">Clean loại quote zero-bid, crossed book, một phía IV và spread quá rộng khi thanh khoản thấp; đường hiển thị dùng LOESS cục bộ. Marker trên chart dùng mẫu Clean; KPI ATM/RR/BF vẫn tính từ IV gốc (Raw) để đối chiếu.</div>':'';
     return `${modeControls}${controls}${svg}${legend}${cleanNotice}`;
   }
 
@@ -1403,7 +1432,7 @@
     const p=`so-${s.cfg.key}`,status=$(`${p}-vol-status`);if(!status)return;
     const {inputs,expected}=collectVolatilityInputs(s),api=window.StockOptionsVolatility;
     if(!api?.calculate){status.textContent='Volatility module unavailable';return;}
-    const result=api.calculate({spot:s.price,expiries:inputs});
+    const result=api.calculate({spot:s.price,symbol:s.cfg.symbol,expiries:inputs});
     const current=result.expiries.find(row=>row.expiry===s.expiry)||null;
     const kpis=$(`${p}-vol-kpis`),wings=$(`${p}-vol-wings`),skew=$(`${p}-vol-skew-lines`),move=$(`${p}-vol-move`),range=$(`${p}-vol-range`),skewChart=$(`${p}-vol-skew-chart`),skewChartMeta=$(`${p}-vol-skew-chart-meta`);
     if(skewChart){
@@ -1441,7 +1470,7 @@
     if(kpis){
       const expectedMove=current?.expectedMove,movePct=current?.expectedMovePct;
       const cards=[
-        ['ATM IMPLIED VOLATILITY',volFmt(current?.atmIV??null),current?`${current.expiry} · ${current.sourceLabel}`:'Expiry đang chọn chưa có đủ IV/Spot'],
+        ['ATM IMPLIED VOLATILITY',volFmt(current?.atmIV??null),current?`${current.expiry} · ${current.atmSideCount===2?'Call/Put bracketed':current.atmSideCount===1?'single-side bracketed':'ATM unavailable'} · ${current.sourceLabel}`:'Expiry đang chọn chưa có đủ IV/Spot'],
         ['25Δ RISK REVERSAL',volPoints(current?.rr25??null),current?'Call 25Δ − Put 25Δ':'Cần IV hai cánh 25Δ'],
         ['25Δ BUTTERFLY',volPoints(current?.bf25??null),current?'½(Call 25Δ + Put 25Δ) − ATM':'Cần ATM và hai cánh 25Δ'],
         ['EXPECTED MOVE · 1σ',expectedMove===null||expectedMove===undefined?'—':`±${fmt(expectedMove,2)}`,movePct===null||movePct===undefined?'Cần ATM IV và DTE':`±${(movePct*100).toFixed(2)}% · đến ${current.expiry}`]
@@ -1476,7 +1505,7 @@
     const termCount=$(`${p}-vol-term-count`);if(termCount)termCount.textContent=`${rows.length} / ${expected} expiries`;
     const note=$(`${p}-vol-note`);if(note){
       const scopeText=s.scope==='selected'?'Term Structure hiện chỉ có expiry đang chọn; chọn Analysis Scope → Weekly hoặc All Expiries để tải thêm kỳ hạn.':`Term Structure dùng dữ liệu đã tải theo Analysis Scope: ${scopeLabels[s.scope]||s.scope}.`;
-      note.textContent=`${scopeText} · ${result.providerIVCount} provider IV, ${result.midDerivedIVCount} IV suy ra từ mid. Delta thiếu được ước lượng BSM (r=q=0). Surface là snapshot theo dữ liệu hiện có, không phải surface arbitrage-free.`;
+      note.textContent=`${scopeText} · ${result.providerIVCount} provider IV, ${result.midDerivedIVCount} IV suy ra từ mid. ATM cần strike bao quanh Spot; 10Δ/25Δ được nội suy giữa hai Delta bao quanh, không ngoại suy. Delta thiếu được ước lượng BSM (r=q=0). KPI dùng IV hợp lệ thô; Clean/Raw chỉ ảnh hưởng biểu đồ Skew. Surface là snapshot theo dữ liệu hiện có, không phải surface arbitrage-free.`;
     }
   }
 
@@ -2055,5 +2084,5 @@
   window.stockOptionsCrossAssetSnapshot=crossAssetSnapshot;
   window.stockOptionsCrossAssetSetExpiry=crossAssetSetExpiry;
   window.stockOptionsSetScope=(key,scope)=>{const s=sessions[key];if(!s)throw new Error('Nguồn ETF không hợp lệ: '+key);setScope(s,scope);};
-  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,price:s.price,previousClose:s.previousClose,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,priceAgeMs:s.priceAgeMs,priceReceivedAgeMs:s.priceReceivedAgeMs,priceType:s.priceType,marketPhase:s.marketPhase,priceFeedState:s.priceFeedState,priceFeedDetail:s.priceFeedDetail,priceSource:s.priceSource,priceEndpointIndex:s.priceEndpointIndex,priceActivationAt:s.priceActivationAt,priceConnectStartedAt:s.priceConnectStartedAt,priceSocketOpenedAt:s.priceSocketOpenedAt,priceUpstreamConnectedAt:s.priceUpstreamConnectedAt,priceFirstMessageAt:s.priceFirstMessageAt,priceFirstSnapshotAt:s.priceFirstSnapshotAt,priceStartupMs:s.priceStartupMs,priceSocketState:s.priceSocket?.readyState??null,optionFeedState:s.optionFeedState,optionFeedError:s.optionFeedError,optionSocketState:s.socket?.readyState??null,quotes:s.quotes.size,contracts:c.totalContracts,quotesExpiry:s.quotesExpiry,complete:c.complete,hydrating:s.hydrating,missingQuoteSymbols:c.missingQuoteSymbols.slice(0,20),lastHydrationIncompleteSymbols:s.lastHydrationIncompleteSymbols||[],incompleteContractDetails:(s.lastHydrationIncompleteSymbols||[]).slice(0,12).map(symbol=>{const q=s.quotes.get(symbol)||{},m=s.contractMeta?.get(symbol)||{};return {symbol,side:q.side??m.side,strike:q.strike??m.strike,oi:q.openInterest??m.openInterest,iv:q.iv??m.iv,gamma:q.gamma??m.gamma,multiplier:q.multiplier??m.multiplier,effectiveMultiplier:effectiveMultiplier(q.optionSymbol?q:m)}}),quoteSamples:[...s.quotes.values()].slice(0,3).map(q=>({symbol:q.optionSymbol,side:q.side,strike:q.strike,oi:q.openInterest,iv:q.iv,gamma:q.gamma,multiplier:q.multiplier,effectiveMultiplier:effectiveMultiplier(q)})),chainListInvalidCount:s.chainListInvalidCount,chainListDuplicateCount:s.chainListDuplicateCount,displayStrikes:s.displayStrikes,oiKnown:c.oiKnown,oiMissing:c.oiMissing,oiAssumedZero:c.oiAssumedZero,volumeKnown:c.volumeKnown,volumeAssumedZero:c.volumeAssumedZero,oiObservedCoverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiMissingSamples:c.oiMissingSamples,multiplierKnown:c.multiplierKnown,multiplierAssumed:c.multiplierAssumed,multiplierMissing:c.multiplierMissing,missingMultiplierSamples:c.missingMultiplierSamples,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,missingGreekSamples:c.missingGreekSamples,gexCoverage:c.gexCoverage,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexComplete:c.gexComplete,oiComplete:c.oiComplete,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,maxPainTiedStrikes:c.maxPain?.tiedStrikes||[],maxPainComplete:c.maxPainComplete,gexRatio:c.gexRatio,volatility:window.StockOptionsVolatility?.calculate?.({spot:s.price,expiries:collectVolatilityInputs(s).inputs})||null,price:s.price}] }));
+  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,price:s.price,previousClose:s.previousClose,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,priceAgeMs:s.priceAgeMs,priceReceivedAgeMs:s.priceReceivedAgeMs,priceType:s.priceType,marketPhase:s.marketPhase,priceFeedState:s.priceFeedState,priceFeedDetail:s.priceFeedDetail,priceSource:s.priceSource,priceEndpointIndex:s.priceEndpointIndex,priceActivationAt:s.priceActivationAt,priceConnectStartedAt:s.priceConnectStartedAt,priceSocketOpenedAt:s.priceSocketOpenedAt,priceUpstreamConnectedAt:s.priceUpstreamConnectedAt,priceFirstMessageAt:s.priceFirstMessageAt,priceFirstSnapshotAt:s.priceFirstSnapshotAt,priceStartupMs:s.priceStartupMs,priceSocketState:s.priceSocket?.readyState??null,optionFeedState:s.optionFeedState,optionFeedError:s.optionFeedError,optionSocketState:s.socket?.readyState??null,quotes:s.quotes.size,contracts:c.totalContracts,quotesExpiry:s.quotesExpiry,complete:c.complete,hydrating:s.hydrating,missingQuoteSymbols:c.missingQuoteSymbols.slice(0,20),lastHydrationIncompleteSymbols:s.lastHydrationIncompleteSymbols||[],incompleteContractDetails:(s.lastHydrationIncompleteSymbols||[]).slice(0,12).map(symbol=>{const q=s.quotes.get(symbol)||{},m=s.contractMeta?.get(symbol)||{};return {symbol,side:q.side??m.side,strike:q.strike??m.strike,oi:q.openInterest??m.openInterest,iv:q.iv??m.iv,gamma:q.gamma??m.gamma,multiplier:q.multiplier??m.multiplier,effectiveMultiplier:effectiveMultiplier(q.optionSymbol?q:m)}}),quoteSamples:[...s.quotes.values()].slice(0,3).map(q=>({symbol:q.optionSymbol,side:q.side,strike:q.strike,oi:q.openInterest,iv:q.iv,gamma:q.gamma,multiplier:q.multiplier,effectiveMultiplier:effectiveMultiplier(q)})),chainListInvalidCount:s.chainListInvalidCount,chainListDuplicateCount:s.chainListDuplicateCount,displayStrikes:s.displayStrikes,oiKnown:c.oiKnown,oiMissing:c.oiMissing,oiAssumedZero:c.oiAssumedZero,volumeKnown:c.volumeKnown,volumeAssumedZero:c.volumeAssumedZero,oiObservedCoverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiMissingSamples:c.oiMissingSamples,multiplierKnown:c.multiplierKnown,multiplierAssumed:c.multiplierAssumed,multiplierMissing:c.multiplierMissing,missingMultiplierSamples:c.missingMultiplierSamples,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,missingGreekSamples:c.missingGreekSamples,gexCoverage:c.gexCoverage,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexComplete:c.gexComplete,oiComplete:c.oiComplete,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,maxPainTiedStrikes:c.maxPain?.tiedStrikes||[],maxPainComplete:c.maxPainComplete,gexRatio:c.gexRatio,volatility:window.StockOptionsVolatility?.calculate?.({spot:s.price,symbol:s.cfg.symbol,expiries:collectVolatilityInputs(s).inputs})||null,price:s.price}] }));
 })();

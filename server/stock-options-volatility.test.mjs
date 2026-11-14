@@ -100,4 +100,80 @@ const emptyBook = vol.calculate({ spot: 100, now, expiries: [{ expiry, quotes: [
 assert.equal(emptyBook.expiries[0].skewCurve[0].callCleanIV, null, 'an empty bid/ask book is not shown in Clean');
 assert.equal(emptyBook.expiries[0].skewQualityCounts['empty-book'], 1);
 
+
+// Audit regression: 25-delta metrics are interpolated between bracketing deltas,
+// rather than borrowing whichever contract happens to be nearest.
+const deltaInterpolation = vol.calculate({ spot: 100, now, expiries: [{ expiry, quotes: [
+  { side: 'C', strike: 104, iv: 0.22, delta: 0.20 },
+  { side: 'C', strike: 106, iv: 0.28, delta: 0.30 },
+  { side: 'P', strike: 96, iv: 0.30, delta: -0.30 },
+  { side: 'P', strike: 94, iv: 0.24, delta: -0.20 },
+  { side: 'C', strike: 100, iv: 0.20, delta: 0.50 },
+  { side: 'P', strike: 100, iv: 0.21, delta: -0.50 }
+] }] });
+assert.ok(Math.abs(deltaInterpolation.expiries[0].call25IV - 0.25) < 1e-9);
+assert.ok(Math.abs(deltaInterpolation.expiries[0].put25IV - 0.27) < 1e-9);
+assert.equal(deltaInterpolation.expiries[0].call25Strike, 105);
+assert.equal(deltaInterpolation.expiries[0].call25Method, 'delta-interpolated');
+
+// Audit regression: never label a one-sided far-OTM observation as ATM.
+const unbracketedAtm = vol.calculate({ spot: 100, now, expiries: [{ expiry, quotes: [
+  { side: 'C', strike: 115, iv: 0.35, delta: 0.15 },
+  { side: 'P', strike: 90, iv: 0.31, delta: -0.15 }
+] }] });
+assert.equal(unbracketedAtm.expiries[0].atmIV, null);
+assert.equal(unbracketedAtm.expiries[0].atmSideCount, 0);
+
+// Audit regression: an excessively wide strike bracket is not accepted as ATM.
+const wideAtmBracket = vol.calculate({ spot: 100, now, expiries: [{ expiry, quotes: [
+  { side: 'C', strike: 90, iv: 0.25, delta: 0.65 },
+  { side: 'C', strike: 110, iv: 0.35, delta: 0.35 }
+] }] });
+assert.equal(wideAtmBracket.expiries[0].atmCallIV, null);
+
+// Low but positive provider IVs are valid; do not impose an arbitrary 1% floor.
+assert.ok(Math.abs(vol.ivSigma(0.005) - 0.005) < 1e-12);
+
+// GLD and QQQ use their late-close 16:15 ET schedule; normal equity defaults to 16:00 ET.
+const winterDate = '2026-12-18';
+const gldClose = vol.expiryAtNewYorkClose(winterDate, 'GLD');
+const qqqClose = vol.expiryAtNewYorkClose(winterDate, 'QQQ');
+const standardClose = vol.expiryAtNewYorkClose(winterDate, 'AAPL');
+assert.equal(new Date(gldClose).toISOString(), '2026-12-18T21:15:00.000Z');
+assert.equal(new Date(qqqClose).toISOString(), '2026-12-18T21:15:00.000Z');
+assert.equal(new Date(standardClose).toISOString(), '2026-12-18T21:00:00.000Z');
+const summerClose = vol.expiryAtNewYorkClose('2026-07-17', 'GLD');
+assert.equal(new Date(summerClose).toISOString(), '2026-07-17T20:15:00.000Z');
+const seventyFiveMinutes = vol.timeToExpiry('2026-12-18', Date.parse('2026-12-18T20:00:00Z'), 'QQQ');
+assert.ok(Math.abs(seventyFiveMinutes - (75 / (60 * 24 * 365.25))) < 1e-12, 'QQQ DTE includes the 16:15 ET late close');
+
+// Clean chart marker calculations are kept separate from raw headline metrics.
+assert.ok(Number.isFinite(cleanRow.cleanAtmIV));
+assert.equal(cleanRow.cleanIVCount, 5);
+
 console.log('Stock Options Volatility Analytics tests: passed');
+
+
+// Audit: mid-derived IV must retain valid sub-1% vol observations, but not return
+// the arbitrary lower solver bound when the premium contains no time value.
+const lowVolMid = vol.bsmPrice(100, 100, t, 0.005, 'C');
+const lowVolInverted = vol.impliedVolFromMid(lowVolMid, 100, 100, t, 'C');
+assert.ok(lowVolInverted !== null && Math.abs(lowVolInverted - 0.005) < 1e-5);
+assert.equal(vol.impliedVolFromMid(0, 100, 100, t, 'C'), null);
+
+// Delta interpolation is deliberately unavailable when the nearest bracket is sparse.
+const sparseDelta = vol.interpolateAtDelta([
+  { side:'C', delta:0.16, iv:0.20, strike:110 },
+  { side:'C', delta:0.34, iv:0.30, strike:105 }
+], 'C', 0.25);
+assert.equal(sparseDelta, null);
+
+
+// A provider Mid outside its own valid bid/ask book is ignored for model inversion.
+const bookTime = vol.timeToExpiry(expiry, now);
+const fairMid = vol.bsmPrice(100, 100, bookTime, 0.24, 'C');
+const bookFallback = vol.calculate({ spot:100, now, expiries:[{ expiry, quotes:[{
+  side:'C', strike:100, iv:null, delta:null,
+  bid:fairMid-0.05, ask:fairMid+0.05, mid:0.01
+}]}]});
+assert.ok(Math.abs(bookFallback.expiries[0].atmIV - 0.24) < 1e-5);

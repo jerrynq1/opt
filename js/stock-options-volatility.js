@@ -24,13 +24,21 @@
     let sigma = n(value);
     if (sigma === null || sigma <= 0) return null;
     if (sigma > 3) sigma /= 100;
-    return sigma >= 0.01 && sigma <= 5 ? sigma : null;
+    return sigma > 0 && sigma <= 5 ? sigma : null;
   }
 
-  function expiryAtNewYorkClose(expiry) {
+  const LATE_CLOSE_SYMBOLS = new Set(['GLD', 'QQQ']);
+
+  // GLD and QQQ are listed among the ETF options with a 4:15 p.m. ET late close.
+  // Other underlyings retain the standard 4:00 p.m. ET assumption. The broker's
+  // contract screen remains authoritative for holiday/early-close exceptions.
+  function expiryAtNewYorkClose(expiry, symbol = '') {
     const match = String(expiry || '').slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (!match) return null;
-    const targetWall = Date.UTC(+match[1], +match[2] - 1, +match[3], 16, 0, 0);
+    const closeMinute = LATE_CLOSE_SYMBOLS.has(String(symbol || '').toUpperCase()) ? 16 * 60 + 15 : 16 * 60;
+    const closeHour = Math.floor(closeMinute / 60);
+    const closeMinutePart = closeMinute % 60;
+    const targetWall = Date.UTC(+match[1], +match[2] - 1, +match[3], closeHour, closeMinutePart, 0);
     try {
       const formatter = new Intl.DateTimeFormat('en-US', {
         timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
@@ -50,8 +58,8 @@
     }
   }
 
-  function timeToExpiry(expiry, now = Date.now()) {
-    const end = expiryAtNewYorkClose(expiry);
+  function timeToExpiry(expiry, now = Date.now(), symbol = '') {
+    const end = expiryAtNewYorkClose(expiry, symbol);
     if (end === null) return null;
     const years = (end - now) / (365.25 * DAY_MS);
     return Number.isFinite(years) && years > 0 ? years : null;
@@ -94,12 +102,17 @@
 
   function quoteMid(q) {
     const directMid = n(q?.mid);
-    if (directMid !== null && directMid > 0) return { price: directMid, source: 'mid' };
     const bid = n(q?.bid), ask = n(q?.ask);
     if (bid !== null && ask !== null && bid > 0 && ask >= bid) {
-      const mid = (bid + ask) / 2;
-      return mid > 0 ? { price: mid, source: 'bid-ask midpoint' } : null;
+      // Do not invert a provider Mid that contradicts its own two-sided book.
+      // A valid in-book Mid is retained; otherwise use the contemporaneous NBBO midpoint.
+      if (directMid !== null && directMid > 0 && directMid >= bid && directMid <= ask) {
+        return { price: directMid, source: 'mid' };
+      }
+      const midpoint = (bid + ask) / 2;
+      return midpoint > 0 ? { price: midpoint, source: 'bid-ask midpoint' } : null;
     }
+    if (directMid !== null && directMid > 0) return { price: directMid, source: 'mid' };
     return null;
   }
 
@@ -107,7 +120,7 @@
     if (!(price > 0 && spot > 0 && strike > 0 && time > 0 && (side === 'C' || side === 'P'))) return null;
     const intrinsic = side === 'C' ? Math.max(spot - strike, 0) : Math.max(strike - spot, 0);
     if (price + Math.max(0.01, spot * 1e-6) < intrinsic) return null;
-    let low = 0.01, high = 5;
+    let low = 0.0001, high = 5;
     const maxPrice = bsmPrice(spot, strike, time, high, side);
     if (maxPrice === null || price > maxPrice) return null;
     for (let i = 0; i < 72; i++) {
@@ -118,12 +131,12 @@
       else high = mid;
     }
     const sigma = (low + high) / 2;
-    return Number.isFinite(sigma) && sigma >= 0.01 && sigma <= 5 ? sigma : null;
+    return Number.isFinite(sigma) && sigma > 0.0001001 && sigma <= 5 ? sigma : null;
   }
 
   function resolveQuoteIV(q, spot, time) {
     const provider = ivSigma(q?.iv);
-    if (provider !== null) return { iv: provider, source: 'provider' };
+    if (provider !== null) return { iv: provider, source: 'provider', providerSource: q?.providerIVSource || 'mark' };
     const mid = quoteMid(q);
     if (!mid) return { iv: null, source: 'missing' };
     const derived = impliedVolFromMid(mid.price, spot, Number(q.strike), time, q.side);
@@ -161,14 +174,16 @@
         }
       }
     } else {
-      // A one-sided/absent book is not automatically discarded when a provider
-      // IV and independent liquidity evidence are present. A synthetic/mid IV
-      // without a two-sided market or activity is too weak for the Clean curve.
-      const hasMid = directMid !== null && directMid > 0;
+      // Without a two-sided book, require independent activity evidence. A
+      // mid-derived IV needs an actual two-sided market; a single bidIV/askIV
+      // is not treated as a clean, balanced volatility observation.
       const hasActivity = volume > 0 || openInterest > 0;
-      if (!hasMid && !hasActivity) return { clean: false, reason: 'no-market-or-liquidity', spreadPct };
-      if (q?.ivSource === 'mid-derived' && !hasActivity) {
+      if (!hasActivity) return { clean: false, reason: 'no-market-or-liquidity', spreadPct };
+      if (q?.ivSource === 'mid-derived') {
         return { clean: false, reason: 'mid-derived-no-liquidity', spreadPct };
+      }
+      if (q?.providerIVSource === 'bid-only' || q?.providerIVSource === 'ask-only') {
+        return { clean: false, reason: 'one-sided-provider-iv', spreadPct };
       }
     }
 
@@ -197,34 +212,72 @@
     return match ? Number(match[1]) / 1000 : null;
   }
 
-  function interpolateAtSpot(rows, spot) {
-    const valid = rows.filter(row => row.iv !== null && row.strike > 0)
+  function interpolateAtSpot(rows, spot, maxBracketLogWidth = 0.06) {
+    if (!(spot > 0)) return null;
+    const valid = rows.filter(row => row.iv !== null && Number.isFinite(row.iv) && row.strike > 0)
       .map(row => ({ ...row, x: Math.log(row.strike / spot) }))
       .sort((a, b) => a.x - b.x);
     if (!valid.length) return null;
-    const lower = [...valid].reverse().find(row => row.x <= 0);
-    const upper = valid.find(row => row.x >= 0);
-    if (lower && upper && lower !== upper && upper.x - lower.x > 1e-9) {
-      const weight = (0 - lower.x) / (upper.x - lower.x);
-      return lower.iv + (upper.iv - lower.iv) * weight;
+
+    const exact = valid.find(row => Math.abs(row.x) < 1e-9);
+    if (exact) return exact.iv;
+
+    const lower = [...valid].reverse().find(row => row.x < 0);
+    const upper = valid.find(row => row.x > 0);
+    // ATM must be bracketed by observations around Spot. Do not silently label a
+    // far-OTM/ITM single quote as ATM when one side of the smile is absent.
+    if (!lower || !upper) return null;
+    const width = upper.x - lower.x;
+    if (!(width > 0) || width > maxBracketLogWidth) return null;
+    const weight = (0 - lower.x) / width;
+    return lower.iv + (upper.iv - lower.iv) * weight;
+  }
+
+  function interpolateAtDelta(rows, side, target) {
+    const wantedSign = side === 'P' ? -1 : 1;
+    const grouped = new Map();
+    for (const row of rows) {
+      if (row.side !== side || !Number.isFinite(row.iv) || !Number.isFinite(row.delta)) continue;
+      const absDelta = Math.abs(row.delta);
+      if (!(absDelta > 0 && absDelta <= 1)) continue;
+      const key = absDelta.toFixed(5);
+      if (!grouped.has(key)) grouped.set(key, { delta: absDelta, ivs: [], strikes: [], rows: [] });
+      const group = grouped.get(key);
+      group.ivs.push(row.iv);
+      if (Number.isFinite(row.strike) && row.strike > 0) group.strikes.push(row.strike);
+      group.rows.push(row);
     }
-    return valid.reduce((best, row) => !best || Math.abs(row.x) < Math.abs(best.x) ? row : best, null).iv;
+    const points = [...grouped.values()].map(group => ({
+      delta: group.delta,
+      iv: average(group.ivs),
+      strike: average(group.strikes),
+      rows: group.rows
+    })).filter(point => Number.isFinite(point.iv)).sort((a, b) => a.delta - b.delta);
+    if (!points.length) return null;
+
+    const exact = points.find(point => Math.abs(point.delta - target) <= 0.001);
+    if (exact) return { iv: exact.iv, strike: exact.strike, delta: wantedSign * target, method: 'observed' };
+
+    const lower = [...points].reverse().find(point => point.delta < target);
+    const upper = points.find(point => point.delta > target);
+    // No extrapolation: a 17-delta quote is not a 25-delta quote just because
+    // it happens to be the nearest available contract.
+    if (!lower || !upper) return null;
+    const lowerGap = target - lower.delta;
+    const upperGap = upper.delta - target;
+    const maxSideGap = target >= 0.20 ? 0.06 : 0.035;
+    const totalGap = upper.delta - lower.delta;
+    if (lowerGap > maxSideGap || upperGap > maxSideGap || totalGap > maxSideGap * 2) return null;
+
+    const weight = lowerGap / totalGap;
+    const iv = lower.iv + (upper.iv - lower.iv) * weight;
+    const strike = Number.isFinite(lower.strike) && Number.isFinite(upper.strike)
+      ? lower.strike + (upper.strike - lower.strike) * weight : null;
+    return { iv, strike, delta: wantedSign * target, method: 'delta-interpolated' };
   }
 
-  function closestDelta(rows, side, target) {
-    const valid = rows.filter(row => row.side === side && row.iv !== null && Number.isFinite(row.delta));
-    if (!valid.length) return null;
-    const wanted = side === 'P' ? -target : target;
-    const sorted = valid.slice().sort((a, b) => Math.abs(a.delta - wanted) - Math.abs(b.delta - wanted));
-    const selected = sorted[0];
-    // Avoid labelling a deep ITM/OTM quote as a 10/25-delta wing when coverage is poor.
-    const tolerance = target >= 0.20 ? 0.10 : 0.06;
-    if (Math.abs(selected.delta - wanted) > tolerance) return null;
-    return selected;
-  }
-
-  function expiryMetrics(expiry, quotes, spot, now) {
-    const time = timeToExpiry(expiry, now);
+  function expiryMetrics(expiry, quotes, spot, now, symbol = '') {
+    const time = timeToExpiry(expiry, now, symbol);
     if (!(spot > 0) || time === null) return null;
     const valid = [];
     let providerIVCount = 0, midDerivedIVCount = 0, providerDeltaCount = 0, modelDeltaCount = 0;
@@ -250,10 +303,11 @@
     const atmPut = interpolateAtSpot(puts, spot);
     const atmValues = [atmCall, atmPut].filter(value => Number.isFinite(value));
     const atmIV = atmValues.length ? atmValues.reduce((sum, value) => sum + value, 0) / atmValues.length : null;
-    const put25 = closestDelta(valid, 'P', 0.25);
-    const call25 = closestDelta(valid, 'C', 0.25);
-    const put10 = closestDelta(valid, 'P', 0.10);
-    const call10 = closestDelta(valid, 'C', 0.10);
+    const put25 = interpolateAtDelta(valid, 'P', 0.25);
+    const call25 = interpolateAtDelta(valid, 'C', 0.25);
+    const put10 = interpolateAtDelta(valid, 'P', 0.10);
+    const call10 = interpolateAtDelta(valid, 'C', 0.10);
+    const atmSideCount = atmValues.length;
     const rr25 = put25 && call25 ? call25.iv - put25.iv : null;
     const bf25 = put25 && call25 && atmIV !== null ? (call25.iv + put25.iv) / 2 - atmIV : null;
     // Keep the actual strike-by-strike IV observations for the simple smile/skew chart.
@@ -263,7 +317,7 @@
       accepted: 0, rejected: 0, 'zero-bid': 0, 'empty-book': 0, 'crossed-market': 0,
       'spread-over-100pct': 0, 'wide-spread-low-liquidity': 0,
       'wide-spread-no-activity': 0, 'no-market-or-liquidity': 0,
-      'mid-derived-no-liquidity': 0
+      'mid-derived-no-liquidity': 0, 'one-sided-provider-iv': 0
     };
     for (const row of valid) {
       const key = row.strike;
@@ -300,6 +354,14 @@
     });
     const cleanIVCount = skewCurve.reduce((sum, item) => sum + item.callCleanCount + item.putCleanCount, 0);
     const rawSkewIVCount = skewCurve.reduce((sum, item) => sum + item.callCount + item.putCount, 0);
+    const cleanValid = valid.filter(row => row.skewClean);
+    const cleanAtmCall = interpolateAtSpot(cleanValid.filter(row => row.side === 'C'), spot);
+    const cleanAtmPut = interpolateAtSpot(cleanValid.filter(row => row.side === 'P'), spot);
+    const cleanAtmValues = [cleanAtmCall, cleanAtmPut].filter(Number.isFinite);
+    const cleanAtmIV = cleanAtmValues.length
+      ? cleanAtmValues.reduce((sum, value) => sum + value, 0) / cleanAtmValues.length : null;
+    const cleanPut25 = interpolateAtDelta(cleanValid, 'P', 0.25);
+    const cleanCall25 = interpolateAtDelta(cleanValid, 'C', 0.25);
     const dte = time * 365.25;
     const expectedMove = atmIV !== null ? spot * atmIV * Math.sqrt(time) : null;
     const expectedMovePct = atmIV !== null ? atmIV * Math.sqrt(time) : null;
@@ -308,24 +370,30 @@
       expiry, time, dte, quoteCount: Array.isArray(quotes) ? quotes.length : 0,
       ivCount: valid.length, providerIVCount, midDerivedIVCount, providerDeltaCount, modelDeltaCount,
       ivCoverage: quotes?.length ? valid.length / quotes.length : 0,
-      atmIV, atmCallIV: atmCall, atmPutIV: atmPut,
+      atmIV, atmCallIV: atmCall, atmPutIV: atmPut, atmSideCount,
+      atmMethod: atmSideCount === 2 ? 'call-put-bracketed' : atmSideCount === 1 ? 'single-side-bracketed' : 'unavailable',
       put10IV: put10?.iv ?? null, put25IV: put25?.iv ?? null,
       call25IV: call25?.iv ?? null, call10IV: call10?.iv ?? null,
       put25Delta: put25?.delta ?? null, call25Delta: call25?.delta ?? null,
+      put25Method: put25?.method ?? null, call25Method: call25?.method ?? null,
       rr25, bf25,
       putSkew: put25 && atmIV !== null ? put25.iv - atmIV : null,
       callSkew: call25 && atmIV !== null ? call25.iv - atmIV : null,
       put25Strike: put25?.strike ?? null, call25Strike: call25?.strike ?? null,
+      cleanAtmIV, cleanPut25IV: cleanPut25?.iv ?? null, cleanCall25IV: cleanCall25?.iv ?? null,
+      cleanPut25Strike: cleanPut25?.strike ?? null, cleanCall25Strike: cleanCall25?.strike ?? null,
+      cleanAtmSideCount: cleanAtmValues.length,
       expectedMove, expectedMovePct, skewCurve, cleanIVCount, rawSkewIVCount, skewRejectedCount: skewQualityCounts.rejected, skewQualityCounts,
       sourceLabel: midDerivedIVCount ? (providerIVCount ? 'Provider IV + Mid-derived fallback' : 'Mid-derived BSM IV') : 'Provider IV',
       surface: { put10: put10?.iv ?? null, put25: put25?.iv ?? null, atm: atmIV, call25: call25?.iv ?? null, call10: call10?.iv ?? null }
     };
   }
 
-  function calculate({ spot, expiries = [], now = Date.now() } = {}) {
+  function calculate({ spot, symbol = '', expiries = [], now = Date.now() } = {}) {
     const underlying = n(spot);
+    const underlyingSymbol = String(symbol || '').toUpperCase();
     const rows = (Array.isArray(expiries) ? expiries : [])
-      .map(item => expiryMetrics(item?.expiry, item?.quotes, underlying, now))
+      .map(item => expiryMetrics(item?.expiry, item?.quotes, underlying, now, underlyingSymbol))
       .filter(Boolean)
       .sort((a, b) => a.expiry.localeCompare(b.expiry));
     return {
@@ -339,5 +407,5 @@
     };
   }
 
-  return { calculate, ivSigma, timeToExpiry, bsmDelta, bsmPrice, impliedVolFromMid, normalizedProviderDelta };
+  return { calculate, ivSigma, timeToExpiry, expiryAtNewYorkClose, bsmDelta, bsmPrice, impliedVolFromMid, normalizedProviderDelta, interpolateAtSpot, interpolateAtDelta };
 });
