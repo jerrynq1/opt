@@ -1764,33 +1764,39 @@
       delta:{callField:'callDex',putField:'putDex',title:'DELTA EXPOSURE',subtitle:'Call DEX → right · Put DEX ← left',units:'USD delta notional',note:'Cột Call/Put biểu thị độ lớn Delta Notional riêng theo từng option side; aggregate vẫn giữ dấu Delta native từ provider. OI không xác định holder đang Long hay Short.'},
       vega:{callField:'callVgex',putField:'putVgex',title:'VEGA EXPOSURE',subtitle:'Call Vega → right · Put Vega ← left',units:'Vega × OI × contract multiplier',note:'Call và Put Vega được tách theo option side, hiển thị độ lớn tuyệt đối. Đây là Greek × OI × multiplier, không phải vị thế Long/Short đã xác minh.'},
       theta:{callField:'callThex',putField:'putThex',title:'THETA EXPOSURE',subtitle:'Call Theta → right · Put Theta ← left',units:'Theta × OI × contract multiplier',note:'Call và Put Theta được tách theo option side, hiển thị độ lớn tuyệt đối. Aggregate vẫn giữ dấu Theta native từ provider; không phải P/L dự báo.'},
-      vanna:{signedField:'vannaEx',title:'VANNA · OI-WEIGHTED MODEL SENSITIVITY',subtitle:'Positive / negative ∂Delta/∂IV by strike · sign is Greek direction, not position direction',units:'USD delta-notional change per +1 volatility point',note:'OI-weighted BSM Vanna: ∂Delta/∂σ × OI × multiplier × Spot × 0.01. Bar dương/âm chỉ biểu thị dấu toán học của model Greek; OI không cho biết dealer/holder đang Long hay Short. q: QQQ 0.45%, GLD 0%; r = 0% giả định.'},
-      charm:{signedField:'charmEx',title:'CHARM · OI-WEIGHTED MODEL SENSITIVITY',subtitle:'Calendar-time ∂Delta/∂t by strike · sign is Greek direction, not position direction',units:'USD delta-notional change per calendar day',note:'OI-weighted BSM Charm: ∂Delta/∂calendar time × OI × multiplier × Spot / 365.25. Charm dương/âm mô tả chiều thay đổi Delta khi thời gian trôi qua; không phải dealer Long/Short. q: QQQ 0.45%, GLD 0%; r = 0% giả định.'}
+      vanna:{callField:'callVannaEx',putField:'putVannaEx',title:'VANNA EXPOSURE',subtitle:'Call Vanna → right · Put Vanna ← left',units:'USD delta-notional change per +1 volatility point',note:'Cùng giao diện GEX/DEX: Call → right (cyan), Put ← left (gold); độ dài thanh là trị tuyệt đối theo option side. Tooltip giữ dấu Vanna gốc của từng phía. OI-weighted BSM Vanna = ∂Delta/∂σ × OI × multiplier × Spot × 0.01; dấu là hướng đạo hàm mô hình, không xác định Long/Short của holder/dealer. q: QQQ 0.45%, GLD 0%; r = 0% giả định.'},
+      charm:{callField:'callCharmEx',putField:'putCharmEx',title:'CHARM EXPOSURE',subtitle:'Call Charm → right · Put Charm ← left',units:'USD delta-notional change per calendar day',note:'Cùng giao diện GEX/DEX: Call → right (cyan), Put ← left (gold); độ dài thanh là trị tuyệt đối theo option side. Tooltip giữ dấu Charm gốc của từng phía. OI-weighted BSM Charm = ∂Delta/∂calendar time × OI × multiplier × Spot / 365.25; dấu là hướng đạo hàm mô hình, không xác định Long/Short của holder/dealer. q: QQQ 0.45%, GLD 0%; r = 0% giả định.'}
     }[metricKey]||null;
     const title=$(`so-${s.cfg.key}-exposure-title`),subtitle=$(`so-${s.cfg.key}-exposure-subtitle`),units=$(`so-${s.cfg.key}-exposure-units`),note=$(`so-${s.cfg.key}-exposure-note`),legend=$(`so-${s.cfg.key}-exposure-legend`);
     if(config){if(title)title.textContent=config.title;if(subtitle)subtitle.textContent=config.subtitle;if(units)units.textContent=config.units;if(note)note.textContent=config.note;}
     if(!config){el.innerHTML='<div class="opt-empty">Exposure metric không được hỗ trợ.</div>';return;}
 
-    const hasValue=x=>config.signedField?Number.isFinite(Number(x[config.signedField]))&&Math.abs(Number(x[config.signedField]))>0:((Number(x[config.callField])||0)!==0||(Number(x[config.putField])||0)!==0);
+    const modelMetric=metricKey==='vanna'||metricKey==='charm';
+    const modelKnown=modelMetric?(metricKey==='vanna'?c.vannaKnown:c.charmKnown):0;
+    const modelRequired=modelMetric?(metricKey==='vanna'?c.vannaRequired:c.charmRequired):0;
+    const modelCoverage=modelMetric?(metricKey==='vanna'?c.vannaCoverage:c.charmCoverage):null;
+    const hasValue=x=>(Number(x[config.callField])||0)!==0||(Number(x[config.putField])||0)!==0;
     const candidates=c.dist.filter(hasValue);
+    const commonLegend='<span><i class="call"></i>CALL EXPOSURE</span><span><i class="put"></i>PUT EXPOSURE</span><span><i class="spot"></i>UNDERLYING SPOT</span><span><i class="call-wall"></i>CALL OI WALL</span><span><i class="put-wall"></i>PUT OI WALL</span><span><i class="gex-call-wall"></i>CW · MAX +GEX</span><span><i class="gex-put-wall"></i>PW · MAX −GEX</span>';
     if(!candidates.length){
-      const waitingSpot=s.price===null&&(metricKey==='gamma'||metricKey==='delta'||metricKey==='vanna'||metricKey==='charm');
-      const modelMetric=metricKey==='vanna'||metricKey==='charm';
+      const waitingSpot=s.price===null&&(metricKey==='gamma'||metricKey==='delta'||modelMetric);
       const message=waitingSpot?'Chờ Spot underlying từ Binance price stream để tính model Greek.':modelMetric?'Cần contract có OI > 0, multiplier, IV hợp lệ và DTE còn hiệu lực để suy ra BSM '+(metricKey==='vanna'?'Vanna':'Charm')+'.':'Cần OI, multiplier và Greeks hợp lệ cho expiry này.';
       el.innerHTML=`<div class="exposure-empty"><b>${waitingSpot?'Đang chờ Spot underlying':'Chưa có dữ liệu Exposure'}</b><span>${message}</span></div>`;
-      if(legend&&modelMetric)legend.innerHTML='<span><i class="model-negative"></i>NEGATIVE MODEL GREEK</span><span><i class="model-positive"></i>POSITIVE MODEL GREEK</span><span><i class="spot"></i>UNDERLYING SPOT</span>';
+      if(legend)legend.innerHTML=commonLegend;
       return;
     }
 
-    // Keep a symmetric strike window around the underlying so the profile reads like a ladder.
+    // Every metric, including Vanna and Charm, uses the exact bilateral GEX/DEX renderer.
+    // Call magnitude is drawn to the right (cyan); Put magnitude is drawn to the left (gold).
+    // For model Greeks, raw signs remain available in row tooltips and the explanatory note.
     const MAX_ROWS=44;
     let visible;
     if(Number.isFinite(s.price)){
       visible=candidates.slice().sort((a,b)=>Math.abs(a.strike-s.price)-Math.abs(b.strike-s.price)).slice(0,MAX_ROWS).sort((a,b)=>a.strike-b.strike);
     }else{
-      visible=candidates.slice().sort((a,b)=>((Number(b[config.callField])||0)+Math.abs(Number(b[config.putField])||0))-((Number(a[config.callField])||0)+Math.abs(Number(a[config.putField])||0))).slice(0,MAX_ROWS).sort((a,b)=>a.strike-b.strike);
+      visible=candidates.slice().sort((a,b)=>((Math.abs(Number(b[config.callField])||0)+Math.abs(Number(b[config.putField])||0))-(Math.abs(Number(a[config.callField])||0)+Math.abs(Number(a[config.putField])||0)))).slice(0,MAX_ROWS).sort((a,b)=>a.strike-b.strike);
     }
-    const max=Math.max(1,...visible.flatMap(x=>config.signedField?[Math.abs(Number(x[config.signedField])||0)]:[Math.abs(Number(x[config.callField])||0),Math.abs(Number(x[config.putField])||0)]));
+    const max=Math.max(1,...visible.flatMap(x=>[Math.abs(Number(x[config.callField])||0),Math.abs(Number(x[config.putField])||0)]));
     const first=visible[0].strike,last=visible[visible.length-1].strike,range=last-first||1;
     const positionFor=value=>{
       const v=Number(value);if(!Number.isFinite(v)||v<first||v>last)return null;
@@ -1802,42 +1808,29 @@
       return `<div class="exposure-marker ${kind}" style="--marker-y:${pos.toFixed(3)}%"><span>${label} <b>${fmt(value,2)}</b></span></div>`;
     };
     const rows=visible.map((x,i)=>{
-      if(config.signedField){
-        const value=Number(x[config.signedField])||0,width=Math.max(0,Math.min(50,Math.abs(value)/max*50));
-        const cls=value>=0?'is-positive':'is-negative';
-        const rowClass=(Number.isFinite(s.price)&&Math.abs(x.strike-s.price)<=range/Math.max(visible.length-1,1)*.55)?' is-near-spot':'';
-        const callPart=metricKey==='vanna'?Number(x.callVannaEx)||0:Number(x.callCharmEx)||0;
-        const putPart=metricKey==='vanna'?Number(x.putVannaEx)||0:Number(x.putCharmEx)||0;
-        const signedText=`${value>=0?'+':'−'}${compact(Math.abs(value))}`;
-        return `<div class="exposure-row exposure-row-signed${rowClass}" style="--row-i:${i}" data-strike="${x.strike}" title="Strike ${fmt(x.strike,2)} · OI-weighted ${metricKey} ${signedText} · Call contribution ${callPart>=0?'+':'−'}${compact(Math.abs(callPart))} · Put contribution ${putPart>=0?'+':'−'}${compact(Math.abs(putPart))} · Not a dealer-position estimate"><span class="exposure-strike">${fmt(x.strike,2)}</span><span class="exposure-signed-track"><i class="${cls}" style="--signed-width:${width.toFixed(2)}%"></i></span><b class="exposure-signed-value ${cls}">${signedText}</b></div>`;
-      }
-      const call=Math.abs(Number(x[config.callField])||0),put=Math.abs(Number(x[config.putField])||0);
+      const callRaw=Number(x[config.callField])||0,putRaw=Number(x[config.putField])||0;
+      const call=Math.abs(callRaw),put=Math.abs(putRaw);
       const cw=call>0?Math.max(1,call/max*100):0,pw=put>0?Math.max(1,put/max*100):0;
       const rowClass=(Number.isFinite(s.price)&&Math.abs(x.strike-s.price)<=range/Math.max(visible.length-1,1)*.55)?' is-near-spot':'';
-      return `<div class="exposure-row${rowClass}" style="--row-i:${i}" data-strike="${x.strike}" title="Strike ${fmt(x.strike,2)} · Call ${compact(call)} · Put ${compact(put)}"><span class="exposure-strike">${fmt(x.strike,2)}</span><span class="exposure-put-track"><i data-exposure-value="${put}" style="width:${pw.toFixed(2)}%"></i></span><span class="exposure-zero"></span><span class="exposure-call-track"><i data-exposure-value="${call}" style="width:${cw.toFixed(2)}%"></i></span></div>`;
+      const modelDetails=modelMetric
+        ?` · Call signed ${callRaw>=0?'+':'−'}${compact(Math.abs(callRaw))} · Put signed ${putRaw>=0?'+':'−'}${compact(Math.abs(putRaw))} · sign is model-Greek direction, not holder/dealer positioning`
+        :'';
+      return `<div class="exposure-row${rowClass}" style="--row-i:${i}" data-strike="${x.strike}" title="Strike ${fmt(x.strike,2)} · Call ${compact(call)} · Put ${compact(put)}${modelDetails}"><span class="exposure-strike">${fmt(x.strike,2)}</span><span class="exposure-put-track"><i data-exposure-value="${put}" style="width:${pw.toFixed(2)}%"></i></span><span class="exposure-zero"></span><span class="exposure-call-track"><i data-exposure-value="${call}" style="width:${cw.toFixed(2)}%"></i></span></div>`;
     }).join('');
-    const signedMode=!!config.signedField;
     const lines=[
       marker(s.price,'is-spot','SPOT'),
       marker(c.callOIWall?.strike,'is-call-wall','CALL OI WALL'),
       marker(c.putOIWall?.strike,'is-put-wall','PUT OI WALL'),
-      ...(!signedMode?[marker(c.gexCallWall?.strike,'is-gex-call-wall','CW · MAX +GEX'),marker(c.gexPutWall?.strike,'is-gex-put-wall','PW · MAX −GEX')]:[])
+      marker(c.gexCallWall?.strike,'is-gex-call-wall','CW · MAX +GEX'),
+      marker(c.gexPutWall?.strike,'is-gex-put-wall','PW · MAX −GEX')
     ].join('');
-    const modelMetric=metricKey==='vanna'||metricKey==='charm';
-    const modelKnown=modelMetric?(metricKey==='vanna'?c.vannaKnown:c.charmKnown):0;
-    const modelRequired=modelMetric?(metricKey==='vanna'?c.vannaRequired:c.charmRequired):0;
-    const modelCoverage=modelMetric?(metricKey==='vanna'?c.vannaCoverage:c.charmCoverage):null;
     const status=modelMetric
       ?`${!c.complete?'CHAIN PARTIAL · ':''}BSM ${modelKnown}/${modelRequired} · ${modelCoverage===null?'NO OI COVERAGE':(modelCoverage*100).toFixed(1)+'% MODEL COVERAGE'}${c.multiplierMissing?` · ${c.multiplierMissing} MULTIPLIER MISSING`:''}`
       :!c.complete?'PARTIAL CHAIN':metricKey==='gamma'&&c.gexProvisional?'GEX PROVISIONAL':metricKey==='gamma'&&!c.gexComplete?'GEX COVERAGE INCOMPLETE':'FULL CHAIN';
-    if(legend){
-      legend.innerHTML=signedMode
-        ?'<span><i class="model-negative"></i>NEGATIVE MODEL GREEK</span><span><i class="model-positive"></i>POSITIVE MODEL GREEK</span><span><i class="spot"></i>UNDERLYING SPOT</span><span><i class="call-wall"></i>CALL OI WALL</span><span><i class="put-wall"></i>PUT OI WALL</span>'
-        :'<span><i class="call"></i>CALL EXPOSURE</span><span><i class="put"></i>PUT EXPOSURE</span><span><i class="spot"></i>UNDERLYING SPOT</span><span><i class="call-wall"></i>CALL OI WALL</span><span><i class="put-wall"></i>PUT OI WALL</span><span><i class="gex-call-wall"></i>CW · MAX +GEX</span><span><i class="gex-put-wall"></i>PW · MAX −GEX</span>';
-    }
-    el.innerHTML=`<div class="exposure-plot ${signedMode?'is-signed-exposure':''}" role="img" aria-label="${signedMode?'OI-weighted model Greek sensitivity':'Bilateral'} ${metricKey.toUpperCase()} exposure by strike.">
-      <div class="exposure-axis-head ${signedMode?'is-signed-axis':''}">${signedMode?'<span>STRIKE</span><span>NEGATIVE ← ZERO → POSITIVE</span><span>VALUE</span>':'<span>STRIKE</span><span>PUTS ←</span><span></span><span>→ CALLS</span>'}</div>
-      <div class="exposure-rows ${signedMode?'is-signed-exposure-rows':''}">${rows}${lines}</div>
+    if(legend)legend.innerHTML=commonLegend;
+    el.innerHTML=`<div class="exposure-plot" role="img" aria-label="Bilateral ${metricKey.toUpperCase()} exposure by strike.">
+      <div class="exposure-axis-head"><span>STRIKE</span><span>PUTS ←</span><span></span><span>→ CALLS</span></div>
+      <div class="exposure-rows">${rows}${lines}</div>
       <div class="exposure-bottom"><span>${fmt(first,2)} — ${fmt(last,2)}</span><span>${visible.length} STRIKES · ${status}</span><span>MAX ${compact(max)}</span></div>
     </div>`;
   }
