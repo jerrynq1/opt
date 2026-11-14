@@ -1,0 +1,16 @@
+QuantLab 0DTE Time-Decay 3D Update
+Date: 2026-11-14
+
+Full regression: 29 test files passed, 0 failed.
+
+Key checks:
+- A single real 0DTE expiry becomes nine ordered model time slices.
+- All slices retain the same actual expiry; no synthetic second expiry is added.
+- The highest-DTE row retains the observed/provider snapshot.
+- Lower-DTE rows are explicitly tagged as modelled time slices.
+- Greek and exposure metrics are recalculated with BSM as time-to-expiry decreases.
+- IV, Volume and OI are held flat through the modelled time axis.
+- The Y axis starts at 0DTE and shows intermediate remaining-time ticks.
+- Very short remaining times are labelled in minutes to avoid duplicate 0.00D labels.
+- Both axis titles and tooltips identify the modelled time-left view.
+- Multi-expiry surfaces and existing IV/Exposure/Volume/OI tests remain passing.

@@ -1,0 +1,16 @@
+QUANTLAB — SINGLE EXPIRY / 0DTE 3D PROFILE FIX
+
+Problem fixed
+- A single selected expiry no longer shows the “need at least 2 expiries” empty state.
+- The selected expiry is rendered as a 3D Strike-vs-Greek/Exposure profile at its actual DTE.
+- No synthetic second expiry or mesh faces are invented. A full area surface still requires multiple actual expiries.
+- Fractional same-day DTE (e.g. 0.25D) uses a readable 0..1D Y-axis display range while retaining its exact data position.
+- The gold Spot marker can be interpolated between valid moneyness buckets when there is no exact zero bucket.
+
+Install (patch)
+1. Merge opt-main/js/stock-options-3d.js into the deployed website.
+2. Merge opt-main/sw.js.
+3. Publish the website and reload the PWA / Ctrl+Shift+R. Service-worker cache is now ict-quantlab-shell-v38.
+4. No Node.js, Worker, Task Scheduler, or Cloudflare Tunnel restart is required.
+
+Full source also contains tests/stock-options-3d.test.mjs and updated display/PWA tests.

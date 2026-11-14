@@ -1,0 +1,71 @@
+QuantLab full-source package — Three.js 3D Greeks + Options Surface redesign
+Date: 2026-11-14
+
+Test command:
+  bash tests/run-all.sh
+
+Result:
+  Passed: 28 test files
+  Failed: 0
+
+Additional Node-side test suites:
+  node server/equity-price-feed.test.mjs                PASS
+  node server/stock-options-volatility.test.mjs         PASS
+  node server/stock-options-surfaces.test.mjs           PASS
+  node server/home-proxy.integration.test.mjs           PASS
+
+JavaScript syntax checks:
+  js/stock-options.js                                    PASS
+  js/stock-options-volatility.js                         PASS
+  js/stock-options-surfaces.js                           PASS
+  js/stock-options-3d.js                                  PASS
+
+3D renderer checks:
+  - Pinned Three.js r128 loads before the QuantLab 3D adapter PASS
+  - WebGLRenderer / BufferGeometry / MeshStandardMaterial wiring PASS
+  - Explicit X Strike, Y Expiry, Z Metric coordinate semantics PASS
+  - Camera uses Z-up orientation so the vertical axis is metric value PASS
+  - Pointer orbit, wheel/pinch/button zoom and Reset wiring PASS
+  - Hover tooltip maps to the nearest observed mesh vertex PASS
+  - Missing cells are not zero-filled and mesh segments stop at gaps PASS
+  - 2D fallback is explicitly labeled when Three.js/WebGL is unavailable PASS
+  - WebGL renderer instance is reused across data refreshes PASS
+  - PWA cache version: ict-quantlab-shell-v38
+
+Architecture:
+  C. Greeks 3D: per-contract Greek surfaces for Delta, Gamma, Vega, Theta,
+  Vanna, Charm and Rho; selectable Calls or Puts.
+  D. Options Surface 3D: IV, Exposure (GEX/DEX/Vega/Theta/Vanna/Charm),
+  Volume and Open Interest.
+  X = strike moneyness relative to Spot (2.5 percentage-point buckets),
+  Y = expiry/DTE, Z = selected metric. Primary renderer is a true Three.js
+  WebGL mesh, restyled for QuantLab dark navy / teal / indigo / gold theme.
+
+Data caveats:
+  - At least two expiry rows and adjacent populated moneyness buckets are
+    required to draw a surface; a single-expiry scope shows an explanatory state.
+  - Missing cells are not zero-filled and faces are not drawn across gaps.
+  - Greek surfaces show per-contract Greeks; exposure surfaces separately
+    aggregate Greek × OI × multiplier.
+  - Provider Greeks are preferred where available. BSM fallback uses r=0%,
+    q=0.45% for QQQ and q=0% for GLD. Vanna, Charm and Rho are model-derived
+    where provider fields are absent.
+  - Binance OI does not identify dealer-side positioning; Volume is not signed
+    buyer/seller flow. GEX Call+/Put− is a display convention, not verified
+    dealer positioning.
+
+Validation note:
+  Automated tests validate data aggregation, mesh topology, WebGL renderer
+  wiring, interaction lifecycle, markup and cache inclusion. A visual test
+  against the user's deployed browser/session is still required after publish.
+
+3D axis readability update: enlarged tick/axis labels, explicit 0DTE origin with adaptive DTE intervals, gold Spot/ATM ridge markers applied to Greeks and Options surfaces.
+
+Axis / Spot marker update:
+  - Tick and XYZ axis titles enlarged in WebGL and Canvas fallback PASS
+  - Y expiry axis starts at 0DTE and uses adaptive interval ticks PASS
+  - Actual same-day expiries retain fractional DTE; no synthetic T=0 row PASS
+  - Gold Spot / ATM surface ridge and labeled sphere markers PASS
+  - ATM marker interpolates only from valid buckets on both sides when exact 0% bucket is missing PASS
+
+Single-expiry 3D profile regression: 0DTE exact row, fractional 0DTE axis, Spot marker resolution, sparse gaps, and empty single-row data are covered.

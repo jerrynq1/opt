@@ -1,0 +1,13 @@
+QUANTLAB SINGLE-EXPIRY 3D PROFILE FIX
+
+Validation:
+- node --check js/stock-options-3d.js: PASS
+- node --check js/stock-options-surfaces.js: PASS
+- tests/stock-options-3d.test.mjs: PASS (single expiry exact 0DTE, fractional 0DTE, sparse gaps, missing data)
+- tests/stock-options-3d-display.test.js: PASS
+- tests/stock-options-3d-webgl.test.js: PASS
+- tests/pwa.test.js: PASS (cache v38)
+- tests/run-all.sh: 28 test files passed, 0 failed.
+
+The single-expiry chart is truthfully labelled as a 3D profile, not a full area mesh.
+No second expiry or mesh face is synthesized.

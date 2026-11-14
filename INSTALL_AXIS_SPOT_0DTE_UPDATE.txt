@@ -1,0 +1,26 @@
+QuantLab 3D Axis + Spot Marker Update
+====================================
+
+PATCH INSTALL
+1. Unzip this package.
+2. Merge the included opt-main folder into your current website source.
+3. Overwrite the matching files.
+4. Publish/deploy the website.
+5. Reload the PWA so Service Worker cache ict-quantlab-shell-v38 activates (Ctrl+Shift+R, or close/reopen the installed PWA).
+
+No Node.js, Worker, Task Scheduler or Cloudflare Tunnel restart is required.
+
+WHAT CHANGED
+- Larger XYZ axis tick values and axis titles on Greeks 3D and Options Surface 3D.
+- Larger axis footer labels and a taller chart area, including mobile layout.
+- Explicit 0DTE origin and adaptive DTE divisions to the farthest loaded expiry.
+- Expiry rows are sorted nearest-to-farthest.
+- Actual same-day expiries retain fractional DTE (e.g. 0.25D). No synthetic T=0 row is fabricated.
+- Gold Spot/ATM markers are drawn on the surface across observed expiry rows, with a labeled front marker.
+- If an exact 0% moneyness bucket is absent, the marker is interpolated only from valid cells on both sides and labeled EST.
+- Canvas fallback receives the same 0DTE/Spot improvements.
+
+TESTS
+- Full project test files: 28/28 PASS.
+- Additional Node regression suites: 4/4 PASS.
+- JavaScript syntax checks: PASS.
