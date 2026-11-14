@@ -1,19 +1,21 @@
-/* ===== Orderflow: DOM / MBO (indicator "dom") =====
-   Dữ liệu: cTrader Open API có kênh DEPTH (SubscribeDepthQuotes 2156 -> DepthEvent 2155). Mỗi báo giá trong sổ lệnh có một ID riêng + size, sự kiện chỉ gửi phần
-   THÊM/ĐỔI (newQuotes) và phần XOÁ (deletedQuotes). Vì có ID từng lệnh nên giữ được cấu trúc "market by order" (MBO): biết mỗi mức giá gồm những lệnh nào, lệnh nào
-   mới đặt, lệnh nào vừa bị rút/đổi. Lưu ý: với forex/CFD đây là thanh khoản tổng hợp do broker/nhà cung cấp báo, không phải sổ lệnh sàn tập trung như CME.
+/* ===== Orderflow: DOM / Level II depth quotes (indicator "dom") =====
+   Dữ liệu: cTrader Open API có kênh DEPTH (SubscribeDepthQuotes 2156 -> DepthEvent 2155). Mỗi depth quote có ID riêng + size; sự kiện gửi phần
+   THÊM/ĐỔI (newQuotes) và phần XOÁ (deletedQuotes). ID là định danh quote entry do broker gửi, không phải exchange order/MBO ID. Có thể theo dõi quote entry nào
+   vừa được thêm, sửa hoặc xoá; không suy luận việc xoá là cancel hay execution. Lưu ý: với forex/CFD đây là thanh khoản tổng hợp do broker/nhà cung cấp báo, không phải sổ lệnh sàn tập trung như CME.
    Size trong giao thức tính theo 1/100 đơn vị: lot = size / lotSize, đơn vị (oz, EUR...) = size / 100.
    Hiển thị:
-   1) Bảng DOM bên phải chart (Bid | Giá | Ask | VP), canvas riêng, cuộn bằng bánh xe, nhấp đúp = căn giữa lại.
-   2) Histogram thanh khoản ở mép phải vùng vẽ, thẳng hàng với trục giá, tách từng lệnh (MBO), tô nổi các mức "thanh khoản mạnh" (vượt trung bình + k·độ lệch chuẩn)
+   1) Bảng DOM bên phải chart (Bid | Giá | Ask | QFP), canvas riêng, cuộn bằng bánh xe, nhấp đúp = căn giữa lại.
+   2) Histogram thanh khoản ở mép phải vùng vẽ, thẳng hàng với trục giá, có thể tách các depth-quote entry, tô nổi các mức "thanh khoản mạnh" (vượt trung bình + k·độ lệch chuẩn)
       và kẻ đường ngang kèm nhãn từ mức đó sang trái, giống ảnh mẫu "STRONG LIQUIDITY". */
 const DOM={sub:0,epoch:-1,S:{q:new Map(),ch:[],seen:false},v:0,dirty:false,syncAt:0,paintAt:0,retry:0,busy:false,err:"",off:0,msgAt:0,lvK:"",lv:null,vpK:"",vp:null,thr:Infinity,H:[],hStep:0,hAt:0,hc:null,hk:""};
 const domOn=()=>ACT.find(x=>x.key==="dom"&&isOn(x));
-const domVpOn=()=>{const a=domOn();return a&&a.p.vp?a:null};   // fpSync dùng: cột VP cần tick
+const domDepthConsumers=()=>ACT.some(x=>x&&isOn(x)&&["atas_dom_power_l2","atas_order_book_alerts_l2"].includes(x.key));
+const domDepthNeeded=()=>!!domOn()||domDepthConsumers();
+const domVpOn=()=>{const a=domOn();return a&&a.p.vp?a:null};   // fpSync dùng: cột QFP cần quote ticks
 
 /* ===== phần thuần (có test ở tests/dom.test.js) ===== */
 const domNice=v=>{if(!(v>0))return 1;const e=Math.pow(10,Math.floor(Math.log10(v))),m=v/e;return(m<=1?1:m<=2?2:m<=5?5:10)*e};
-// áp 1 DepthEvent vào sổ lệnh S. Sự kiện đầu tiên sau khi đăng ký là ảnh chụp sổ: không tính là "thêm", tuổi lệnh chưa biết (t0=0).
+// áp 1 DepthEvent vào Level II quote book. Sự kiện đầu tiên sau khi đăng ký là ảnh chụp sổ: không tính là "thêm", tuổi quote chưa biết (t0=0).
 function domApply(S,p,now){
   const Q=S.q,first=!S.seen;S.seen=true;
   const px=o=>o.bid>0?o.bid:o.ask;
@@ -24,13 +26,13 @@ function domApply(S,p,now){
     if(!(size>0)||!(bid>0||ask>0)){if(o){Q.delete(key);rec(o,-o.size)}continue}
     if(o){
       if(px(o)===(bid>0?bid:ask)&&(o.bid>0)===(bid>0)){const d=size-o.size;o.size=size;rec(o,d)}
-      else{rec(o,-o.size);o.size=size;o.bid=bid;o.ask=ask;o.t0=now;rec(o,size)}      // đổi giá = rút lệnh cũ + đặt lệnh mới
+      else{rec(o,-o.size);o.size=size;o.bid=bid;o.ask=ask;o.t0=now;rec(o,size)}      // đổi giá = xoá quote entry cũ + cập nhật entry ở giá mới
     }else{const n={size,bid,ask,t0:first?0:now};Q.set(key,n);rec(n,size)}
   }
   const lim=now-6000;let i=0;while(i<S.ch.length&&S.ch[i].t<lim)i++;if(i)S.ch.splice(0,i);
   if(S.ch.length>800)S.ch.splice(0,S.ch.length-800);
 }
-// gộp các lệnh thành mức giá (step = số nguyên 1/100000, u = chia size ra lot/đơn vị). Mỗi mức giữ danh sách từng lệnh (MBO), lớn trước.
+// gộp các quote entries thành mức giá (step = số nguyên 1/100000, u = chia size ra lot/đơn vị). Mỗi mức giữ danh sách từng depth-quote entry, lớn trước.
 function domBuild(Q,step,u,now){
   const M=new Map();let nb=0,na=0,sb=0,sa=0;
   for(const o of Q.values()){
@@ -51,7 +53,7 @@ function domThr(arr,k,min){
   if(!(s>0))return Infinity;
   return Math.max(m+k*s,min||0);
 }
-// tổng thay đổi (thêm +, rút -) theo mức giá trong `ms` mili-giây gần nhất, để nháy ô trên bảng
+// tổng thay đổi size của depth-quote entries theo mức giá trong `ms` mili-giây gần nhất để nháy ô trên bảng; không phân biệt cancel với execution.
 function domFlow(S,step,u,now,ms){
   const M=new Map();
   for(const c of S.ch){if(now-c.t>ms)continue;const b=Math.floor(c.p/step)*step;M.set(b,(M.get(b)||0)+c.d/u)}
@@ -71,7 +73,7 @@ function domSnap(Q,step,u,mid,range){
 /* ===== kết nối: đăng ký / huỷ đăng ký kênh depth ===== */
 function domFeed(p){                       // ctMsg gọi khi có DepthEvent (2155)
   if(!CT.sym||+p.symbolId!==CT.sym.id||DOM.sub!==CT.sym.id)return;
-  domApply(DOM.S,p,Date.now());DOM.dirty=true;DOM.msgAt=Date.now();DOM.err="";
+  domApply(DOM.S,p,Date.now());DOM.dirty=true;DOM.msgAt=Date.now();DOM.err="";try{window.atasDepthIndicatorsRefresh?.()}catch{};
 }
 function domReset(){DOM.H=[];DOM.hc=null;DOM.hk="";DOM.S={q:new Map(),ch:[],seen:false};DOM.lvK="";DOM.lv=null;DOM.vpK="";DOM.vp=null;DOM.v++}
 async function domUnsub(){
@@ -79,8 +81,8 @@ async function domUnsub(){
   if(id&&ep===CT.epoch&&CT.ready)try{await ctSend(2158,{ctidTraderAccountId:CT.acc,symbolId:[id]},8000)}catch{}
 }
 async function domSync(){
-  const a=domOn();
-  if(!a||!ctReady()){if(DOM.sub&&!a)domUnsub();return}
+  const a=domOn(),needed=domDepthNeeded();
+  if(!needed||!ctReady()){if(DOM.sub&&!needed)domUnsub();return}
   const id=CT.sym.id;
   if(DOM.sub===id&&DOM.epoch===CT.epoch)return;
   if(DOM.busy||Date.now()<DOM.retry)return;
@@ -93,6 +95,24 @@ async function domSync(){
     if(g===CT.gen){DOM.sub=0;DOM.err=/NOT_SUPPORTED|NO_DEPTH|INVALID|SYMBOL/i.test(e.message)?"Broker không cung cấp depth cho mã này ("+e.message+")":"Không đăng ký được depth: "+why(e);DOM.retry=Date.now()+8000;DOM.v++}
   }finally{DOM.busy=false}
 }
+
+
+/* Read-only cTrader Level II depth-quote snapshot for indicators. Not exchange MBO or executed trades. */
+window.atasDepthSnapshot=function(levels=5){
+  const bids=new Map(),asks=new Map();
+  for(const q of DOM.S.q.values()){
+    const size=Math.max(0,+q.size||0)/100;
+    if(size<=0)continue;
+    if(+q.bid>0)bids.set(+q.bid,(bids.get(+q.bid)||0)+size);
+    else if(+q.ask>0)asks.set(+q.ask,(asks.get(+q.ask)||0)+size);
+  }
+  const N=Math.max(1,Math.min(1000,Math.round(+levels||5)));
+  const B=[...bids].map(([price,size])=>({price:price/1e5,size})).sort((a,b)=>b.price-a.price).slice(0,N);
+  const A=[...asks].map(([price,size])=>({price:price/1e5,size})).sort((a,b)=>a.price-b.price).slice(0,N);
+  const bidTotal=B.reduce((s,x)=>s+x.size,0),askTotal=A.reduce((s,x)=>s+x.size,0);
+  const changes=(DOM.S.ch||[]).map(c=>({time:c.t,price:c.p/1e5,side:c.s>0?'bid':'ask',delta:c.d/100}));
+  return{available:DOM.S.seen&&!!(B.length||A.length),bids:B,asks:A,bidTotal,askTotal,mid:CT.bid>0&&CT.ask>0?(CT.bid+CT.ask)/2/1e5:0,updatedAt:DOM.msgAt,changes,source:'cTrader Level II depth quotes'};
+};
 
 /* ===== vẽ ===== */
 const domUnit=Q=>Q.unit==="lot"?(CT.sym&&CT.sym.lotSize>0?CT.sym.lotSize:100):Q.unit==="unit"?100:1;
@@ -110,7 +130,7 @@ function domData(Q){      // mức giá + ngưỡng mạnh, lưu theo phiên b�
   if(DOM.lvK!==key){DOM.lv=domBuild(DOM.S.q,step,u,Date.now());DOM.thr=Q.strong?domThr(DOM.lv.arr,+Q.sk||2,+Q.smin||0):Infinity;DOM.lvK=key}
   return{step,u,lv:DOM.lv,thr:DOM.thr};
 }
-// volume đã khớp theo giá (từ tick footprint) trong vpm phút gần nhất, gộp theo cùng step
+// quote-event activity theo giá (từ quote-tick footprint) trong vpm phút gần nhất, gộp theo cùng step; không phải traded volume
 function domVP(step,Q){
   const live=m1.length?m1[m1.length-1][0]:0;if(!live||!FPM.size)return null;
   const key=[step,Q.vpm,live,FPV,FPH].join("|");if(DOM.vpK===key)return DOM.vp;
@@ -245,14 +265,14 @@ function drawDOM(w,h){
 function domTick(){
   const a=domOn(),n=Date.now();
   domLayout(a);
-  if(!a){if(DOM.sub)domUnsub();return}
+  if(!domDepthNeeded()){if(DOM.sub)domUnsub();return}
   if(n-DOM.syncAt>1000){DOM.syncAt=n;domSync().catch(()=>{})}
-  if(a.p.hm&&DOM.S.q.size&&n-DOM.hAt>=1000){
+  if(a&&a.p.hm&&DOM.S.q.size&&n-DOM.hAt>=1000){
     DOM.hAt=n;const Q=Object.assign(pdef(IND.dom),a.p),step=domStep(Q);
     if(step!==DOM.hStep){DOM.H=[];DOM.hStep=step;DOM.hk=""}
     const mid=CT.bid>0&&CT.ask>0?(CT.bid+CT.ask)/2:0;
     if(mid){DOM.H.push({t:u2s(Math.floor(n/1000)),e:domSnap(DOM.S.q,step,domUnit(Q),mid,Math.max(10,Math.round(+Q.hmr)||120))});
       const cap=Math.max(60,Math.round((+Q.hmm||30)*60));if(DOM.H.length>cap)DOM.H.splice(0,DOM.H.length-cap)}
   }
-  if((DOM.dirty||n-DOM.paintAt>1500)&&n-DOM.paintAt>=100){DOM.dirty=false;DOM.paintAt=n;DOM.v++;try{domPaint(a)}catch(e){chErr("domPaint",e)}}
+  if(a&&(DOM.dirty||n-DOM.paintAt>1500)&&n-DOM.paintAt>=100){DOM.dirty=false;DOM.paintAt=n;DOM.v++;try{domPaint(a)}catch(e){chErr("domPaint",e)}}
 }

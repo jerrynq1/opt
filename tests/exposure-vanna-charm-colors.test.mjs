@@ -29,5 +29,5 @@ test('Vanna/Charm inherit the exact GEX/DEX cyan Call and gold Put bar styles', 
   assert.doesNotMatch(css, /exposure-signed-track|model-positive|model-negative/);
 });
 test('PWA cache version bumped for the shared Exposure renderer', () => {
-  assert.match(sw, /CACHE_VERSION = "ict-quantlab-shell-v45"/);
+  assert.match(sw, /CACHE_VERSION = "ict-quantlab-shell-v53"/);
 });

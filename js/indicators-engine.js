@@ -181,6 +181,7 @@ function applyColor(a,j){                           // đổi 1 ô màu: cập n
       else if(m.k==="f"&&m.g)ss[x].applyOptions({gc1:hexA(c,m.g.a1),gc2:hexA(c,m.g.a2)});
       else if(m.k==="f"&&!m.pc)ss[x].applyOptions({color:hexA(c,m.al==null?.1:m.al)})}catch{}})}
 let riq=0;const rIndSoon=()=>{if(!riq)riq=requestAnimationFrame(()=>{riq=0;renderInd()})};
+window.atasDepthIndicatorsRefresh=()=>{try{rIndSoon()}catch{}};
 function renderInd(){
   // Special orderflow indicators manage their own canvas layers and data sessions.
   try{window.crossAssetMapIndicatorSync?.()}catch(e){console.warn("cross asset indicator sync",e)}
@@ -321,8 +322,8 @@ let IF="all", IND_SEARCH="";
 const TL={of:"Orderflow",mm:"Market Model",ov:"ATAS Technical",osc:"ATAS Technical"};
 const indTypeLabel=d=>d.cat==="at"||d.t==="ov"||d.t==="osc"?"ATAS Technical":(TL[d.t]||d.t||"Indicator");
 const indEscape=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const atasStatusLabel=x=>x?.conversion==="approx_proxy"?"Bản gần nhất / proxy":({ported:"Port OHLCV",existing:"Module có sẵn",needs_ticks:"Cần tick / trade",needs_depth:"Cần DOM / MBO",needs_external:"Cần feed ngoài",needs_session:"Cần lịch phiên",visual_only:"Tiện ích ATAS",pending:"Chưa port phép tính"}[x?.status]||"Chưa xác định");
-const atasStatusClass=x=>x?.conversion==="approx_proxy"?"proxy":x?.status==="ported"?"ready":x?.status==="existing"?"existing":"blocked";
+const atasStatusLabel=x=>x?.conversion==="quote_tick_proxy"?"Port Tick / Footprint proxy":x?.conversion==="approx_proxy"?"Bản gần nhất / proxy":({ported:"Port OHLCV",ported_tick:"Port Tick / Footprint proxy",existing:"Module có sẵn",needs_ticks:"Cần tick / trade",needs_depth:"Cần DOM / MBO",needs_external:"Cần feed ngoài",needs_session:"Cần lịch phiên",visual_only:"Tiện ích ATAS",pending:"Chưa port phép tính"}[x?.status]||"Chưa xác định");
+const atasStatusClass=x=>x?.conversion==="approx_proxy"||x?.conversion==="quote_tick_proxy"?"proxy":x?.status==="ported"?"ready":x?.status==="existing"?"existing":"blocked";
 function buildInd(){
   const LS=ACT;
   $("actList").innerHTML=LS.length?LS.map(a=>{const d=IND[a.key];
@@ -353,7 +354,7 @@ function buildInd(){
     const canAdd=!!d&&x.status!=="pending"&&x.status!=="needs_ticks"&&x.status!=="needs_depth"&&x.status!=="needs_external"&&x.status!=="needs_session"&&x.status!=="visual_only";
     const badge=x.source==="QuantLab"?"QuantLab":atasStatusLabel(x);
     const className=x.source==="QuantLab"?"native":atasStatusClass(x);
-    const req=x.requirement&&x.requirement!=="ohlcv"&&x.requirement!=="quantlab"?`<span class="ind-requirement">${indEscape(({ticks:"Cần tick / trade data",depth:"Cần full depth / MBO",oi:"Cần Open Interest",external:"Cần nguồn ngoài",external_symbol:"Cần symbol tham chiếu",account:"Cần account / portfolio data",breadth:"Cần market breadth",footprint:"Cần footprint / price-level volume",session:"Cần lịch phiên / timezone",visual:"UI / renderer riêng",pending:"Chưa có phép tính port"})[x.requirement]||x.requirement)}</span>`:"";
+    const req=x.requirement&&x.requirement!=="ohlcv"&&x.requirement!=="quantlab"?`<span class="ind-requirement">${indEscape(({ticks:"Cần tick / trade data",quote_ticks:"Quote-tick footprint (proxy, không phải trade tape)",quote_footprint:"Quote-tick price-level footprint (proxy)",depth:"cTrader Level II depth quotes (không phải MBO)",oi:"Cần Open Interest",external:"Cần nguồn ngoài",external_symbol:"Cần symbol tham chiếu",account:"Cần account / portfolio data",breadth:"Cần market breadth",footprint:"Cần footprint / price-level volume",session:"Dựa trên timestamp chart/server (không có exchange calendar)",visual:"UI / renderer riêng",pending:"Chưa có phép tính port"})[x.requirement]||x.requirement)}</span>`:"";
     return `<article class="ind-row"><div class="ind-row-main"><div class="ind-row-title"><strong>${indEscape(x.name)}</strong><span class="ind-source">${indEscape(x.sourceClass)}</span><span class="ind-status ${className}">${indEscape(badge)}</span></div><p>${indEscape(x.description||"")}</p><div class="ind-row-meta"><span>${indEscape(x.group==="orderflow"?"Orderflow":x.group==="market"?"Market Model":x.group==="utility"?"Utility":"Technical")}</span>${req}<span class="ind-source-file">${indEscape(x.sourceFile||"QuantLab native")}</span></div></div><div class="ind-row-action">${canAdd?`<button class="btn sm" data-add="${indEscape(x.key)}"${already?" disabled":""}>${already?"Đã thêm":"+ Thêm vào chart"}</button>`:`<button class="btn ghost sm" disabled title="Indicator chưa có bản chạy phù hợp với dữ liệu hiện tại">${x.status==="visual_only"?"Tiện ích riêng":x.status==="pending"?"Chưa port": "Chưa đủ dữ liệu"}</button>`}</div></article>`;
   }).join(""):`<div class="ind-empty">Không tìm thấy indicator phù hợp với từ khóa “${indEscape(IND_SEARCH)}”.</div>`;
   $("indResultCount").textContent=`${filtered.length} / ${rows.length} indicators`;

@@ -15,7 +15,7 @@ const fpRgb=h=>{const m=/^#?([0-9a-f]{6})$/i.exec(h||"");const n=m?parseInt(m[1]
 const fpFm=v=>{const a=Math.abs(v);return(v<0?"-":"")+(a>=1e4?(a/1e3).toFixed(1)+"K":Math.round(a))};
 const btGap=()=>{const b=btOn();return b?Math.max(50,Math.min(5000,Math.round(+b.p.gap)||300)):300};   // khoảng nghỉ tối đa (ms) giữa 2 tick của 1 chuỗi Big Trade
 async function fpSync(){
-  const a=fpOn()||btOn()||stOn()||haOn()||domVpOn()||tpoOn();if(!a||SUB()||fpBusy||!ctReady()||!m1.length||Date.now()<fpRetry)return;fpBusy=true;const gp=btGap();
+  const a=fpOn()||btOn()||stOn()||haOn()||domVpOn()||tpoOn()||(window.atasTickIndicatorActive&&window.atasTickIndicatorActive());if(!a||SUB()||fpBusy||!ctReady()||!m1.length||Date.now()<fpRetry)return;fpBusy=true;const gp=btGap();
   try{
     if(fpSym!==C.sym||fpEpoch!==CT.epoch||fpGap!==gp){FPM.clear();BTE.clear();fpSym=C.sym;fpEpoch=CT.epoch;fpGap=gp;BTG.gap=gp;fpLast=0;fpStart=0;fpCov=null;FPH++;ctFpReset()}
     const ok=()=>C.sym===fpSym&&fpEpoch===CT.epoch&&btGap()===fpGap&&ctReady();

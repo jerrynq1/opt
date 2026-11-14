@@ -61,7 +61,7 @@ function ctMsg(ev){
     return;
   }
   if(t===2131)ctSpot(p);
-  else if(t===2155){if(typeof domFeed==="function")domFeed(p)}   // DepthEvent (sổ lệnh L2 / MBO), xem orderflow-dom.js
+  else if(t===2155){if(typeof domFeed==="function")domFeed(p)}   // DepthEvent (cTrader Level II depth quotes), xem orderflow-dom.js
   else if(t===2147||t===2164){CT.fatal="CT_TOKEN";status("cTrader: "+why(new Error(CT.fatal)),"bad")}   // token bị thu hồi / tài khoản bị ngắt
   else if(t===2142||t===50)console.warn("cTrader lỗi:",p.errorCode,p.description);
 }
@@ -235,8 +235,8 @@ async function ctBars(lo,hi){
    5) Lịch sử nạp theo cửa sổ kèm 5 phút "khởi động" phía trước để có sẵn bid/ask/hướng ở đầu cửa sổ (không mất tick đầu cửa sổ); phần khởi động không được cộng vào số liệu.
    Kết quả mỗi phút: [[giá,mua,bán],...] vào FPM (key = giờ server). Giá là số thực của giá nguyên 1/100000, nên làm tròn lại bằng Math.round(p*1e5) là chính xác. */
 const FPL={ready:false,q:[],st:{bid:0,ask:0,side:0,run:null},min:0,map:null,last:0,dirty:false,pend:null,pendAt:0};
-/* Big Trade: 1 "lệnh lớn" = chuỗi tick LIÊN TIẾP cùng chiều (mua hoặc bán) mà 2 tick kề nhau cách nhau không quá BTG.gap ms (đổi chiều hoặc nghỉ quá gap thì chuỗi kết thúc).
-   Khối lượng = số tick của chuỗi, giá = bình quân giá khớp ước lượng (mua: ask, bán: bid). BTE: key giờ server của PHÚT bắt đầu chuỗi -> [[ts,giá,chiều,volume],...]. */
+/* Big Trade UI groups sequential SAME-DIRECTION quote updates; it is not a confirmed exchange trade.
+   Count = quote updates in the run, price = mean observed ask (buy) / bid (sell). BTE: server-minute -> [[startTs,meanQuotePrice,side,quoteCount,endTs],...]. */
 const BTG={gap:300};const BTE=new Map();
 const FPD={trunc:0,bad:0};                      // chẩn đoán chất lượng dữ liệu: số lần tải tick bị cắt dở, số báo giá lỗi bị bỏ
 const FP_WARM=300000;                           // ms khởi động trước mỗi cửa sổ lịch sử
@@ -267,10 +267,10 @@ function btFeed(st,ts,side,pr,emit){
 }
 function btEmit(r,store){
   const m=u2s(Math.floor(r.t0/60000)*60);let L=store.get(m);if(!L){L=[];store.set(m,L)}
-  L.push([r.t0,px5(Math.round(r.ps/r.v)),r.side,r.v]);
+  L.push([r.t0,px5(Math.round(r.ps/r.v)),r.side,r.v,r.tl]);
 }
 const btEmitLive=r=>{btEmit(r,BTE);FPL.dirty=true};
-// ghi 1 sự kiện (đã hợp lệ) vào phút tương ứng. Trả true nếu có cộng khối lượng
+// ghi 1 quote update hợp lệ vào phút tương ứng. Trả true nếu có cộng quote-event count
 function fpCount(st,ts,b,a,mapOf,emit){
   const side=fpStep(st,b,a);if(!side)return false;
   const pr=side>0?a:b,mp=mapOf(Math.floor(ts/60000)*60);fpAdd(mp,pr,side);mp.sp=(mp.sp||0)+(a-b);mp.sn=(mp.sn||0)+1;btFeed(st,ts,side,pr,emit);return true;
@@ -287,8 +287,16 @@ function ctFpCommit(p){
   if(!FPL.map)FPL.map=new Map();
   if(fpCount(FPL.st,ts,b,a,()=>FPL.map,btEmitLive))FPL.dirty=true;
 }
+function ctFpDemandActive(){
+  try {
+    if(window.atasTickIndicatorActive&&window.atasTickIndicatorActive())return true;
+    return (typeof fpOn==='function'&&!!fpOn()) || (typeof btOn==='function'&&!!btOn()) ||
+      (typeof stOn==='function'&&!!stOn()) || (typeof haOn==='function'&&!!haOn()) ||
+      (typeof domVpOn==='function'&&!!domVpOn()) || (typeof tpoOn==='function'&&!!tpoOn());
+  } catch { return false; }
+}
 function ctFpTick(ts,b,a){
-  if(!FPL.ready){if(FPL.q.length<200000)FPL.q.push([ts,b,a]);return}
+  if(!FPL.ready){if(!ctFpDemandActive())return;if(FPL.q.length<200000)FPL.q.push([ts,b,a]);return}
   const p=FPL.pend;
   if(p){
     if(ts===p[0]){p[1]=b;p[2]=a;FPL.pendAt=performance.now();return}     // cùng mili-giây: lấy giá cuối

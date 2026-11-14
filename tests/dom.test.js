@@ -2,7 +2,7 @@ const fs=require('fs'),vm=require('vm'),assert=require('assert'),path=require('p
 const J=path.join(__dirname,'..','js')+'/';
 const full=fs.readFileSync(J+'orderflow-dom.js','utf8'),pure=full.split('/* ===== vẽ ===== */')[0];
 const strip=s=>s.replace(/\bconst (\w+)=/g,'var $1=');
-const ctx={Math,Number,Array,Map,Set,String,isFinite,Infinity,Date};vm.createContext(ctx);
+const ctx={window:{},Math,Number,Array,Map,Set,String,isFinite,Infinity,Date};vm.createContext(ctx);
 vm.runInContext(strip(pure),ctx);
 let n=0;const ok=x=>console.log('ok  ',x)||n++;const run=c=>vm.runInContext(c,ctx);
 const J2=x=>JSON.parse(JSON.stringify(x));
@@ -48,7 +48,7 @@ const B=J2(run('(()=>{const r=domBuild(Q,100,100,1100);return{arr:r.arr,nb:r.nb,
 assert.strictEqual(B.nb,2);assert.strictEqual(B.na,1);assert.strictEqual(B.sb,8);assert.strictEqual(B.sa,2);
 assert.deepStrictEqual(B.arr.map(L=>[L.p,L.bid,L.ask]),[[200000,8,0],[200100,0,2]]);
 assert.deepStrictEqual(B.arr[0].bo,[5,3]);assert.strictEqual(B.arr[0].age,1000);
-ok('domBuild: gộp mức giá, tách từng lệnh (MBO), tuổi lệnh');
+ok('domBuild: gộp mức giá, tách depth-quote entry, tuổi quote');
 
 // domThr
 const L=(...v)=>v.map(x=>({bid:x,ask:0}));
@@ -71,3 +71,25 @@ ctx.Q2=new Map([['a',{size:500,bid:200030,ask:0}],['b',{size:300,bid:200090,ask:
 const SN=J2(run('domSnap(Q2,100,100,200060,5)')).sort((x,y)=>x[0]-y[0]||x[2]-y[2]);
 assert.deepStrictEqual(SN,[[200000,8,1],[200100,2,-1]]);
 console.log('ok   domSnap: gộp theo hàng/phía, bỏ mức ngoài khoảng');
+
+// Regression: do not present cTrader quote-entry IDs or quote activity as MBO/traded volume.
+const customDom = fs.readFileSync(path.join(__dirname, '..', 'js/indicators-custom.js'), 'utf8');
+assert.match(customDom, /DOM \/ Level II/);
+assert.match(customDom, /quote entries riêng, không phải MBO/);
+assert.match(customDom, /quote events theo price level, không phải volume đã khớp/);
+assert.doesNotMatch(customDom, /DOM \/ MBO|Tách từng lệnh \(MBO\)|volume đã khớp theo giá/);
+assert.match(full, /Not exchange MBO or executed trades/i);
+assert.match(full, /quote-event activity theo giá/);
+console.log('ok   DOM UI labels cTrader depth quote entries and QFP, not exchange MBO or traded volume');
+
+// Depth snapshot uses decimal instrument prices at the indicator boundary (wire values are scaled by 1e5).
+ctx.CT={bid:10000000,ask:10001000};
+ctx.DOM.S={q:new Map([['b',{size:500,bid:10000000,ask:0}],['a',{size:300,bid:0,ask:10001000}]]),ch:[{t:1000,p:10000000,s:1,d:100}],seen:true};
+ctx.DOM.msgAt=1000;
+run('window.atasDepthSnapshot(5)');
+const depthSnap=J2(ctx.window.atasDepthSnapshot(5));
+assert.strictEqual(depthSnap.bids[0].price,100);
+assert.strictEqual(depthSnap.asks[0].price,100.01);
+assert.strictEqual(depthSnap.mid,100.005);
+assert.strictEqual(depthSnap.changes[0].price,100);
+console.log('ok   Depth snapshot converts cTrader wire prices to decimal prices for indicator parameters');

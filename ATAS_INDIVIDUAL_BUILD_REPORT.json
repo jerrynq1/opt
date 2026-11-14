@@ -1,0 +1,56 @@
+{
+  "audit_date": "2026-11-15",
+  "baseline": "ICT_QuantLab_ATAS_Indicators_Audited_2026-11-15.zip",
+  "source_archive": "ATAS-Indicators-Develop.zip",
+  "catalog_count": 254,
+  "catalog_modules": 254,
+  "compat_modules": 7,
+  "mapped_catalog_rows": 217,
+  "unmapped_catalog_rows": 37,
+  "registered_indicator_keys": 220,
+  "quote_tick_proxy_modules": 28,
+  "existing_modules_requiring_quote_footprint": 1,
+  "status": {
+    "ported": 185,
+    "needs_external": 14,
+    "ported_tick": 28,
+    "visual_only": 11,
+    "existing": 4,
+    "needs_session": 8,
+    "needs_depth": 4
+  },
+  "requirement": {
+    "ohlcv": 181,
+    "external": 10,
+    "quote_ticks": 18,
+    "session": 14,
+    "visual": 11,
+    "quote_footprint": 11,
+    "depth": 5,
+    "account": 2,
+    "breadth": 2
+  },
+  "conversion": {
+    "approx_proxy": 90,
+    "direct": 95,
+    "not_ported": 37,
+    "quote_tick_proxy": 28,
+    "existing_module": 4
+  },
+  "html_script_tags": 304,
+  "service_worker_cache": "ict-quantlab-shell-v49",
+  "syntax_checked_js_mjs_files": 346,
+  "test_files_passed": 33,
+  "test_files_failed": 0,
+  "feed_semantics": {
+    "historical": "cTrader GetTickData (2145), BID type=1 and ASK type=2",
+    "live": "cTrader live Bid/Ask quote updates",
+    "footprint": "one quote-change event classified by Bid/Ask movement and assigned to a quote-derived price level",
+    "not_provided": "executed trade size, exchange trade IDs, verified aggressor side, full MBO/order-by-order depth, and OI fields"
+  },
+  "catalogCount": 217,
+  "implementedCatalogCount": 217,
+  "removedUnsupported": [
+    "MultiMarketPower.cs — requires CumulativeTrades from multiple markets/symbols, not available in cTrader BID/ASK quote stream."
+  ]
+}

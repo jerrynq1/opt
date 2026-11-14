@@ -102,23 +102,23 @@ IND.hab={
 };
 
 
-/* ===== DOM / MBO: sổ lệnh (Depth of Market) từ cTrader, bảng bên phải chart + histogram thanh khoản ở mép phải =====
-   Kiểu "of": phần tính + vẽ nằm ở js/orderflow-dom.js. Dữ liệu là kênh depth của cTrader Open API (mỗi báo giá có ID riêng nên tách được từng lệnh). */
+/* ===== DOM / Level II: sổ quote depth của cTrader, bảng bên phải chart + histogram thanh khoản ở mép phải =====
+   Kiểu "of": phần tính + vẽ nằm ở js/orderflow-dom.js. ID chỉ nhận diện một depth-quote entry; không đồng nghĩa MBO/exchange order. */
 IND.dom={
-  n:"DOM / MBO",t:"of",ver:1,
-  d:"Sổ lệnh (Depth of Market) lấy từ kênh depth của cTrader: bảng Bid | Giá | Ask | VP nằm bên phải ngoài chart, và histogram thanh khoản dựng ngay mép phải vùng vẽ, thẳng hàng với trục giá. Mỗi báo giá trong sổ có ID riêng nên tách được từng lệnh (MBO), đếm số lệnh mỗi mức, nháy ô khi lệnh được thêm hoặc rút, và tô nổi các mức thanh khoản mạnh bất thường kèm đường ngang sang trái. Với forex/CFD đây là thanh khoản tổng hợp do broker báo, không phải sổ lệnh sàn tập trung.",
+  n:"DOM / Level II",t:"of",ver:2,
+  d:"Sổ Depth of Market dạng Level II từ cTrader: bảng Bid | Giá | Ask | QFP nằm bên phải chart và histogram thanh khoản ở mép phải vùng vẽ. ID chỉ nhận diện depth-quote entry do broker gửi; chế độ tách thanh hiển thị các quote entries riêng, không phải MBO/exchange orders. QFP là số quote events theo price level, không phải volume đã khớp. Size changes có thể hiển thị nháy khi quote được thêm, sửa hoặc xoá; không phân biệt được quote bị rút hay bị khớp. Với forex/CFD đây là depth tổng hợp do broker báo, không phải sổ lệnh sàn tập trung.",
   p:[["panel","Hiện bảng DOM bên phải",true,"b",{g:"Bảng DOM",mn:1}],
      ["pw","Bề rộng bảng (px)",250,"i",{min:150,max:500,on:p=>p.panel}],
      ["rh","Chiều cao hàng (px)",18,"i",{min:12,max:36,on:p=>p.panel}],
-     ["step","Gộp giá (0 = tự động)",0,"n",{min:0,step:0.01,tt:"Gộp các lệnh vào hàng giá có bề rộng này. 0 = tự động theo spread hiện tại (làm tròn 1/2/5), không nhỏ hơn bước giá của mã."}],
+     ["step","Gộp giá (0 = tự động)",0,"n",{min:0,step:0.01,tt:"Gộp các quote entries vào hàng giá có bề rộng này. 0 = tự động theo spread hiện tại (làm tròn 1/2/5), không nhỏ hơn bước giá của mã."}],
      ["unit","Đơn vị size","lot","s",{o:[["lot","Lot"],["unit","Đơn vị hợp đồng (oz, EUR...)"],["raw","Số thô của cTrader (1/100 đơn vị)"]],tt:"Size trong giao thức cTrader tính theo 1/100 đơn vị. Lot = size / lotSize của mã."}],
-     ["vp","Cột VP (volume đã khớp theo giá)",true,"b",{on:p=>p.panel,tt:"Volume đã khớp theo giá trong khoảng thời gian bên dưới, lấy từ tick footprint nên bật cột này sẽ tự tải tick (3 ngày gần nhất)."}],
-     ["vpm","VP: số phút gần nhất",240,"i",{min:5,max:4320,on:p=>p.panel&&p.vp}],
-     ["ord","Hiện số lệnh mỗi mức (×N)",true,"b",{on:p=>p.panel,tt:"Số lệnh riêng lẻ (ID khác nhau) đang nằm ở mức giá đó."}],
-     ["flow","Nháy ô khi lệnh thêm / rút",true,"b",{on:p=>p.panel,tt:"Ô sáng màu Bid/Ask khi size mức đó tăng, màu ngược lại khi giảm trong 1,2 giây gần nhất. Giảm size có thể là rút lệnh hoặc bị khớp, cTrader không phân biệt."}],
+     ["vp","Cột QFP (quote events theo giá)",true,"b",{on:p=>p.panel,tt:"Số quote events được gán vào từng price level trong khoảng thời gian bên dưới. Đây không phải executed volume; bật cột này sẽ tải quote-tick footprint (tối đa theo giới hạn lịch sử hiện có)."}],
+     ["vpm","QFP: số phút gần nhất",240,"i",{min:5,max:4320,on:p=>p.panel&&p.vp}],
+     ["ord","Hiện số quote entries mỗi mức (×N)",true,"b",{on:p=>p.panel,tt:"Số depth-quote entries có ID khác nhau đang được broker báo tại mức giá đó; không khẳng định mỗi entry là một lệnh trên sàn."}],
+     ["flow","Nháy ô khi quote size thay đổi",true,"b",{on:p=>p.panel,tt:"Ô sáng màu Bid/Ask khi tổng size quote entries tại mức giá tăng hoặc giảm trong 1,2 giây gần nhất. Feed không đủ thông tin để kết luận quote bị rút hay được khớp."}],
      ["edge","Histogram thanh khoản ở mép phải chart",true,"b",{g:"Histogram trên chart",mn:1,tt:"Thanh ngang mỗi mức giá, bám mép phải vùng vẽ: đỏ là Ask phía trên giá, xanh là Bid phía dưới giá."}],
      ["ew","Bề rộng tối đa (% vùng vẽ)",24,"i",{min:5,max:60,on:p=>p.edge}],
-     ["mbo","Tách từng lệnh (MBO)",true,"b",{mn:1,on:p=>p.edge,tt:"Mỗi lệnh trong mức giá là một đoạn riêng trong thanh, lệnh lớn nằm sát mép phải."}],
+     ["mbo","Tách từng quote entry",true,"b",{mn:1,on:p=>p.edge,tt:"Mỗi depth-quote entry ID được hiển thị thành một đoạn riêng trong thanh; đây không phải exchange MBO."}],
      ["strong","Đánh dấu thanh khoản mạnh",true,"b",{g:"Thanh khoản mạnh",mn:1,tt:"Mức giá có size vượt trung bình + k × độ lệch chuẩn của toàn bộ sổ lệnh được viền nổi, ghi nhãn size và giá."}],
      ["sk","Hệ số k",2,"n",{min:0.5,max:6,step:0.1,on:p=>p.strong,tt:"Cao hơn thì ít mức mạnh hơn."}],
      ["smin","Size tối thiểu để tính là mạnh (0 = tắt)",0,"n",{min:0,step:0.1,on:p=>p.strong,tt:"Tính theo đơn vị size đang chọn ở trên."}],
@@ -127,7 +127,7 @@ IND.dom={
      ["hmm","Lưu lịch sử (phút)",30,"i",{min:2,max:240,on:p=>p.hm}],
      ["hmr","Độ rộng quanh giá (số hàng mỗi phía)",120,"i",{min:10,max:400,on:p=>p.hm,tt:"Chỉ lưu các mức trong khoảng này quanh giá giữa để nhẹ bộ nhớ."}],
      ["hmo","Độ đậm heatmap",0.5,"n",{min:0.05,max:1,step:0.05,on:p=>p.hm}]],
-  c:["#26c882","#ff5c8a","#ffb02e","#35b6ff","#ffd24a"],L:["Bid (mua chờ)","Ask (bán chờ)","Thanh khoản mạnh","Nhấn giá Bid/Ask","VP đã khớp"],
+  c:["#26c882","#ff5c8a","#ffb02e","#35b6ff","#ffd24a"],L:["Bid depth quote","Ask depth quote","Thanh khoản mạnh","Nhấn giá Bid/Ask","Quote events (QFP)"],
   lab:p=>p.unit==="lot"?"lot":p.unit==="unit"?"đv":"raw",f:()=>[]
 };
 
