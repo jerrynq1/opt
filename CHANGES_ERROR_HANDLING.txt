@@ -1,0 +1,21 @@
+SỬA LỖI XỬ LÝ LỖI VÀ TỰ PHỤC HỒI (js/stock-options.js, js/cross-asset-map.js)
+
+1. activate(): khi lần tải đầu thất bại, giờ gọi deactivate() -> s.active=false, đóng socket, dừng timer.
+   Lần activate() sau thực sự thử lại. Thêm auto-retry backoff 5s,10s,20s... tối đa 60s khi view còn được dùng.
+2. loadChain(refreshAll=true): bọc try/catch; request lỗi thì hydrating/hydrateProgress được reset,
+   chainComplete tính lại theo dữ liệu thực có. Các lần refresh sau không còn bị chặn.
+3. Đổi expiry: ngay khi sang expiry khác, snapshot cũ (quotes/contracts/contractSymbols...) bị xoá.
+   Request lỗi cũng không còn dữ liệu expiry cũ mang nhãn expiry mới. Live quote WS bị chặn
+   (liveBlocked) cho đến khi danh sách contract của expiry mới được nạp.
+4. crossAssetSnapshot() trả thêm dataExpiry + expiryMismatch; complete/oiComplete/maxPainComplete = false khi lệch.
+   cross-asset-map.js buildMappedMap() từ chối map snapshot có expiryMismatch.
+5. request(): timeout 12s cho mỗi fetch và deadline tổng 30s cho một logical request (direct + Worker fallback + retry);
+   đọc body trong timeout, hỗ trợ huỷ bằng AbortController và retry exponential backoff
+   (GET tối đa 2 lần retry, POST 1 lần; chỉ retry timeout/lỗi mạng/HTTP 5xx/429/408, không retry 4xx).
+
+KHÁC
+- sw.js: CACHE_VERSION v19 -> v20 (bắt buộc vì app shell đổi).
+- tests/pwa.test.js: cập nhật v19 -> v20.
+- tests/stock-options-data.test.js: regex chấp nhận fetchWithTimeout(proxyUrl,options).
+- tests/stock-options-resilience.test.js: mở rộng test timeout, cancellation và discovery metadata.
+- js/paper-trading.js đã được xác nhận là file mồ côi, không được index.html nạp và đã xóa theo test cleanup.

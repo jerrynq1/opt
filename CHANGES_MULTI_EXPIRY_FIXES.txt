@@ -1,0 +1,38 @@
+IMPLEMENTATION LOG — 6 HẠNG MỤC MULTI-EXPIRY / RESILIENCE
+
+1. ALL EXPIRIES DISCOVERY
+- Ưu tiên Binance Stock Options get-exchange-info với symbol/rootSymbol của underlying hiện tại.
+- Parser nhận ngày ISO, YYYYMMDD, epoch milliseconds/seconds và OCC option symbols; lọc expiry đã qua.
+- Endpoint được thêm routing đúng underlying trong Cloudflare Worker.
+- Nếu exchange-info không có danh sách expiry, đọc trang Options của underlying qua route Worker đã allowlist; parser nhận ngày gần dạng MM-DD và ngày xa dạng YYYY-MM-DD. Trang Binance QQQ hiện công khai danh sách expiry gần và xa tới 2029.
+- Chỉ khi cả hai nguồn không trả được danh sách mới dùng fallback dò 64 ngày giao dịch trong 90 ngày lịch; UI ghi rõ nguồn discovery/phạm vi fallback.
+- Lưu ý: response thực tế của endpoint Stock Options get-exchange-info và HTML page cần xác minh trên môi trường Worker/live của bạn; test mô phỏng các dạng response phổ biến, không giả nhận đã gọi live API từ môi trường này.
+
+2. GAMMA SHARE COMPLETENESS
+- Near/Far Gamma Share chỉ được xuất bản khi tất cả expiry trong scope có gexComplete và gross GEX dương.
+- Nếu bất kỳ expiry nào thiếu GEX, Share trả null và UI hiển thị provisional/incomplete cùng số expiry có GEX hoàn chỉnh.
+- OI null/0 trên quote đã nhận vẫn zero-fill và có thể được tính là GEX-complete; contract dương OI thiếu Gamma lẫn IV vẫn làm GEX incomplete.
+
+3. MAX PAIN EXPIRY LABEL
+- Headline Max Pain trong multi-expiry hiển thị ngày expiry tạo ra kết quả.
+- Max Pain vẫn tính riêng từng expiry, không cộng payout giữa các expiry.
+
+4. EXPIRY ERROR STATE
+- Breakdown chuẩn hóa Pending, Loading, Error, Partial và OK.
+- Request timeout/lỗi được tách khỏi trạng thái quote hợp lệ có OI/Volume null được zero-fill.
+- Không đổi hành vi zero-fill, quote coverage hoặc retry rule cho OI null.
+
+5. ACTIVATION TOKEN + REQUEST DEADLINE
+- Mỗi activation có token riêng và AbortController; deactivate vô hiệu token và abort request thuộc activation.
+- Các đoạn sau await kiểm tra activation hiện hành; polling/scope timer gắn với token.
+- Deadline mặc định 30 giây bao trùm direct fetch, Worker fallback, retry và backoff của một logical HTTP request; từng fetch vẫn giới hạn 12 giây.
+- Scope fetch bị huỷ không bị ghi nhầm thành Error.
+
+6. CLEANUP
+- Đã xóa js/paper-trading.js sau khi xác nhận không được index.html hoặc runtime module tham chiếu; test cleanup yêu cầu file không tồn tại.
+- Bump service-worker cache v19 -> v20.
+
+VALIDATION
+- Regression tests bao gồm: metadata/page expiry parsing, All Expiries metadata-first, Gamma Share incomplete gating, zero-filled OI completeness, Max Pain expiry label, expiry state classification, cancellation on deactivate và total request deadline.
+- Test suite trước bàn giao: 21/21 file pass; syntax check tất cả JS/MJS pass.
+- Không thể xác minh API live qua Worker đã cấu hình của người dùng trong môi trường đóng gói; response get-exchange-info và HTML page cần được xác minh trên môi trường triển khai.
