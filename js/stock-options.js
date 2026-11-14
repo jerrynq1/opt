@@ -1,7 +1,8 @@
 /* ================= BINANCE STOCK OPTIONS: QQQ + GLD =================
    Uses a narrowly allow-listed Cloudflare Worker proxy for Binance Stock
    Options REST endpoints (the quote endpoint is origin-restricted by Binance).
-   Stock candles and underlying prices use Binance Equity WebSocket directly.
+   Spot is read from the home's Node gateway through the Named Tunnel; a
+   direct browser Binance socket remains only as a fallback.
    Public stock Kline stream is live-only: historical bars are not fabricated.
 */
 (function(){
@@ -35,6 +36,14 @@
   const esc = s => String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const fmt = (x,d=2) => x===null || !Number.isFinite(Number(x)) ? '—' : Number(x).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
   const compact = x => x===null || !Number.isFinite(Number(x)) ? '—' : Intl.NumberFormat('en-US',{notation:'compact',maximumFractionDigits:2}).format(Number(x));
+  const ageLabel = ms => {
+    if(ms===null||ms===undefined||ms===''||!Number.isFinite(Number(ms))) return 'age unknown';
+    const n=Math.max(0,Number(ms));
+    if(n<60000)return `${Math.floor(n/1000)}s`;
+    if(n<3600000)return `${Math.floor(n/60000)}m`;
+    const hours=Math.floor(n/3600000),minutes=Math.floor((n%3600000)/60000);
+    return `${hours}h ${minutes}m`;
+  };
   const pct = x => x===null || !Number.isFinite(Number(x)) ? '—' : (Number(x)*100).toFixed(2)+'%';
   const isoTodayNY = () => new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
   const dateLabel = iso => {
@@ -178,7 +187,7 @@
       sessions[cfg.key] = sessions[cfg.key] || {
         cfg, active:false, socket:null, priceSocket:null, reconnectTimer:null, priceReconnectTimer:null, priceSnapshotTimer:null, pollTimer:null, statusTimer:null,
         expiry:null,expirations:[],contracts:[],contractSymbols:new Set(),quotes:new Map(),price:null,previousClose:null,
-        priceTime:null,priceReceivedAt:0,marketPhase:null,priceActivationAt:0,priceConnectStartedAt:0,priceSocketOpenedAt:0,priceUpstreamConnectedAt:0,priceFirstMessageAt:0,priceFirstSnapshotAt:0,priceStartupMs:null,oiLastUpdate:0,quoteLoading:false,activationToken:0,activationController:null,chainLoadState:'pending',chainLoadError:'',
+        priceTime:null,priceReceivedAt:0,priceAgeMs:null,priceReceivedAgeMs:null,priceType:null,marketPhase:null,priceActivationAt:0,priceConnectStartedAt:0,priceSocketOpenedAt:0,priceUpstreamConnectedAt:0,priceFirstMessageAt:0,priceFirstSnapshotAt:0,priceStartupMs:null,oiLastUpdate:0,quoteLoading:false,activationToken:0,activationController:null,chainLoadState:'pending',chainLoadError:'',
         quoteFeed:'delay', streamExpiry:null, streamNames:[], reconnectDelay:1000, priceReconnectDelay:1000, requestId:1, priceFeedState:'idle', priceFeedDetail:'', priceLastMessageAt:0, optionFeedState:'idle', optionFeedError:'', chainLoadToken:0, crossAssetError:'',
         displayStrikes:readDisplayStrikes(cfg.key), chainComplete:false, hydrating:false, hydrateProgress:0, loadedExpiry:null, quotesExpiry:null, lastHydrationMissingSymbols:[], lastHydrationIncompleteSymbols:[], chainListInvalidCount:0,chainListDuplicateCount:0,contractMeta:new Map(),
         scope:readScope(cfg.key), scopeData:new Map(), scopeToken:0, scopeLoading:false, scopeProgress:{done:0,total:0}, scopeError:'', scopeRev:0, scopeTimer:null, _scopeFlipCache:null, _scopeMemo:null
@@ -1207,8 +1216,10 @@
     const c=calc(s),spot=s.price,change=spot!==null&&s.previousClose!==null?spot-s.previousClose:null,changePct=change!==null&&s.previousClose?change/s.previousClose:null;
     const k=$(`so-${s.cfg.key}-kpis`);if(!k)return;
     const phaseLabel=({C:'Market closed · last available price',PRE:'Pre-market',O:'Market open',POST:'Post-market',ON:'Overnight'})[s.marketPhase]||'Binance Equity';
+    const priceTypeLabel=s.priceType==='midquote'?'Bid/Ask midpoint':'Last Price';
+    const priceAgeLabel=s.priceAgeMs===null||s.priceAgeMs===undefined?'age unknown':`price age ${ageLabel(s.priceAgeMs)}`;
     k.innerHTML=[
-      metric(fmt(spot,2),'LAST PRICE',`${s.cfg.symbol} · USD · ${phaseLabel}`),
+      metric(fmt(spot,2),s.priceType==='midquote'?'SPOT MIDPOINT':'LAST PRICE',`${s.cfg.symbol} · USD · ${phaseLabel} · ${priceTypeLabel} · ${priceAgeLabel}`),
       metric(change===null?'—':`${change>=0?'+':''}${fmt(change,2)} (${changePct===null?'—':(changePct*100).toFixed(2)+'%'})`,'CHANGE','So với previous close',change===null?'':change>=0?'pos-t':'neg-t'),
       metric(compact(c.callOI),'CALL OI',`${c.rows.filter(x=>x.side==='C'&&x.openInterest!=null).length} observed · null→0 ${c.rows.filter(x=>x.side==='C'&&x.openInterest==null).length}`),
       metric(compact(c.putOI),'PUT OI',`${c.rows.filter(x=>x.side==='P'&&x.openInterest!=null).length} observed · null→0 ${c.rows.filter(x=>x.side==='P'&&x.openInterest==null).length}`),
@@ -1368,7 +1379,7 @@
         ['MULTIPLIER COVERAGE',`${c.multiplierKnown} hợp lệ · ${c.multiplierAssumed} assumed ×100 · thiếu ${c.multiplierMissing}${missingMultSample}`],
         ['ZERO-FILL ASSUMPTIONS',`${c.oiAssumedZero} OI · ${c.volumeAssumedZero} Volume`],
         ['MISSING DATA',`${c.ivMissing} IV · ${c.multiplierMissing} multiplier · ${c.missingGreekSamples.length} Gamma/IV`],
-        ['SPOT PRICE FEED',`${s.price!==null?`${s.marketPhase==='C'?'Market closed · last available price':s.marketPhase==='O'?'Market open':s.marketPhase==='PRE'?'Pre-market':s.marketPhase==='POST'?'Post-market':'Price received'}${s.priceReceivedAt?` · received ${new Date(s.priceReceivedAt).toLocaleTimeString('vi-VN')}`:''}`:s.priceFeedDetail||(s.priceFeedState==='connected-waiting'?'Connected · waiting for price snapshot':s.priceFeedState==='symbol-missing'?'Snapshot received · target symbol absent':s.priceFeedState==='error'?'Price WebSocket error':s.priceSocket&&s.priceSocket.readyState===WebSocket.OPEN?'Connected · waiting for Binance price snapshot':'Connecting / closed')}${Number.isFinite(s.priceStartupMs)?` · first Spot ${(s.priceStartupMs/1000).toFixed(1)}s after activation`:''}`],
+        ['SPOT PRICE FEED',`${s.price!==null?`${s.priceFeedState==='closed'?'Market closed · last available price':s.priceFeedState==='live-midquote'?'Live · Bid/Ask midpoint':s.priceFeedState==='stale'?'STALE · old market price':s.marketPhase==='O'?'Market open':s.marketPhase==='PRE'?'Pre-market':s.marketPhase==='POST'?'Post-market':'Price received'} · ${s.priceType==='midquote'?'MIDQUOTE':'LAST'} · price age ${ageLabel(s.priceAgeMs)}${s.priceReceivedAt?` · received ${new Date(s.priceReceivedAt).toLocaleTimeString('vi-VN')}`:''} · ${s.priceSource||'unknown source'}`:s.priceFeedDetail||(s.priceFeedState==='connected-waiting'?'Connected · waiting for price snapshot':s.priceFeedState==='symbol-missing'?'Snapshot received · target symbol absent':s.priceFeedState==='error'?'Price feed error':s.priceSocket&&s.priceSocket.readyState===WebSocket.OPEN?'Connected · waiting for Binance price snapshot':'Connecting / closed')}${Number.isFinite(s.priceStartupMs)?` · first Spot ${(s.priceStartupMs/1000).toFixed(1)}s after activation`:''}`],
         ['OPTION QUOTE STREAM',s.optionFeedError||({subscribed:'Subscription accepted',pending:'Subscription pending',connecting:'Connecting',error:'Subscription rejected',idle:'Not connected'})[s.optionFeedState]||s.optionFeedState]
       ];
       meta.innerHTML=items.map(([label,value])=>`<span class="opt-meta-item"><small>${esc(label)}</small><b>${esc(value)}</b></span>`).join('');
@@ -1391,20 +1402,32 @@
       marketPhase:typeof hit.mp==='string'?hit.mp.toUpperCase():null
     };
   }
-  function handlePrice(s, data, source='binance-price-stream'){
+  function handlePrice(s, data, source='binance-price-stream', quality=null){
     const quote=underlyingPriceRow(data,s.cfg);
     if(!quote)return false;
+    const now=Date.now();
+    // Do not let a slower Node poll overwrite a newer browser Last Price.
+    if(source==='node-server'&&s.priceSource==='direct-binance'&&s.priceTime!==null&&quote.priceTime!==null&&quote.priceTime<s.priceTime)return false;
     s.price=quote.price;
     if(!s.priceFirstSnapshotAt){
-      s.priceFirstSnapshotAt=Date.now();
+      s.priceFirstSnapshotAt=now;
       s.priceStartupMs=s.priceActivationAt?s.priceFirstSnapshotAt-s.priceActivationAt:null;
     }
     if(quote.previousClose!==null)s.previousClose=quote.previousClose;
-    if(quote.priceTime!==null)s.priceTime=quote.priceTime;
-    s.marketPhase=quote.marketPhase||s.marketPhase;
-    s.priceReceivedAt=Date.now();
-    s.priceSource=source;
-    s.priceFeedState='ok';s.priceFeedDetail='';
+    if(quote.priceTime!==null||source==='node-server')s.priceTime=quote.priceTime;
+    if(quote.marketPhase!==null)s.marketPhase=quote.marketPhase;
+    else if(source==='node-server'&&quality?.priceType==='midquote')s.marketPhase=null;
+    s.priceReceivedAt=now;
+    const suppliedPriceAge=quality?.priceAgeMs;
+    const suppliedReceivedAge=quality?.receivedAgeMs;
+    s.priceAgeMs=suppliedPriceAge!==null&&suppliedPriceAge!==undefined&&Number.isFinite(Number(suppliedPriceAge))?Math.max(0,Number(suppliedPriceAge)):(quote.priceTime!==null?Math.max(0,now-quote.priceTime):null);
+    s.priceReceivedAgeMs=suppliedReceivedAge!==null&&suppliedReceivedAge!==undefined&&Number.isFinite(Number(suppliedReceivedAge))?Math.max(0,Number(suppliedReceivedAge)):0;
+    s.priceType=quality?.priceType||'last';
+    s.priceSource=quality?.source?`${source} · ${quality.source}`:source;
+    const computedState=quote.marketPhase==='C'?'closed':s.priceAgeMs===null?'unknown-age':s.priceAgeMs<=300000?(s.priceType==='midquote'?'live-midquote':'live'):'stale';
+    s.priceFeedState=quality?.feedState||computedState;
+    const stateLabel=({live:'Live Last Price', 'live-midquote':'Live Bid/Ask midpoint', closed:'Market closed · last available price', stale:'Stale market price', 'unknown-age':'Price timestamp unavailable'})[s.priceFeedState]||s.priceFeedState;
+    s.priceFeedDetail=source==='node-server'?`Node Server · ${stateLabel} · price age ${ageLabel(s.priceAgeMs)}`:'';
     s.priceReconnectDelay=1000;
     // Spot changes invalidate BSM GEX, Gamma Flip, Gamma Share and every per-expiry status.
     renderAll(s);
@@ -1422,13 +1445,10 @@
     subscribeOptionChain(s);
   }
   function priceFeedEndpoints(){
-    const endpoints=[];
-    if(API_BASE){
-      const wsBase=API_BASE.replace(/^https:/i,'wss:').replace(/^http:/i,'ws:');
-      endpoints.push({url:`${wsBase}/api/stock-price-feed`,source:'worker-relay',label:'Cloudflare Worker Spot relay'});
-    }
-    endpoints.push({url:PRICE_WS_DIRECT_URL,source:'direct-binance',label:'Binance raw Price Stream'});
-    return endpoints;
+    // Binance blocks the Cloudflare Worker egress for this WebSocket (HTTP 403).
+    // Node.js over the existing Named Tunnel is the primary Spot source; this
+    // direct browser socket is only a fallback when the Node API is unreachable.
+    return [{url:PRICE_WS_DIRECT_URL,source:'direct-binance',label:'Binance raw Price Stream (browser fallback)'}];
   }
   const PRICE_SNAPSHOT_TIMEOUT_MS=9000; // Binance Stock Price Stream publishes a push-all snapshot every 3 seconds.
   function armPriceSnapshotWatchdog(s,ws,endpoint){
@@ -1446,25 +1466,38 @@
   }
   function startServerSpotFallback(s){
     if(!SPOT_SERVER_BASE||!s.active||s.priceHttpTimer)return;
+    let consecutiveFailures=0;
     const poll=async()=>{
       if(!s.active||s.priceHttpBusy)return;
       s.priceHttpBusy=true;
       const controller=typeof AbortController!=='undefined'?new AbortController():null;
-      const timeout=setTimeout(()=>controller?.abort(),8000);
+      const timeout=setTimeout(()=>controller?.abort(),10000);
       try{
-        const url=`${SPOT_SERVER_BASE}/api/spot?symbol=${encodeURIComponent(s.cfg.symbol)}`;
+        const url=`${SPOT_SERVER_BASE}/api/spot?symbol=${encodeURIComponent(s.cfg.symbol)}&timeout=8000`;
         const response=await fetch(url,{method:'GET',cache:'no-store',headers:{Accept:'application/json'},signal:controller?.signal});
         const payload=await response.json().catch(()=>null);
         if(!response.ok||!payload?.ok||!(Number(payload.price)>0)){
           throw new Error(payload?.error||`Spot server HTTP ${response.status}`);
         }
+        consecutiveFailures=0;
         const row={s:s.cfg.symbol,ac:s.cfg.assetCode,p:payload.price,pc:payload.previousClose,t:payload.priceTime,mp:payload.marketPhase};
-        handlePrice(s,{e:'price',rates:[row]},'node-server');
-        s.priceFeedDetail=`Node Server fallback · ${payload.feedState||'price received'}${Number.isFinite(payload.ageMs)?` · age ${Math.round(payload.ageMs/1000)}s`:''}`;
-        updateChainMeta(s);
+        handlePrice(s,{e:'price',rates:[row]},'node-server',{
+          source:payload.source||'Node Spot API',
+          priceType:payload.priceType||'last',
+          priceAgeMs:payload.priceAgeMs??payload.ageMs??null,
+          receivedAgeMs:payload.receivedAgeMs??null,
+          feedState:payload.feedState||null
+        });
       }catch(e){
-        s.priceFeedDetail=`Node Server Spot fallback: ${e?.name==='AbortError'?'request timeout':e.message||e}`;
+        consecutiveFailures++;
+        s.priceFeedDetail=`Node Server Spot API: ${e?.name==='AbortError'?'request timeout':e.message||e}`;
         updateChainMeta(s);
+        // Fall back to the browser's direct Binance connection only after the
+        // tunnel/API fails repeatedly. Never use the blocked Worker WebSocket.
+        if(consecutiveFailures>=2&&!s.priceSocket&&s.active){
+          s.priceFeedState='fallback';
+          subscribePrice(s,0);
+        }
       }finally{
         clearTimeout(timeout);s.priceHttpBusy=false;
       }
@@ -1472,6 +1505,7 @@
     poll();
     s.priceHttpTimer=setInterval(poll,5000);
   }
+
   function subscribePrice(s,index=0){
     if(!s.active)return;
     const endpoints=priceFeedEndpoints();
@@ -1641,7 +1675,7 @@
     s.priceActivationAt=Date.now();
     s.priceFirstMessageAt=0;s.priceFirstSnapshotAt=0;s.priceStartupMs=null;
     s.priceSocketOpenedAt=0;s.priceUpstreamConnectedAt=0;
-    subscribePrice(s,0);
+    if(SPOT_SERVER_BASE)startServerSpotFallback(s);else subscribePrice(s,0);
     try{
       const exps=await loadExpirations(s,requestOptions);
       if(!isCurrent())return;
@@ -1725,7 +1759,7 @@
     const s=sessions[key];if(!s)return null;
     const c=calcSingle(s); // Cross-Asset Map is defined on the selected expiry, independent of Analysis Scope
     const expiryMismatch=!!(s.expiry&&s.quotesExpiry!==s.expiry);
-    return {key,symbol:s.cfg.symbol,price:s.price,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,marketPhase:s.marketPhase,expiry:s.expiry,dataExpiry:s.quotesExpiry||null,expiryMismatch,expirations:s.expirations.map(x=>({date:x.date,root:x.root})),updatedAt:s.oiLastUpdate,error:s.crossAssetError||'',
+    return {key,symbol:s.cfg.symbol,price:s.price,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,priceAgeMs:s.priceAgeMs,priceType:s.priceType,priceFeedState:s.priceFeedState,marketPhase:s.marketPhase,expiry:s.expiry,dataExpiry:s.quotesExpiry||null,expiryMismatch,expirations:s.expirations.map(x=>({date:x.date,root:x.root})),updatedAt:s.oiLastUpdate,error:s.crossAssetError||'',
       coverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiKnown:c.oiKnown,oiAssumedZero:c.oiAssumedZero,volumeAssumedZero:c.volumeAssumedZero,oiAnalyticsComplete:c.oiComplete,totalContracts:c.totalContracts,callOI:c.callOI,putOI:c.putOI,callVol:c.callVol,putVol:c.putVol,
       callOIWall:c.oiComplete&&c.callOIWall?{strike:c.callOIWall.strike,oi:c.callOIWall.callOI}:null,
       putOIWall:c.oiComplete&&c.putOIWall?{strike:c.putOIWall.strike,oi:c.putOIWall.putOI}:null,
@@ -1744,5 +1778,5 @@
   window.stockOptionsCrossAssetSnapshot=crossAssetSnapshot;
   window.stockOptionsCrossAssetSetExpiry=crossAssetSetExpiry;
   window.stockOptionsSetScope=(key,scope)=>{const s=sessions[key];if(!s)throw new Error('Nguồn ETF không hợp lệ: '+key);setScope(s,scope);};
-  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,price:s.price,previousClose:s.previousClose,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,marketPhase:s.marketPhase,priceFeedState:s.priceFeedState,priceFeedDetail:s.priceFeedDetail,priceSource:s.priceSource,priceEndpointIndex:s.priceEndpointIndex,priceActivationAt:s.priceActivationAt,priceConnectStartedAt:s.priceConnectStartedAt,priceSocketOpenedAt:s.priceSocketOpenedAt,priceUpstreamConnectedAt:s.priceUpstreamConnectedAt,priceFirstMessageAt:s.priceFirstMessageAt,priceFirstSnapshotAt:s.priceFirstSnapshotAt,priceStartupMs:s.priceStartupMs,priceSocketState:s.priceSocket?.readyState??null,optionFeedState:s.optionFeedState,optionFeedError:s.optionFeedError,optionSocketState:s.socket?.readyState??null,quotes:s.quotes.size,contracts:c.totalContracts,quotesExpiry:s.quotesExpiry,complete:c.complete,hydrating:s.hydrating,missingQuoteSymbols:c.missingQuoteSymbols.slice(0,20),lastHydrationIncompleteSymbols:s.lastHydrationIncompleteSymbols||[],incompleteContractDetails:(s.lastHydrationIncompleteSymbols||[]).slice(0,12).map(symbol=>{const q=s.quotes.get(symbol)||{},m=s.contractMeta?.get(symbol)||{};return {symbol,side:q.side??m.side,strike:q.strike??m.strike,oi:q.openInterest??m.openInterest,iv:q.iv??m.iv,gamma:q.gamma??m.gamma,multiplier:q.multiplier??m.multiplier,effectiveMultiplier:effectiveMultiplier(q.optionSymbol?q:m)}}),quoteSamples:[...s.quotes.values()].slice(0,3).map(q=>({symbol:q.optionSymbol,side:q.side,strike:q.strike,oi:q.openInterest,iv:q.iv,gamma:q.gamma,multiplier:q.multiplier,effectiveMultiplier:effectiveMultiplier(q)})),chainListInvalidCount:s.chainListInvalidCount,chainListDuplicateCount:s.chainListDuplicateCount,displayStrikes:s.displayStrikes,oiKnown:c.oiKnown,oiMissing:c.oiMissing,oiAssumedZero:c.oiAssumedZero,volumeKnown:c.volumeKnown,volumeAssumedZero:c.volumeAssumedZero,oiObservedCoverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiMissingSamples:c.oiMissingSamples,multiplierKnown:c.multiplierKnown,multiplierAssumed:c.multiplierAssumed,multiplierMissing:c.multiplierMissing,missingMultiplierSamples:c.missingMultiplierSamples,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,missingGreekSamples:c.missingGreekSamples,gexCoverage:c.gexCoverage,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexComplete:c.gexComplete,oiComplete:c.oiComplete,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,maxPainTiedStrikes:c.maxPain?.tiedStrikes||[],maxPainComplete:c.maxPainComplete,gexRatio:c.gexRatio,price:s.price}] }));
+  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,price:s.price,previousClose:s.previousClose,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,priceAgeMs:s.priceAgeMs,priceReceivedAgeMs:s.priceReceivedAgeMs,priceType:s.priceType,marketPhase:s.marketPhase,priceFeedState:s.priceFeedState,priceFeedDetail:s.priceFeedDetail,priceSource:s.priceSource,priceEndpointIndex:s.priceEndpointIndex,priceActivationAt:s.priceActivationAt,priceConnectStartedAt:s.priceConnectStartedAt,priceSocketOpenedAt:s.priceSocketOpenedAt,priceUpstreamConnectedAt:s.priceUpstreamConnectedAt,priceFirstMessageAt:s.priceFirstMessageAt,priceFirstSnapshotAt:s.priceFirstSnapshotAt,priceStartupMs:s.priceStartupMs,priceSocketState:s.priceSocket?.readyState??null,optionFeedState:s.optionFeedState,optionFeedError:s.optionFeedError,optionSocketState:s.socket?.readyState??null,quotes:s.quotes.size,contracts:c.totalContracts,quotesExpiry:s.quotesExpiry,complete:c.complete,hydrating:s.hydrating,missingQuoteSymbols:c.missingQuoteSymbols.slice(0,20),lastHydrationIncompleteSymbols:s.lastHydrationIncompleteSymbols||[],incompleteContractDetails:(s.lastHydrationIncompleteSymbols||[]).slice(0,12).map(symbol=>{const q=s.quotes.get(symbol)||{},m=s.contractMeta?.get(symbol)||{};return {symbol,side:q.side??m.side,strike:q.strike??m.strike,oi:q.openInterest??m.openInterest,iv:q.iv??m.iv,gamma:q.gamma??m.gamma,multiplier:q.multiplier??m.multiplier,effectiveMultiplier:effectiveMultiplier(q.optionSymbol?q:m)}}),quoteSamples:[...s.quotes.values()].slice(0,3).map(q=>({symbol:q.optionSymbol,side:q.side,strike:q.strike,oi:q.openInterest,iv:q.iv,gamma:q.gamma,multiplier:q.multiplier,effectiveMultiplier:effectiveMultiplier(q)})),chainListInvalidCount:s.chainListInvalidCount,chainListDuplicateCount:s.chainListDuplicateCount,displayStrikes:s.displayStrikes,oiKnown:c.oiKnown,oiMissing:c.oiMissing,oiAssumedZero:c.oiAssumedZero,volumeKnown:c.volumeKnown,volumeAssumedZero:c.volumeAssumedZero,oiObservedCoverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiMissingSamples:c.oiMissingSamples,multiplierKnown:c.multiplierKnown,multiplierAssumed:c.multiplierAssumed,multiplierMissing:c.multiplierMissing,missingMultiplierSamples:c.missingMultiplierSamples,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,missingGreekSamples:c.missingGreekSamples,gexCoverage:c.gexCoverage,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexComplete:c.gexComplete,oiComplete:c.oiComplete,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,maxPainTiedStrikes:c.maxPain?.tiedStrikes||[],maxPainComplete:c.maxPainComplete,gexRatio:c.gexRatio,price:s.price}] }));
 })();

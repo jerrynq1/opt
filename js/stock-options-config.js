@@ -1,8 +1,8 @@
 /* Cloudflare Worker URL for Binance QQQ/GLD Stock Options. */
 window.BINANCE_STOCK_PROXY = 'https://api.gexadecimal.dev';
 
-/* Optional Node Server Spot fallback. Leave empty when not exposing the private Node server.
- * If you run server/home-proxy.mjs behind an HTTPS tunnel, set its public base URL here.
- * Example: window.BINANCE_STOCK_SPOT_API = 'https://spot-api.example.com';
+/* Node.js Spot API exposed through the existing Cloudflare Named Tunnel.
+ * The same host routes /api/spot to C:\server\home-proxy.mjs and
+ * /api/binance-stock-proxy to the local Worker module.
  */
-window.BINANCE_STOCK_SPOT_API = window.BINANCE_STOCK_SPOT_API || '';
+window.BINANCE_STOCK_SPOT_API = 'https://api.gexadecimal.dev';

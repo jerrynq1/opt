@@ -1,13 +1,13 @@
 // Local Node.js gateway for QuantLab PWA + iOS Quick Options.
 // Requires Node.js 22+ (native global WebSocket; no npm packages required).
 // Start: node server/home-proxy.mjs
-// Optional public access for PWA fallback: cloudflared tunnel --url http://localhost:8787
+// Public Node API is exposed through the existing Cloudflare Named Tunnel on port 8788.
 import http from 'node:http';
-import worker from '../opt-main/worker/index.js';
+import worker from '../worker/index.js';
 import { createQuickOptionsService } from './quick-options.mjs';
 import { createEquityPriceFeed } from './equity-price-feed.mjs';
 
-const PORT = Number(process.env.PORT || 8787);
+const PORT = Number(process.env.PORT || 8788);
 const env = { ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS || '*' };
 const spotFeed = createEquityPriceFeed();
 const quickOptions = createQuickOptionsService({ worker, env, spotFeed });
