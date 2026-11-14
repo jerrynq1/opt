@@ -1204,7 +1204,7 @@
     const k=$(`so-${s.cfg.key}-kpis`);if(!k)return;
     const phaseLabel=({C:'Market closed · last available price',PRE:'Pre-market',O:'Market open',POST:'Post-market',ON:'Overnight'})[s.marketPhase]||'Binance Equity';
     k.innerHTML=[
-      metric(fmt(spot,2),'LAST PRICE',`${s.cfg.symbol} · USD · ${phaseLabel}`),
+      metric(fmt(spot,2),'LAST PRICE',spot>0?`${s.cfg.symbol} · USD · ${phaseLabel}`:'Chưa nhận Spot từ stream price · GEX, Gamma Flip chờ Spot'),
       metric(change===null?'—':`${change>=0?'+':''}${fmt(change,2)} (${changePct===null?'—':(changePct*100).toFixed(2)+'%'})`,'CHANGE','So với previous close',change===null?'':change>=0?'pos-t':'neg-t'),
       metric(compact(c.callOI),'CALL OI',`${c.rows.filter(x=>x.side==='C'&&x.openInterest!=null).length} observed · null→0 ${c.rows.filter(x=>x.side==='C'&&x.openInterest==null).length}`),
       metric(compact(c.putOI),'PUT OI',`${c.rows.filter(x=>x.side==='P'&&x.openInterest!=null).length} observed · null→0 ${c.rows.filter(x=>x.side==='P'&&x.openInterest==null).length}`),
@@ -1413,6 +1413,8 @@
       if(s.expiry){const root=s.expirations.find(x=>x.date===s.expiry)?.root||s.cfg.root;const d=s.expiry.replace(/-/g,'');params.push(`${s.cfg.symbol}_${d}_${root}@optionChainQuoteDelayed`);s.streamNames=params;}
       ws.send(JSON.stringify({method:'SUBSCRIBE',params,id:s.requestId++}));
       setStatus(s,`Connected · ${s.cfg.symbol}`,'ok');
+      clearTimeout(s.spotWatchdog);
+      s.spotWatchdog=setTimeout(()=>{if(s.active&&s.socket===ws&&!(s.price>0)){setStatus(s,'Đã kết nối nhưng chưa nhận giá Spot · GEX/Gamma Flip đang chờ','warn');renderAll(s);}},12000);
     };
     ws.onmessage=ev=>{
       let msg;try{msg=JSON.parse(ev.data)}catch{return;}
@@ -1429,6 +1431,7 @@
   function closeSocket(s){
     if(s.socket){try{s.socket.onclose=null;s.socket.close(1000,'stock-options inactive')}catch{}s.socket=null;}
     if(s.reconnectTimer){clearTimeout(s.reconnectTimer);s.reconnectTimer=null;}
+    if(s.spotWatchdog){clearTimeout(s.spotWatchdog);s.spotWatchdog=null;}
   }
   function scheduleReconnect(s){
     if(!s.active||s.reconnectTimer)return;
