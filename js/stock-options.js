@@ -158,28 +158,45 @@
         </div>
         <p class="so-vol-disclaimer" id="${p}-vol-note">Risk Reversal = IV Call 25Δ − IV Put 25Δ. Butterfly = trung bình hai IV 25Δ trừ ATM IV. Put Skew / Call Skew lần lượt là IV cánh Put / Call trừ ATM IV. Nếu thiếu delta provider, delta được xấp xỉ bằng Black–Scholes với r = 0%; q = 0.45% cho QQQ và 0% cho GLD.</p>
       </section>
-      <section class="card so-surface-lab" aria-label="Multi-expiry option surfaces">
+      <section class="card so-greeks-3d-lab" aria-label="Greeks 3D surfaces">
         <div class="so-surface-head">
-          <div><span class="so-vol-eyebrow">C · MULTI-EXPIRY SURFACES</span><h3>Option Surface Lab</h3><p>Expiry × moneyness · chỉ dùng các chain đã tải trong Analysis Scope.</p></div>
+          <div><span class="so-vol-eyebrow">C · GREEKS 3D</span><h3>Greeks Surface Lab</h3><p>Greek trên mỗi hợp đồng theo Strike/Moneyness × Expiry. Kéo để xoay, cuộn để zoom.</p></div>
+          <span class="so-surface-status" id="${p}-greeks3d-status">Đang chờ dữ liệu…</span>
+        </div>
+        <div class="so-surface-controls">
+          <label>GREEK METRIC
+            <select id="${p}-greeks3d-metric"><option value="delta">Delta</option><option value="gamma">Gamma</option><option value="vega">Vega</option><option value="theta">Theta</option><option value="vanna">Vanna</option><option value="charm">Charm</option><option value="rho">Rho</option></select>
+          </label>
+          <label>OPTION SIDE
+            <select id="${p}-greeks3d-side"><option value="call">Calls</option><option value="put">Puts</option></select>
+          </label>
+          <span class="so-surface-axis-note">X: Strike / Spot · Y: Expiry · Z: Greek</span>
+        </div>
+        <div class="so-3d-host" id="${p}-greeks3d-chart"><div class="so-3d-empty">Chọn Weekly hoặc All Expiries để dựng Greeks Surface 3D.</div></div>
+        <div class="so-surface-foot" id="${p}-greeks3d-foot">Greeks 3D hiển thị median Greek mỗi contract trong từng bucket; đây không phải exposure nhân OI. Provider Greeks được ưu tiên, BSM là fallback và được phân biệt trong coverage.</div>
+      </section>
+      <section class="card so-surface-lab" aria-label="Multi-expiry option surfaces 3D">
+        <div class="so-surface-head">
+          <div><span class="so-vol-eyebrow">D · OPTIONS SURFACE 3D</span><h3>Options Surface Lab</h3><p>Bề mặt 3D thực: X = Strike/Moneyness · Y = Expiry/DTE · Z = metric. Kéo để xoay, cuộn để zoom.</p></div>
           <span class="so-surface-status" id="${p}-surface-status">Đang chờ dữ liệu…</span>
         </div>
-        <div class="so-surface-tabs" id="${p}-surface-tabs" role="tablist" aria-label="Chọn loại surface">
-          <button type="button" data-surface-tab="iv" class="is-active" role="tab" aria-selected="true">IV Surface</button>
-          <button type="button" data-surface-tab="exposure" role="tab" aria-selected="false">Exposure Surface</button>
-          <button type="button" data-surface-tab="volume" role="tab" aria-selected="false">Volume Surface</button>
-          <button type="button" data-surface-tab="oi" role="tab" aria-selected="false">OI Surface</button>
+        <div class="so-surface-tabs" id="${p}-surface-tabs" role="tablist" aria-label="Chọn loại 3D surface">
+          <button type="button" data-surface-tab="iv" class="is-active" role="tab" aria-selected="true">IV</button>
+          <button type="button" data-surface-tab="exposure" role="tab" aria-selected="false">Exposure</button>
+          <button type="button" data-surface-tab="volume" role="tab" aria-selected="false">Volume</button>
+          <button type="button" data-surface-tab="oi" role="tab" aria-selected="false">Open Interest</button>
         </div>
         <div class="so-surface-controls">
           <label id="${p}-surface-exposure-control">EXPOSURE METRIC
             <select id="${p}-surface-exposure-metric"><option value="gamma">GEX · Gamma</option><option value="delta">DEX · Delta</option><option value="vega">Vega</option><option value="theta">Theta</option><option value="vanna">Vanna</option><option value="charm">Charm</option></select>
           </label>
-          <label>SIDE
+          <label>OPTION SIDE
             <select id="${p}-surface-side"><option value="both">Call + Put</option><option value="call">Calls only</option><option value="put">Puts only</option></select>
           </label>
-          <span class="so-surface-axis-note">X: Strike / Spot moneyness · Y: Expiry</span>
+          <span class="so-surface-axis-note">X: Strike / Spot · Y: Expiry · Z: Surface metric</span>
         </div>
-        <div class="so-surface-heatmap" id="${p}-surface-heatmap"><div class="so-vol-empty">Chọn Analysis Scope → Weekly hoặc All Expiries để tạo surface nhiều kỳ hạn.</div></div>
-        <div class="so-surface-foot" id="${p}-surface-foot">Ô trống = chưa có quote hợp lệ trong bucket. Surface là snapshot, không phải dữ liệu giao dịch Long/Short.</div>
+        <div class="so-3d-host" id="${p}-surface-3d-chart"><div class="so-3d-empty">Chọn Analysis Scope → Weekly hoặc All Expiries để tạo 3D surface.</div></div>
+        <div class="so-surface-foot" id="${p}-surface-foot">IV là median IV theo bucket; Exposure là Greek × OI × multiplier; Volume/OI là tổng hợp contracts. Partial expiry được đánh dấu; ô thiếu không bị zero-fill. OI không xác định dealer Long/Short.</div>
       </section>
       <div class="card so-level-card">
         <div class="opt-card-title"><div><h3>Key Levels</h3><small id="${p}-levels-sub">Ước lượng từ OI và Greeks của expiry được chọn</small></div><button class="btn ghost sm" type="button" id="${p}-copy">Copy Levels</button></div>
@@ -194,7 +211,7 @@
         <div class="card so-exposure-card">
           <div class="so-exposure-window">
             <div class="so-exposure-windowbar">
-              <div class="so-exposure-windowtitle"><span class="so-exposure-dots"><i></i><i></i><i></i></span><span>EXPOSURE</span></div>
+              <div class="so-exposure-windowtitle"><span class="so-exposure-dots"><i></i><i></i><i></i></span><span>EXPOSURE PROFILE · SELECTED EXPIRY</span></div>
               <div class="so-exposure-windowcontrols"><span class="so-exposure-feed">${cfg.symbol} · OPTIONS</span>
                 <select id="${p}-exposure-metric" class="opt-exposure-select" aria-label="Chọn loại Exposure"><option value="gamma">GEX · Gamma</option><option value="delta">DEX · Delta</option><option value="vega">VGEX · Vega</option><option value="theta">THEX · Theta</option><option value="vanna">VANNA · Vanna</option><option value="charm">CHARM · Charm</option></select>
               </div>
@@ -1607,6 +1624,28 @@
     }
   }
 
+  const GREEK_3D_FORMATS = {
+    delta: value => Number(value).toFixed(3),
+    gamma: value => Number(value).toFixed(5),
+    vega: value => Number(value).toFixed(4),
+    theta: value => Number(value).toFixed(4),
+    vanna: value => Number(value).toFixed(4),
+    charm: value => Number(value).toFixed(5),
+    rho: value => Number(value).toFixed(5)
+  };
+  function renderGreeks3D(s){
+    const p=`so-${s.cfg.key}`,host=$(`${p}-greeks3d-chart`),status=$(`${p}-greeks3d-status`),foot=$(`${p}-greeks3d-foot`);
+    if(!host)return;
+    const {inputs,expected}=collectSurfaceInputs(s);
+    const metric=$(`${p}-greeks3d-metric`)?.value||'delta',side=$(`${p}-greeks3d-side`)?.value||'call';
+    const api=window.StockOptionsSurfaces,renderer=window.StockOptions3D;
+    if(!api?.buildGreeks||!renderer?.mount){host.innerHTML='<div class="so-3d-empty">Greeks 3D module chưa được tải.</div>';return;}
+    const result=api.buildGreeks({spot:s.price,symbol:s.cfg.symbol,expiries:inputs,metric,side});
+    if(status)status.textContent=`${result.rows.length}/${expected} expiry rows · ${result.quoteCount} quotes · ${side.toUpperCase()}`;
+    renderer.mount(host,result,{metricLabel:result.config?.label||metric,formatValue:GREEK_3D_FORMATS[metric],xLabel:'Strike / Spot moneyness (%)',yLabel:'Expiry (DTE)'});
+    if(foot){const partial=result.rows.filter(row=>!row.complete).length;foot.textContent=`${result.config?.unit||''} · q=${(result.dividendYield*100).toFixed(2)}% · r=0% assumption. Median per-contract Greek in each bucket; Provider Greeks preferred, BSM fallback for missing fields. ${partial?`${partial} expiry rows partial.`:'All loaded rows marked complete.'} ${metric==='rho'?'Rho is BSM-derived only (no Provider Rho field in the current feed).':''}`;}
+  }
+
   const SURFACE_LABELS={iv:'IV Surface',exposure:'Exposure Surface',volume:'Volume Surface',oi:'Open Interest Surface'};
   const SURFACE_FORMATS={
     iv:value=>`${(value*100).toFixed(1)}%`,
@@ -1632,45 +1671,9 @@
     }
     return {inputs,expected:expiries.length};
   }
-  function renderSurfaceHeatmap(result,activeTab){
-    if(!result?.rows?.length)return '<div class="so-vol-empty">Chưa có expiry nào được tải trong Analysis Scope. Chọn Weekly hoặc All Expiries, sau đó đợi tải chain hoàn tất.</div>';
-    const cells=result.rows.flatMap(row=>row.cells).filter(cell=>Number.isFinite(cell.value));
-    if(!cells.length)return '<div class="so-vol-empty">Chưa có dữ liệu hợp lệ cho surface đang chọn. Kiểm tra OI, multiplier, IV hoặc provider Greeks.</div>';
-    const signed=result.config?.kind==='signed';
-    const values=cells.map(cell=>Math.abs(cell.value));
-    values.sort((a,b)=>a-b);
-    const scale=values[Math.min(values.length-1,Math.floor((values.length-1)*.92))]||1;
-    const allVals=cells.map(cell=>cell.value),min=Math.min(...allVals),max=Math.max(...allVals);
-    const heat=(cell)=>{
-      if(!Number.isFinite(cell.value))return 'background:rgba(100,116,139,.035)';
-      const intensity=Math.max(.08,Math.min(.88,Math.sqrt(Math.abs(cell.value)/Math.max(scale,1e-12))*.78));
-      if(signed)return cell.value>=0?`background:rgba(38,190,139,${(intensity*.48).toFixed(3)})`:`background:rgba(224,91,115,${(intensity*.48).toFixed(3)})`;
-      const t=max===min?.5:(cell.value-min)/(max-min);
-      if(activeTab==='iv')return `background:rgba(${Math.round(38+25*t)},${Math.round(115+85*t)},${Math.round(190+45*t)},${(.10+intensity*.40).toFixed(3)})`;
-      if(activeTab==='volume')return `background:rgba(132,100,220,${(.08+intensity*.45).toFixed(3)})`;
-      if(activeTab==='oi')return `background:rgba(216,157,72,${(.08+intensity*.45).toFixed(3)})`;
-      return `background:rgba(66,150,190,${(.08+intensity*.45).toFixed(3)})`;
-    };
-    const fmtCell=SURFACE_FORMATS[result.metric]||compact;
-    const headers=result.bins.map(bin=>`<div class="so-surface-colhead">${bin===0?'ATM':`${bin>0?'+':''}${bin}%`}</div>`).join('');
-    const rows=result.rows.map(row=>{
-      const state=row.complete?'FULL':`PARTIAL ${row.loadedContracts}/${row.expectedContracts??'?'}`;
-      const cellsHtml=row.cells.map((cell,index)=>{
-        const value=cell.value,display=Number.isFinite(value)?fmtCell(value):'—';
-        const assumed=activeTab==='volume'?(cell.assumedVolumeCount>0?` · ${cell.assumedVolumeCount} volume missing`: ''):(activeTab==='oi'?(cell.assumedOICount>0?` · ${cell.assumedOICount} OI missing`:'' ):(cell.assumedOICount>0?` · ${cell.assumedOICount} OI missing`:''));
-        const coverage=cell.coverage===null?'n/a':`${(cell.coverage*100).toFixed(0)}%`;
-        const strikeText=cell.strikes.length?`${fmt(cell.strikeMin,2)}–${fmt(cell.strikeMax,2)}`:'no strikes';
-        const title=`${row.expiry} · ${result.bins[index]}% moneyness · ${strikeText} · ${cell.usableCount}/${cell.contractCount} usable (${coverage})${assumed}${cell.skippedCount?` · ${cell.skippedCount} skipped`:''}`;
-        return `<div class="so-surface-cell ${Number.isFinite(value)?'has-value':'is-empty'}" style="${heat(cell)}" title="${esc(title)}" data-surface-cell="1" data-expiry="${esc(row.expiry)}"><b>${display}</b><small>${cell.usableCount?`${cell.usableCount}/${cell.contractCount}`:'—'}</small></div>`;
-      }).join('');
-      return `<div class="so-surface-row"><div class="so-surface-rowhead" title="${esc(row.error||state)}"><b>${esc(row.expiry)}</b><small>${row.dte.toFixed(1)} DTE</small><em class="${row.complete?'is-complete':'is-partial'}">${esc(state)}</em></div>${cellsHtml}</div>`;
-    }).join('');
-    const sideLabel=result.side==='both'?'Call + Put':result.side==='call'?'Calls only':'Puts only';
-    return `<div class="so-surface-scroll"><div class="so-surface-grid" style="--surface-cols:${result.bins.length}"><div class="so-surface-row so-surface-header"><div class="so-surface-rowhead">EXPIRY / DTE</div>${headers}</div>${rows}</div></div><div class="so-surface-scale"><span>${esc(result.config?.unit||'')}</span><span>${sideLabel} · ${result.quoteCount} received quotes · ${signed?`range ${fmt(min,1)} → ${fmt(max,1)}`:`range ${fmt(min,1)} → ${fmt(max,1)}`}</span></div>`;
-  }
   function renderOptionSurfaces(s){
-    const p=`so-${s.cfg.key}`,status=$(`${p}-surface-status`),heatmap=$(`${p}-surface-heatmap`),tabs=$(`${p}-surface-tabs`);
-    if(!heatmap||!tabs)return;
+    const p=`so-${s.cfg.key}`,status=$(`${p}-surface-status`),surfaceHost=$(`${p}-surface-3d-chart`),tabs=$(`${p}-surface-tabs`);
+    if(!surfaceHost||!tabs)return;
     const active=['iv','exposure','volume','oi'].includes(s.surfaceTab)?s.surfaceTab:'iv';
     s.surfaceTab=active;
     for(const button of tabs.querySelectorAll('[data-surface-tab]')){
@@ -1680,13 +1683,15 @@
     if(metricControl)metricControl.hidden=active!=='exposure';
     const {inputs,expected}=collectSurfaceInputs(s);
     const surfaceApi=window.StockOptionsSurfaces;
-    if(!surfaceApi?.build){heatmap.innerHTML='<div class="so-vol-empty">Surface module chưa được tải.</div>';return;}
+    if(!surfaceApi?.build){surfaceHost.innerHTML='<div class="so-3d-empty">Surface module chưa được tải.</div>';return;}
     const exposureMetric=metricSelect?.value||'gamma',side=sideSelect?.value||'both';
     const metric=active==='exposure'?'exposure':active;
     const result=surfaceApi.build({spot:s.price,symbol:s.cfg.symbol,expiries:inputs,metric,exposureMetric,side});
     const loaded=result.rows.length;
     if(status)status.textContent=`${loaded}/${expected} expiry rows · ${result.quoteCount} quotes · ${s.scope==='selected'?'Selected expiry':scopeLabels[s.scope]||s.scope}`;
-    heatmap.innerHTML=renderSurfaceHeatmap(result,active);
+    const renderer=window.StockOptions3D;
+    if(renderer?.mount){renderer.mount(surfaceHost,result,{metricLabel:result.config?.label||SURFACE_LABELS[active],formatValue:SURFACE_FORMATS[result.metric]||compact,xLabel:'Strike / Spot moneyness (%)',yLabel:'Expiry (DTE)'});}
+    else surfaceHost.innerHTML='<div class="so-3d-empty">3D renderer chưa được tải.</div>';
     const foot=$(`${p}-surface-foot`);
     if(foot){
       const notes={
@@ -1695,14 +1700,14 @@
         volume:'Volume là tổng contracts Call + Put theo bucket (hoặc chọn riêng một phía). Đây là traded volume, không phải buyer-initiated/seller-initiated flow.',
         oi:'Open Interest là số hợp đồng đang mở, tổng Call + Put theo bucket. Không diễn giải OI là vị thế dealer hoặc hướng Long/Short.'
       };
-      foot.textContent=`${notes[active]} Ô trống = không có quan sát hợp lệ; partial chain được đánh dấu ở đầu hàng. X-axis là % Strike/Spot − 1, Y-axis là expiry.`;
+      foot.textContent=`${notes[active]} Ô trống = không có quan sát hợp lệ; partial chain được đánh dấu ở đầu hàng. 3D axes: X = % Strike/Spot − 1, Y = DTE/expiry, Z = selected metric.`;
     }
   }
 
-  function renderScopeViews(s){try{renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderVolatilityAnalysis(s);renderOptionSurfaces(s);updateChainMeta(s);renderScope(s);}catch(e){}}
+  function renderScopeViews(s){try{renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderVolatilityAnalysis(s);renderGreeks3D(s);renderOptionSurfaces(s);updateChainMeta(s);renderScope(s);}catch(e){}}
 
   function renderAll(s){
-    renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderChain(s);renderVolatilityAnalysis(s);renderOptionSurfaces(s);updateChainMeta(s);renderScope(s);
+    renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderChain(s);renderVolatilityAnalysis(s);renderGreeks3D(s);renderOptionSurfaces(s);updateChainMeta(s);renderScope(s);
     try{if(typeof window.crossAssetMapDataUpdated==='function')window.crossAssetMapDataUpdated(s.cfg.key)}catch(e){}
   }
   function metric(value,label,sub,cls=''){
@@ -2240,12 +2245,14 @@
     const strikeSelect=$(`${p}-strike-count`);if(strikeSelect){strikeSelect.value=String(s.displayStrikes);strikeSelect.onchange=e=>{s.displayStrikes=e.target.value==='all'?'all':Math.max(5,+e.target.value||15);saveDisplayStrikes(s.cfg.key,s.displayStrikes);renderChain(s);};}
     $(`${p}-method-toggle`).onclick=()=>{const box=$(`${p}-method`);box.hidden=!box.hidden;};
     $(`${p}-exposure-metric`).onchange=()=>renderExposure(s);
-    const surfaceTabs=$(`${p}-surface-tabs`),surfaceHeatmap=$(`${p}-surface-heatmap`);
+    const surfaceTabs=$(`${p}-surface-tabs`);
     if(surfaceTabs){surfaceTabs.onclick=event=>{const tab=event.target?.closest?.('[data-surface-tab]');if(!tab)return;s.surfaceTab=tab.dataset.surfaceTab;renderOptionSurfaces(s);};}
     const surfaceMetric=$(`${p}-surface-exposure-metric`),surfaceSide=$(`${p}-surface-side`);
     if(surfaceMetric)surfaceMetric.onchange=()=>renderOptionSurfaces(s);
     if(surfaceSide)surfaceSide.onchange=()=>renderOptionSurfaces(s);
-    if(surfaceHeatmap)surfaceHeatmap.onclick=event=>{const cell=event.target?.closest?.('[data-surface-cell]');if(!cell)return;const expiry=cell.getAttribute('data-expiry');if(expiry&&expiry!==s.expiry&&s.expirations.some(x=>x.date===expiry)){$(`${p}-expiry`).value=expiry;$(`${p}-expiry`).dispatchEvent(new Event('change'));}};
+    const greekMetric=$(`${p}-greeks3d-metric`),greekSide=$(`${p}-greeks3d-side`);
+    if(greekMetric)greekMetric.onchange=()=>renderGreeks3D(s);
+    if(greekSide)greekSide.onchange=()=>renderGreeks3D(s);
     $(`${p}-copy`).onclick=()=>{
       const c=calc(s),text=[`${s.cfg.symbol} · ${c.scopeInfo?c.scopeInfo.label:s.expiry}`,`Call OI Wall: ${c.callOIWall?.strike??'—'}`,`Put OI Wall: ${c.putOIWall?.strike??'—'}`,`CW (max +Net GEX): ${c.gexCallWall?.strike??'—'}`,`PW (max |−Net GEX|): ${c.gexPutWall?.strike??'—'}`,`Gamma Flip / Zero Gamma (BSM repriced): ${c.gammaFlip??'—'}`,`Max Pain${c.scopeInfo?` (${c.scopeInfo.maxPainExpiry||'—'}, per expiry)`:''}: ${c.maxPain?.strike??'—'}${c.maxPain?.isTie?` (tied: ${c.maxPain.tiedStrikes.join('/')})`:''}`,`GEX Ratio (Call GEX / |Put GEX|): ${c.gexRatioState==='call-only'?'∞':c.gexRatio===null?'—':c.gexRatio.toFixed(4)+'x'}`,`GEX 1-10: ${c.gexLevels.map(x=>x.strike).join(', ')}`,`Call OI: ${c.callOI}`,`Put OI: ${c.putOI}`,`GEX: ${c.gamma}`,`DEX: ${c.delta}`,`OI observed: ${(c.coverage*100).toFixed(1)}% · zero-filled ${c.oiAssumedZero}`].join('\n');
       if(navigator.clipboard?.writeText)navigator.clipboard.writeText(text).catch(()=>{});else{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();}

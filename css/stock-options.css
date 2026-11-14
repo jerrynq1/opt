@@ -213,3 +213,32 @@
 @media(max-width:900px){.so-vol-cm-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:480px){.so-vol-cm-grid{gap:6px}.so-vol-cm-item{min-height:82px;padding:9px}.so-vol-cm-item>strong{font-size:17px}.so-vol-cm-item>em{font-size:8px}}
 
+
+/* ================= INTERACTIVE TRUE 3D GREEKS / OPTION SURFACES ================= */
+.stock-options-view .so-greeks-3d-lab,
+.stock-options-view .so-surface-lab{margin:0 0 14px;padding:16px 18px;min-width:0;overflow:hidden}
+.stock-options-view .so-3d-host{position:relative;min-width:0;width:100%;margin-top:8px;border:1px solid rgba(128,148,172,.18);border-radius:10px;background:radial-gradient(ellipse at 50% 0%,rgba(52,85,118,.16),transparent 66%),linear-gradient(180deg,rgba(7,15,26,.92),rgba(5,11,20,.98));overflow:hidden}
+.stock-options-view .so-3d-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:9px 11px;border-bottom:1px solid rgba(128,148,172,.15);background:rgba(8,17,29,.66)}
+.stock-options-view .so-3d-legend{display:flex;align-items:center;gap:8px;min-width:0;color:var(--ink);font:700 10px ui-monospace,monospace}
+.stock-options-view .so-3d-legend>i{display:inline-block;width:19px;height:7px;border-radius:5px;background:linear-gradient(90deg,#35c3dc,#4bd3a4,#e6b85c)}
+.stock-options-view .so-3d-legend small{margin-left:5px;color:var(--mut);font:9px ui-monospace,monospace;font-weight:500}
+.stock-options-view .so-3d-actions{display:flex;align-items:center;gap:5px}
+.stock-options-view .so-3d-actions button{min-width:29px;height:26px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:rgba(120,145,170,.08);color:var(--ink);font:700 11px ui-monospace,monospace;cursor:pointer}
+.stock-options-view .so-3d-actions button:hover{border-color:var(--win);background:rgba(75,224,168,.09)}
+.stock-options-view .so-3d-stage{position:relative;width:100%;height:420px;min-height:340px;overflow:hidden;touch-action:pan-y}
+.stock-options-view .so-3d-canvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none;outline:none}
+.stock-options-view .so-3d-canvas.is-dragging{cursor:grabbing}
+.stock-options-view .so-3d-canvas:focus-visible{outline:2px solid rgba(75,224,168,.65);outline-offset:-3px}
+.stock-options-view .so-3d-tooltip{position:absolute;z-index:3;pointer-events:none;display:flex;flex-direction:column;gap:4px;min-width:150px;max-width:220px;padding:8px 10px;border:1px solid rgba(119,160,195,.35);border-radius:7px;background:rgba(5,13,23,.95);box-shadow:0 8px 24px rgba(0,0,0,.35);color:var(--ink);font:10px ui-monospace,monospace}
+.stock-options-view .so-3d-tooltip[hidden]{display:none}
+.stock-options-view .so-3d-tooltip>span,.stock-options-view .so-3d-tooltip>small{color:var(--mut);font-size:9px}
+.stock-options-view .so-3d-tooltip>strong{color:#75dfc0;font-size:14px}
+.stock-options-view .so-3d-axis-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:7px 10px;border-top:1px solid rgba(128,148,172,.13);color:var(--mut);font:8px ui-monospace,monospace;letter-spacing:.25px}
+.stock-options-view .so-3d-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:210px;padding:22px;text-align:center;color:var(--mut);font-size:11px;line-height:1.55}
+.stock-options-view .so-3d-empty small{font:9px ui-monospace,monospace;opacity:.78}
+@media(max-width:700px){.stock-options-view .so-greeks-3d-lab,.stock-options-view .so-surface-lab{padding:13px 10px}.stock-options-view .so-3d-stage{height:360px;min-height:300px}.stock-options-view .so-3d-legend{flex-wrap:wrap}.stock-options-view .so-3d-legend small{width:100%;margin-left:27px}.stock-options-view .so-3d-axis-footer{justify-content:flex-start;gap:6px 14px}}
+
+.stock-options-view .so-3d-legend>i.is-signed{background:linear-gradient(90deg,#df6b80 0%,#7b8ca2 50%,#43d2a1 100%)}
+.stock-options-view .so-3d-legend>i.is-iv{background:linear-gradient(90deg,#326fba,#56a6de,#b98af1)}
+.stock-options-view .so-3d-legend>i.is-volume{background:linear-gradient(90deg,#6851a9,#9071df,#c7a5f4)}
+.stock-options-view .so-3d-legend>i.is-oi{background:linear-gradient(90deg,#9d6d32,#d69b4d,#f0d28b)}

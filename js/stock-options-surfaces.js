@@ -11,8 +11,17 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
 
-  const DEFAULT_BINS = Object.freeze([-20, -15, -10, -5, 0, 5, 10, 15, 20]);
+  const DEFAULT_BINS = Object.freeze([-20, -17.5, -15, -12.5, -10, -7.5, -5, -2.5, 0, 2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20]);
   const DAY_MS = 86400000;
+  const GREEK_METRICS = Object.freeze({
+    delta: { label: 'Delta', unit: 'Δ per share', kind: 'signed' },
+    gamma: { label: 'Gamma', unit: 'Γ per $1 underlying move', kind: 'positive' },
+    vega: { label: 'Vega', unit: 'per +1 implied-volatility point', kind: 'positive' },
+    theta: { label: 'Theta', unit: 'per calendar day', kind: 'signed' },
+    vanna: { label: 'Vanna', unit: 'Δ change per +1 volatility point', kind: 'signed' },
+    charm: { label: 'Charm', unit: 'Δ change per calendar day', kind: 'signed' },
+    rho: { label: 'Rho', unit: 'per +1 percentage-point risk-free rate', kind: 'signed' }
+  });
   const METRICS = Object.freeze({
     iv: { label: 'IV', unit: 'Median implied volatility', kind: 'rate' },
     gamma: { label: 'GEX', unit: 'USD notional per 1% underlying move · Calls + / Puts −', kind: 'signed' },
@@ -37,8 +46,11 @@
       const next = Math.abs(moneyness - bins[i]);
       if (next < gap) { gap = next; best = i; }
     }
-    // 5%-wide buckets: do not drag a far-wing contract into an unrelated bucket.
-    return gap <= 2.500001 ? best : -1;
+    // Bucket tolerance is half the smallest spacing, so quotes cannot be
+    // stretched across adjacent buckets when the surface resolution changes.
+    const spacings = bins.slice(1).map((v, i) => Math.abs(v - bins[i])).filter(v => v > 0);
+    const tolerance = spacings.length ? Math.min(...spacings) / 2 + 1e-6 : 0;
+    return gap <= tolerance ? best : -1;
   }
   function contractMultiplier(q, symbol) {
     const explicit = toNum(q?.multiplier);
@@ -60,6 +72,29 @@
     const rootTime = Math.sqrt(time);
     const d1 = (Math.log(spot / strike) + (rate - dividendYield + 0.5 * sigma * sigma) * time) / (sigma * rootTime);
     return Math.exp(-dividendYield * time) * normalPdf(d1) / (spot * sigma * rootTime);
+  }
+  function bsmGreeks(spot, strike, time, sigma, side, rate, dividendYield) {
+    if (!(spot > 0 && strike > 0 && time > 0 && sigma > 0) || !['C', 'P'].includes(side)) return null;
+    const sqrtT = Math.sqrt(time);
+    const d1 = (Math.log(spot / strike) + (rate - dividendYield + 0.5 * sigma * sigma) * time) / (sigma * sqrtT);
+    const d2 = d1 - sigma * sqrtT;
+    const pdf = normalPdf(d1);
+    const cdf = x => 0.5 * (1 + erfApprox(x / Math.SQRT2));
+    const dq = Math.exp(-dividendYield * time), dr = Math.exp(-rate * time);
+    const delta = side === 'C' ? dq * cdf(d1) : dq * (cdf(d1) - 1);
+    const gamma = dq * pdf / (spot * sigma * sqrtT);
+    const vega = spot * dq * pdf * sqrtT / 100;
+    const thetaYear = side === 'C'
+      ? -(spot * dq * pdf * sigma) / (2 * sqrtT) - rate * strike * dr * cdf(d2) + dividendYield * spot * dq * cdf(d1)
+      : -(spot * dq * pdf * sigma) / (2 * sqrtT) + rate * strike * dr * cdf(-d2) - dividendYield * spot * dq * cdf(-d1);
+    const theta = thetaYear / 365.25;
+    const rho = side === 'C' ? strike * time * dr * cdf(d2) / 100 : -strike * time * dr * cdf(-d2) / 100;
+    return [delta, gamma, vega, theta, rho].every(Number.isFinite) ? { delta, gamma, vega, theta, rho } : null;
+  }
+  function erfApprox(x) {
+    const sign = x < 0 ? -1 : 1, z = Math.abs(x), t = 1 / (1 + 0.3275911 * z);
+    const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-z * z);
+    return sign * y;
   }
   function sideAllowed(side, filter) {
     const selected = String(filter || 'both').toLowerCase();
@@ -212,5 +247,64 @@
     };
   }
 
-  return { DEFAULT_BINS, METRICS, build, median, dividendYieldForSymbol: symbol => String(symbol || '').toUpperCase() === 'QQQ' ? 0.0045 : 0 };
+  function buildGreeks({ spot, symbol = '', expiries = [], now = Date.now(), bins = DEFAULT_BINS, metric = 'delta', side = 'call' } = {}) {
+    const underlying = toNum(spot), key = String(symbol || '').trim().toUpperCase();
+    const vol = typeof globalThis !== 'undefined' ? globalThis.StockOptionsVolatility : null;
+    const qYield = typeof vol?.dividendYieldForSymbol === 'function' ? vol.dividendYieldForSymbol(key) : (key === 'QQQ' ? 0.0045 : 0);
+    const rate = 0, config = GREEK_METRICS[metric];
+    const centers = (Array.isArray(bins) ? bins : DEFAULT_BINS).map(Number).filter(Number.isFinite);
+    if (!(underlying > 0) || !config || !centers.length) return { spot: underlying, symbol: key, bins: centers, rows: [], metric, config: config || null, side, dividendYield: qYield, rate };
+    const surfaceRows = []; let totalQuotes = 0;
+    for (const input of (Array.isArray(expiries) ? expiries : [])) {
+      const expiry = String(input?.expiry || ''), quotes = Array.isArray(input?.quotes) ? input.quotes : [];
+      const time = typeof vol?.timeToExpiry === 'function' ? vol.timeToExpiry(expiry, now, key) : null;
+      if (!(time > 0)) continue;
+      totalQuotes += quotes.length;
+      const cells = centers.map(() => ({ value: null, contractCount: 0, usableCount: 0, skippedCount: 0, values: [], providerCount: 0, modelCount: 0, strikes: [] }));
+      for (const q of quotes) {
+        const strike = toNum(q?.strike), optionSide = q?.side === 'C' || q?.side === 'P' ? q.side : null;
+        if (!(strike > 0) || !optionSide || !sideAllowed(optionSide, side)) continue;
+        const binIndex = nearestBin((strike / underlying - 1) * 100, centers);
+        if (binIndex < 0) continue;
+        const cell = cells[binIndex]; cell.contractCount++;
+        if (!cell.strikes.includes(strike)) cell.strikes.push(strike);
+        const provider = {
+          delta: normalizedDelta(q?.delta, optionSide),
+          rho: null,
+          gamma: (() => { const x = toNum(q?.gamma); return x !== null && x >= 0 ? x : null; })(),
+          vega: toNum(q?.vega), theta: toNum(q?.theta)
+        };
+        let value = null, source = 'provider';
+        if (metric === 'vanna' || metric === 'charm' || provider[metric] === null || provider[metric] === undefined) {
+          const sigmaResult = typeof vol?.resolveQuoteIV === 'function' ? vol.resolveQuoteIV(q, underlying, time, rate, qYield) : { iv: null };
+          const sigma = toNum(sigmaResult?.iv);
+          if (sigma !== null && sigma > 0) {
+            if (metric === 'vanna' || metric === 'charm') {
+              const vc = typeof vol?.bsmVannaCharm === 'function' ? vol.bsmVannaCharm(underlying, strike, time, sigma, optionSide, rate, qYield) : null;
+              if (vc) value = metric === 'vanna' ? vc.vanna * 0.01 : vc.charm / 365.25;
+            } else {
+              const model = bsmGreeks(underlying, strike, time, sigma, optionSide, rate, qYield);
+              if (model) value = model[metric] ?? null;
+            }
+            source = 'model';
+          }
+        } else value = provider[metric];
+        if (Number.isFinite(value)) {
+          cell.values.push(value); cell.usableCount++;
+          if (source === 'provider') cell.providerCount++; else cell.modelCount++;
+        } else cell.skippedCount++;
+      }
+      for (const cell of cells) {
+        cell.value = median(cell.values); delete cell.values;
+        cell.coverage = cell.contractCount ? cell.usableCount / cell.contractCount : null;
+        cell.strikes.sort((a,b)=>a-b); cell.strikeMin = cell.strikes[0] ?? null; cell.strikeMax = cell.strikes.at(-1) ?? null;
+      }
+      const expected = Number(input?.expectedContracts), loaded = Number(input?.loadedContracts ?? quotes.length);
+      const complete = input?.complete === true || (input?.complete !== false && Number.isFinite(expected) && expected > 0 && loaded >= expected);
+      surfaceRows.push({ expiry, dte: time * 365.25, cells, expectedContracts: Number.isFinite(expected) ? expected : null, loadedContracts: loaded, complete, status: input?.status || (complete ? 'complete' : 'partial'), error: input?.error || '' });
+    }
+    return { spot: underlying, symbol: key, bins: centers, rows: surfaceRows, metric, config, side, dividendYield: qYield, riskFreeRate: rate, loadedExpiries: surfaceRows.length, quoteCount: totalQuotes };
+  }
+
+  return { DEFAULT_BINS, METRICS, GREEK_METRICS, build, buildGreeks, median, dividendYieldForSymbol: symbol => String(symbol || '').toUpperCase() === 'QQQ' ? 0.0045 : 0 };
 });
