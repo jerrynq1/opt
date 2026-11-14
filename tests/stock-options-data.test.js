@@ -254,6 +254,14 @@ test('missing underlying Spot blocks BSM GEX even when IV and multiplier coverag
   assert.match(html,/Chờ Spot underlying từ Binance price stream/);
 });
 
+test('renderExposure shows waiting-for-Spot state without throwing when Spot is absent', () => {
+  const session={cfg:{key:'qqq'},price:null,expiry:'2026-11-20',chainComplete:true,contracts:[],quotes:new Map()};
+  assert.doesNotThrow(()=>helpers.renderExposure(session));
+  const html=helpers.elements.get('so-qqq-gex').innerHTML;
+  assert.match(html,/Đang chờ Spot underlying/);
+  assert.match(html,/Chờ Spot underlying từ Binance price stream/);
+});
+
 test('zero provider Gamma falls back to BSM IV instead of creating a false zero-GEX strike', () => {
   const q={optionSymbol:'QQQ261120C00100000',side:'C',strike:100,multiplier:100,openInterest:10,iv:.25,gamma:0};
   const resolved=helpers.resolveGamma(q,100,0.02);
