@@ -36,3 +36,25 @@ VALIDATION
 - Regression tests bao gồm: metadata/page expiry parsing, All Expiries metadata-first, Gamma Share incomplete gating, zero-filled OI completeness, Max Pain expiry label, expiry state classification, cancellation on deactivate và total request deadline.
 - Test suite trước bàn giao: 21/21 file pass; syntax check tất cả JS/MJS pass.
 - Không thể xác minh API live qua Worker đã cấu hình của người dùng trong môi trường đóng gói; response get-exchange-info và HTML page cần được xác minh trên môi trường triển khai.
+
+
+FOLLOW-UP HOTFIX — BINANCE UNDERLYING SPOT / GEX AVAILABILITY
+
+7. BINANCE STOCK PRICE STREAM
+- Fixed the subscribed underlying stream: Binance Stocks Trading uses the shared `price` stream, not `${assetCode}@symbol_price`.
+- Keep using the official snapshot `rates[]` rows and match the target ETF by `ac=EQ_GLD/EQ_QQQ` or `s=GLD/QQQ`.
+- Capture market phase (`mp`) so a closed-market snapshot is identifiable as the last available price rather than a live trade.
+- Do not invent a trade timestamp when Binance sends `t: null`; receive time is recorded separately.
+- This should allow the application to receive the last available underlying price while the US market is closed, provided Binance includes the symbol in its price snapshot.
+
+8. MISSING GEX DIAGNOSTICS
+- When Spot is unavailable, show `Chờ Spot` rather than generic `Partial` for an otherwise complete expiry.
+- Explain that BSM Gamma/GEX needs Spot even when IV and multiplier coverage are complete.
+- An expiry with no calculable GEX now carries null GEX fields instead of synthetic numeric zero; the All Expiries breakdown displays `—`, not `+0`.
+- Partial numeric GEX, when available, is marked provisional with `~`.
+- Preserve the agreed OI/Volume null-to-zero assumptions; this hotfix does not reinterpret missing OI as missing chain data.
+
+FOLLOW-UP VALIDATION
+- Added tests for the official Binance `price` snapshot schema, `mp: C` closed-market parsing, and subscription payload `['price', ...optionChainStream]`.
+- Added regression coverage proving full IV/multiplier coverage still cannot produce BSM GEX without Spot, and that missing per-expiry GEX is not displayed as `+0`.
+- Updated service-worker cache version v20 -> v21 so deployed clients fetch the patched stock-options.js.
