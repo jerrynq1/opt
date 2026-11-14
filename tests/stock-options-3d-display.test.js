@@ -12,7 +12,7 @@ const css = fs.readFileSync(path.join(root, 'css/stock-options.css'), 'utf8');
 test('Options page loads the 3D renderer before stock-options UI', () => {
   assert.match(html, /stock-options-surfaces\.js"><\/script><script src="https:\/\/cdn\.jsdelivr\.net\/npm\/three@0\.128\.0\/build\/three\.min\.js" crossorigin="anonymous"><\/script><script src="js\/stock-options-3d\.js"><\/script><script src="js\/stock-options\.js/);
   assert.match(sw, /"\.\/js\/stock-options-3d\.js"/);
-  assert.match(sw, /ict-quantlab-shell-v36/);
+  assert.match(sw, /ict-quantlab-shell-v37/);
 });
 
 test('Greeks area is a dedicated 3D surface with model metric and side controls', () => {

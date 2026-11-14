@@ -13,7 +13,7 @@ test('pinned Three.js loads before the QuantLab 3D adapter and is cacheable by P
   const three = html.indexOf('https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js');
   const adapter = html.indexOf('js/stock-options-3d.js');
   assert.ok(three >= 0 && adapter > three, 'Three.js script must precede 3D adapter');
-  assert.match(sw, /ict-quantlab-shell-v36/);
+  assert.match(sw, /ict-quantlab-shell-v37/);
   assert.match(sw, /cdn\\\.jsdelivr\\\.net/);
 });
 
@@ -34,4 +34,21 @@ test('3D renderer has an explicit 2D fallback label and retains missing-cell han
   assert.match(css, /\.so-3d-axis-footer \.axis-x/);
   assert.match(css, /\.so-3d-axis-footer \.axis-y/);
   assert.match(css, /\.so-3d-axis-footer \.axis-z/);
+});
+
+
+test('3D axis labels are larger and explicitly include 0DTE expiry ticks', () => {
+  assert.match(renderer, /800 66px ui-monospace/);
+  assert.match(renderer, /700 48px ui-monospace/);
+  assert.match(renderer, /0DTE/);
+  assert.match(renderer, /buildDteTicks/);
+  assert.match(renderer, /mesh\.dteTicks/);
+});
+
+test('Spot is marked on the mesh with a gold ATM ridge and labeled underlying price', () => {
+  assert.match(renderer, /function addSpotMarker\(\)/);
+  assert.match(renderer, /THREE\.SphereGeometry/);
+  assert.match(renderer, /SPOT \$\$\{fmt\(mesh\.spot, 2\)\}/);
+  assert.match(renderer, /resolveSpotVertex/);
+  assert.match(renderer, /spotIndex/);
 });

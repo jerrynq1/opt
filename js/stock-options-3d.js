@@ -22,21 +22,63 @@
     if (scale.max === scale.min) return 0.35;
     return -0.1 + ((value - scale.min) / (scale.max - scale.min)) * 0.92;
   }
+  function formatDteTick(value) {
+    const dte = Math.max(0, Number(value) || 0);
+    if (dte < 1e-6) return '0DTE';
+    if (dte < 1) return `${fmt(dte, 2)}D`;
+    if (dte < 10 && Math.abs(dte - Math.round(dte)) > 1e-6) return `${fmt(dte, 1)}D`;
+    return `${Math.round(dte)}D`;
+  }
+  function buildDteTicks(maxDte, targetIntervals = 5) {
+    const max = Math.max(0, Number(maxDte) || 0);
+    if (max <= 1e-9) return [0];
+    const raw = max / Math.max(2, targetIntervals);
+    const magnitude = Math.pow(10, Math.floor(Math.log10(raw)));
+    const step = [1, 2, 2.5, 5, 10].map(v => v * magnitude).find(v => v >= raw) || magnitude * 10;
+    const ticks = [0];
+    for (let value = step; value < max - step * 1e-7; value += step) ticks.push(Number(value.toFixed(8)));
+    if (max - ticks[ticks.length - 1] > step * 0.15) ticks.push(max);
+    else ticks[ticks.length - 1] = max;
+    return ticks;
+  }
+  function dteToAxis(dte, maxDte) {
+    const max = Math.max(0, Number(maxDte) || 0);
+    if (max <= 1e-9) return -1;
+    return clamp((Math.max(0, Number(dte) || 0) / max) * 2 - 1, -1, 1);
+  }
   function makeMesh(dataset) {
-    const bins = Array.isArray(dataset?.bins) ? dataset.bins : [];
-    const rows = Array.isArray(dataset?.rows) ? dataset.rows : [];
+    const bins = Array.isArray(dataset?.bins) ? dataset.bins.map(Number) : [];
+    // Stable sort is essential: the Y-axis must run from 0DTE to the farthest expiry.
+    const rows = (Array.isArray(dataset?.rows) ? dataset.rows : []).slice().sort((a, b) => {
+      const da = Number.isFinite(Number(a?.dte)) ? Math.max(0, Number(a.dte)) : Infinity;
+      const db = Number.isFinite(Number(b?.dte)) ? Math.max(0, Number(b.dte)) : Infinity;
+      return da - db || String(a?.expiry || '').localeCompare(String(b?.expiry || ''));
+    });
     const scale = valueScale(rows, dataset?.config?.kind);
-    const dtes = rows.map(r => Number(r.dte)).filter(Number.isFinite);
-    const minDte = dtes.length ? Math.min(...dtes) : 0;
-    const maxDte = dtes.length ? Math.max(...dtes) : 1;
+    const dtes = rows.map(r => Number(r.dte)).filter(Number.isFinite).map(v => Math.max(0, v));
+    // The expiry axis always begins at 0DTE. Actual same-day contracts remain at
+    // their fractional DTE (e.g. 0.28D); no synthetic T=0 option row is invented.
+    const minDte = 0;
+    const maxDte = dtes.length ? Math.max(...dtes) : 0;
+    const dteTicks = buildDteTicks(maxDte);
+    const spot = Number.isFinite(Number(dataset?.spot)) && Number(dataset.spot) > 0 ? Number(dataset.spot) : null;
+    let spotIndex = -1, spotX = null;
+    if (bins.length) {
+      const span = Number(bins[bins.length - 1]) - Number(bins[0]);
+      if (Number.isFinite(span) && Math.abs(span) > 1e-9 && Number(bins[0]) <= 0 && Number(bins[bins.length - 1]) >= 0) {
+        spotX = ((0 - Number(bins[0])) / span) * 2 - 1;
+      }
+      const exact = bins.findIndex(value => Math.abs(Number(value)) <= 1e-8);
+      if (exact >= 0) spotIndex = exact;
+    }
     const vertices = rows.map((row, yi) => (row.cells || []).map((cell, xi) => {
       const value = Number.isFinite(cell?.value) ? cell.value : null;
       return {
         xi, yi, value, z: value === null ? null : normalizeZ(value, scale),
-        strikePrice: Number.isFinite(Number(dataset?.spot)) && bins[xi] !== undefined ? Number(dataset.spot) * (1 + Number(bins[xi]) / 100) : null,
+        strikePrice: spot !== null && bins[xi] !== undefined ? spot * (1 + bins[xi] / 100) : null,
         x: bins.length <= 1 ? 0 : (xi / (bins.length - 1)) * 2 - 1,
-        y: maxDte === minDte ? 0 : ((Number(row.dte) - minDte) / (maxDte - minDte)) * 2 - 1,
-        labelX: bins[xi], labelY: row.dte, expiry: row.expiry,
+        y: dteToAxis(row.dte, maxDte),
+        labelX: bins[xi], labelY: Number(row.dte), expiry: row.expiry,
         complete: row.complete !== false, coverage: cell?.coverage ?? null,
         usableCount: cell?.usableCount ?? 0, contractCount: cell?.contractCount ?? 0,
         providerCount: cell?.providerCount ?? cell?.sources?.providerGreek ?? 0,
@@ -52,7 +94,32 @@
         } else if (quad.length === 3) faces.push(quad);
       }
     }
-    return { bins, rows, vertices, faces, scale, minDte, maxDte, minX: bins[0] ?? 0, maxX: bins.at(-1) ?? 0 };
+    return { bins, rows, vertices, faces, scale, minDte, maxDte, dteTicks, spot, spotIndex, spotX, minX: bins[0] ?? 0, maxX: bins.at(-1) ?? 0 };
+  }
+
+  function resolveSpotVertex(vertexRow, mesh) {
+    if (!Array.isArray(vertexRow) || !mesh || !(mesh.spot > 0)) return null;
+    if (mesh.spotIndex >= 0) {
+      const exact = vertexRow[mesh.spotIndex];
+      if (exact && exact.z !== null && Number.isFinite(exact.value)) return { ...exact, x: mesh.spotX ?? 0, labelX: 0, strikePrice: mesh.spot, spotSource: 'observed' };
+    }
+    let left = null, right = null;
+    for (const vertex of vertexRow) {
+      if (!vertex || vertex.z === null || !Number.isFinite(vertex.value)) continue;
+      if (Number(vertex.labelX) < 0 && (!left || Number(vertex.labelX) > Number(left.labelX))) left = vertex;
+      if (Number(vertex.labelX) > 0 && (!right || Number(vertex.labelX) < Number(right.labelX))) right = vertex;
+    }
+    if (!left || !right || !(Number(left.labelX) < 0 && Number(right.labelX) > 0)) return null;
+    const weight = -Number(left.labelX) / (Number(right.labelX) - Number(left.labelX));
+    const value = Number(left.value) + (Number(right.value) - Number(left.value)) * weight;
+    if (!Number.isFinite(value)) return null;
+    return {
+      ...left, x: mesh.spotX ?? 0, y: left.y, z: normalizeZ(value, mesh.scale), value,
+      labelX: 0, strikePrice: mesh.spot, spotSource: 'interpolated',
+      usableCount: Math.min(left.usableCount || 0, right.usableCount || 0),
+      contractCount: (left.contractCount || 0) + (right.contractCount || 0),
+      complete: left.complete && right.complete
+    };
   }
 
   function transform(point, camera) {
@@ -112,23 +179,68 @@
     function axes() {
       const floor = -0.96, x0 = { x: -1.05, y: -1.05, z: floor }, x1 = { x: 1.05, y: -1.05, z: floor }, y1 = { x: -1.05, y: 1.05, z: floor }, z1 = { x: -1.05, y: -1.05, z: 0.98 };
       const p0 = projectPoint(x0, camera, width, height), px = projectPoint(x1, camera, width, height), py = projectPoint(y1, camera, width, height), pz = projectPoint(z1, camera, width, height);
-      drawLine(p0, px, 'rgba(145,170,198,.78)', 1.4); drawLine(p0, py, 'rgba(145,170,198,.78)', 1.4); drawLine(p0, pz, 'rgba(145,170,198,.78)', 1.4);
-      ctx.font = '10px ui-monospace,monospace'; ctx.fillStyle = '#9fb2c9';
-      ctx.textAlign = 'center'; ctx.fillText('STRIKE / SPOT', (p0.x + px.x) / 2, (p0.y + px.y) / 2 + 20);
-      ctx.fillText('EXPIRY / DTE', (p0.x + py.x) / 2 - 4, (p0.y + py.y) / 2 - 10);
-      ctx.save(); ctx.translate(pz.x - 20, pz.y + 10); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.fillText(metricLabel.toUpperCase(), 0, 0); ctx.restore();
-      const xTicks = [0, Math.floor((mesh.bins.length - 1) / 2), mesh.bins.length - 1].filter((v, i, a) => a.indexOf(v) === i);
-      xTicks.forEach(i => { const x = mesh.bins.length <= 1 ? 0 : i / (mesh.bins.length - 1) * 2 - 1; const p = projectPoint({ x, y: -1.05, z: floor }, camera, width, height); drawLine(p, { x: p.x, y: p.y + 5 }, 'rgba(145,170,198,.45)'); ctx.fillStyle = '#8498b1'; ctx.textAlign = 'center'; ctx.fillText(`${mesh.bins[i] > 0 ? '+' : ''}${mesh.bins[i]}%`, p.x, p.y + 17); });
-      const yTicks = [0, Math.floor((mesh.rows.length - 1) / 2), mesh.rows.length - 1].filter((v, i, a) => a.indexOf(v) === i);
-      yTicks.forEach(i => { const y = mesh.rows.length <= 1 ? 0 : (Number(mesh.rows[i].dte) - mesh.minDte) / Math.max(1e-9, mesh.maxDte - mesh.minDte) * 2 - 1; const p = projectPoint({ x: -1.05, y, z: floor }, camera, width, height); drawLine(p, { x: p.x - 5, y: p.y }, 'rgba(145,170,198,.45)'); ctx.fillStyle = '#8498b1'; ctx.textAlign = 'right'; ctx.fillText(`${Number(mesh.rows[i].dte).toFixed(0)}D`, p.x - 9, p.y + 3); });
-      const zTicks = mesh.scale.signed ? [-mesh.scale.abs, 0, mesh.scale.abs] : [mesh.scale.min, (mesh.scale.min + mesh.scale.max) / 2, mesh.scale.max];
-      zTicks.forEach(value => { const z = normalizeZ(value, mesh.scale) * .72; const p = projectPoint({ x: -1.05, y: -1.05, z }, camera, width, height); drawLine(p, { x: p.x - 5, y: p.y }, 'rgba(145,170,198,.45)'); ctx.fillStyle = '#9aabc0'; ctx.textAlign = 'right'; ctx.fillText(formatter(value), p.x - 8, p.y + 3); });
+      drawLine(p0, px, 'rgba(145,170,198,.9)', 1.8); drawLine(p0, py, 'rgba(145,170,198,.9)', 1.8); drawLine(p0, pz, 'rgba(145,170,198,.9)', 1.8);
+      ctx.font = '700 14px ui-monospace,monospace'; ctx.fillStyle = '#b9c9db';
+      ctx.textAlign = 'center'; ctx.fillText('X · STRIKE / SPOT', (p0.x + px.x) / 2, (p0.y + px.y) / 2 + 30);
+      ctx.fillText('Y · EXPIRY / DTE', (p0.x + py.x) / 2 - 10, (p0.y + py.y) / 2 - 16);
+      ctx.save(); ctx.translate(pz.x - 27, pz.y + 12); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.font = '700 14px ui-monospace,monospace'; ctx.fillText(`Z · ${metricLabel.toUpperCase()}`, 0, 0); ctx.restore();
+      const xIdx = [...new Set([0, Math.round((mesh.bins.length - 1) * 0.25), Math.round((mesh.bins.length - 1) * 0.5), Math.round((mesh.bins.length - 1) * 0.75), mesh.bins.length - 1])];
+      xIdx.forEach(i => {
+        const x = mesh.bins.length <= 1 ? 0 : i / (mesh.bins.length - 1) * 2 - 1;
+        const p = projectPoint({ x, y: -1.05, z: floor }, camera, width, height);
+        const isSpot = i === mesh.spotIndex;
+        drawLine(p, { x: p.x, y: p.y + 7 }, isSpot ? '#f2c56d' : 'rgba(145,170,198,.58)', isSpot ? 1.8 : 1);
+        ctx.fillStyle = isSpot ? '#f2c56d' : '#a8bbd0'; ctx.font = isSpot ? '700 12px ui-monospace,monospace' : '600 12px ui-monospace,monospace'; ctx.textAlign = 'center';
+        const pct = Number(mesh.bins[i]); ctx.fillText(isSpot ? `SPOT ${fmt(pct, 1)}%` : `${pct > 0 ? '+' : ''}${fmt(pct, 1)}%`, p.x, p.y + 22);
+      });
+      if (mesh.spotX !== null && mesh.spotIndex < 0) {
+        const p = projectPoint({ x: mesh.spotX, y: -1.05, z: floor }, camera, width, height);
+        drawLine(p, { x: p.x, y: p.y + 7 }, '#f2c56d', 1.8);
+        ctx.fillStyle = '#f2c56d'; ctx.font = '700 12px ui-monospace,monospace'; ctx.textAlign = 'center'; ctx.fillText('SPOT 0%', p.x, p.y + 22);
+      }
+      const yTicks = mesh.dteTicks?.length ? mesh.dteTicks : [0, mesh.maxDte / 2, mesh.maxDte];
+      yTicks.forEach(dte => {
+        const y = dteToAxis(dte, mesh.maxDte) * 1.05;
+        const p = projectPoint({ x: -1.05, y, z: floor }, camera, width, height);
+        drawLine(p, { x: p.x - 7, y: p.y }, dte === 0 ? '#e3bd70' : 'rgba(145,170,198,.58)', dte === 0 ? 1.8 : 1);
+        ctx.fillStyle = dte === 0 ? '#e3bd70' : '#a8bbd0'; ctx.textAlign = 'right'; ctx.font = dte === 0 ? '700 12px ui-monospace,monospace' : '600 12px ui-monospace,monospace';
+        ctx.fillText(formatDteTick(dte), p.x - 11, p.y + 4);
+      });
+      const zTicks = mesh.scale.signed ? [-mesh.scale.abs, -mesh.scale.abs * 0.5, 0, mesh.scale.abs * 0.5, mesh.scale.abs] : [0, 0.25, 0.5, 0.75, 1].map(t => mesh.scale.min + (mesh.scale.max - mesh.scale.min) * t);
+      zTicks.forEach(value => { const z = normalizeZ(value, mesh.scale) * .72; const p = projectPoint({ x: -1.05, y: -1.05, z }, camera, width, height); drawLine(p, { x: p.x - 7, y: p.y }, 'rgba(145,170,198,.58)', 1); ctx.fillStyle = '#d0bf98'; ctx.textAlign = 'right'; ctx.font = '600 12px ui-monospace,monospace'; ctx.fillText(formatter(value), p.x - 11, p.y + 4); });
       // Floor grid provides depth cues without implying values in missing cells.
       for (let i = 0; i <= 4; i++) {
         const x = -1 + i * .5, y = -1 + i * .5;
-        drawLine(projectPoint({ x, y: -1, z: floor }, camera, width, height), projectPoint({ x, y: 1, z: floor }, camera, width, height), 'rgba(125,150,180,.12)');
-        drawLine(projectPoint({ x: -1, y, z: floor }, camera, width, height), projectPoint({ x: 1, y, z: floor }, camera, width, height), 'rgba(125,150,180,.12)');
+        drawLine(projectPoint({ x, y: -1, z: floor }, camera, width, height), projectPoint({ x, y: 1, z: floor }, camera, width, height), 'rgba(125,150,180,.16)');
+        drawLine(projectPoint({ x: -1, y, z: floor }, camera, width, height), projectPoint({ x: 1, y, z: floor }, camera, width, height), 'rgba(125,150,180,.16)');
       }
+    }
+    function drawSpotMarker() {
+      if (!(mesh.spot > 0) || mesh.spotX === null) return;
+      const points = [];
+      mesh.vertices.forEach((row, rowIndex) => {
+        const vertex = resolveSpotVertex(row, mesh);
+        if (!vertex || vertex.z === null) return;
+        const point = projectPoint({ x: vertex.x, y: vertex.y, z: vertex.z * .72 }, camera, width, height);
+        points.push({ point, rowIndex, vertex });
+      });
+      if (!points.length) return;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(243,198,106,.88)'; ctx.lineWidth = 2.4; ctx.beginPath();
+      let active = false, lastRow = -2;
+      points.forEach(item => {
+        if (item.rowIndex !== lastRow + 1) active = false;
+        if (!active) { ctx.moveTo(item.point.x, item.point.y); active = true; } else ctx.lineTo(item.point.x, item.point.y);
+        lastRow = item.rowIndex;
+      }); ctx.stroke();
+      points.forEach((item, i) => {
+        ctx.beginPath(); ctx.arc(item.point.x, item.point.y, i === 0 ? 7.5 : 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#f5c96f'; ctx.fill(); ctx.lineWidth = 2.2; ctx.strokeStyle = '#263344'; ctx.stroke();
+      });
+      const first = points[0].point, label = `SPOT $${fmt(mesh.spot, 2)}${points[0].vertex.spotSource === 'interpolated' ? ' · EST.' : ''}`;
+      ctx.font = '800 14px ui-monospace,monospace'; ctx.textAlign = 'left'; ctx.lineWidth = 4.5; ctx.strokeStyle = 'rgba(3,8,15,.98)';
+      ctx.strokeText(label, first.x + 13, first.y - 12); ctx.fillStyle = '#ffdc98'; ctx.fillText(label, first.x + 13, first.y - 12);
+      ctx.restore();
     }
     function draw() {
       if (disposed || !width || !height) return;
@@ -152,6 +264,7 @@
         ctx.beginPath(); let active = false;
         mesh.vertices.forEach(row => { const v = row[x]; if (!v || v.z === null) { active = false; return; } const p = projectPoint({ x: v.x, y: v.y, z: v.z * .72 }, camera, width, height); if (!active) { ctx.moveTo(p.x, p.y); active = true; } else ctx.lineTo(p.x, p.y); }); ctx.stroke();
       }
+      drawSpotMarker();
       axes();
       if (hovered) {
         const v = hovered.vertex, p = hovered.point;
@@ -190,7 +303,7 @@
   */
   function mountThree(host, initialDataset, initialOptions, THREE) {
     if (!host) return null;
-    const defaults = { yaw: -0.72, pitch: 0.62, distance: 5.25 };
+    const defaults = { yaw: -0.72, pitch: 0.62, distance: 6.45 };
     const cameraState = host._stockOptions3dCamera || defaults;
     const camera = { ...defaults, ...cameraState };
     let dataset = initialDataset || {}, options = initialOptions || {}, mesh = makeMesh(dataset);
@@ -234,13 +347,13 @@
     const plotGroup = new THREE.Group(); scene.add(plotGroup);
     const target = new THREE.Vector3(0, 0, -0.02);
     const palette = {
-      axisX: 0x5bcbe2, axisY: 0x829cff, axisZ: 0xe3bd70,
+      axisX: 0x5bcbe2, axisY: 0x829cff, axisZ: 0xe3bd70, spot: 0xf2c56d,
       grid: 0x355069, gridSoft: 0x25384b, zero: 0x8ca2bd,
       neutral: [35, 51, 72], positive: [68, 211, 169], negative: [239, 111, 139]
     };
 
     function setCamera() {
-      camera.distance = clamp(camera.distance, 3.05, 9.5);
+      camera.distance = clamp(camera.distance, 3.45, 10.5);
       camera.pitch = clamp(camera.pitch, 0.12, 1.42);
       const cp = Math.cos(camera.pitch), sp = Math.sin(camera.pitch);
       camera3d.position.set(
@@ -282,23 +395,31 @@
       return object;
     }
     function addTextSprite(text, position, color = '#a8bbd0', size = 'tick') {
-      const c = document.createElement('canvas'); c.width = 512; c.height = 128;
+      const label = String(text);
+      const c = document.createElement('canvas'); c.width = 1024; c.height = 256;
       const g = c.getContext('2d');
-      if (!g) return;
+      if (!g) return null;
       g.clearRect(0, 0, c.width, c.height);
-      g.font = size === 'axis' ? '700 34px ui-monospace,Consolas,monospace' : '600 31px ui-monospace,Consolas,monospace';
+      const isAxis = size === 'axis', isSpot = size === 'spot';
+      g.font = isAxis ? '800 66px ui-monospace,Consolas,monospace' : isSpot ? '800 58px ui-monospace,Consolas,monospace' : '700 48px ui-monospace,Consolas,monospace';
       g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.lineJoin = 'round'; g.lineWidth = size === 'axis' ? 8 : 6; g.strokeStyle = 'rgba(3,8,15,.96)';
-      g.strokeText(String(text), 256, 64); g.fillStyle = color; g.fillText(String(text), 256, 64);
+      g.lineJoin = 'round'; g.lineWidth = isAxis || isSpot ? 13 : 10; g.strokeStyle = 'rgba(3,8,15,.98)';
+      g.strokeText(label, 512, 128); g.fillStyle = color; g.fillText(label, 512, 128);
       const texture = new THREE.CanvasTexture(c);
       texture.minFilter = THREE.LinearFilter;
+      texture.generateMipmaps = true;
       const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false, toneMapped: false });
       const sprite = new THREE.Sprite(material);
       sprite.position.set(position[0], position[1], position[2]);
-      const worldW = size === 'axis' ? Math.min(1.12, Math.max(0.62, String(text).length * 0.043)) : Math.min(0.52, Math.max(0.25, String(text).length * 0.026));
-      sprite.scale.set(worldW, worldW * 0.25, 1);
-      sprite.renderOrder = 20;
+      const worldW = isAxis
+        ? clamp(label.length * 0.092, 1.42, 2.15)
+        : isSpot
+          ? clamp(label.length * 0.068, 0.95, 1.58)
+          : clamp(label.length * 0.058, 0.48, 0.92);
+      sprite.scale.set(worldW, worldW * (isAxis ? 0.31 : 0.29), 1);
+      sprite.renderOrder = 30;
       plotGroup.add(sprite);
+      return sprite;
     }
     function colorForValue(value) {
       const scale = mesh.scale;
@@ -326,50 +447,117 @@
         [[x0, y0, z0], [x0, y1, z0]],
         [[x0, y0, z0], [x0, y0, z1]]
       ];
-      const xAxis = makeLineSegments([axisPairs[0]], palette.axisX, 0.95, 8);
-      const yAxis = makeLineSegments([axisPairs[1]], palette.axisY, 0.95, 8);
-      const zAxis = makeLineSegments([axisPairs[2]], palette.axisZ, 0.98, 8);
+      const xAxis = makeLineSegments([axisPairs[0]], palette.axisX, 1, 9);
+      const yAxis = makeLineSegments([axisPairs[1]], palette.axisY, 1, 9);
+      const zAxis = makeLineSegments([axisPairs[2]], palette.axisZ, 1, 9);
       [xAxis, yAxis, zAxis].filter(Boolean).forEach(o => plotGroup.add(o));
 
-      // Ground and back-plane grids make depth readable without filling missing cells.
       const floorPairs = [], rearPairs = [], sidePairs = [];
-      for (let i = 0; i <= 6; i++) {
-        const t = -1.3 + i * (2.6 / 6);
+      for (let i = 0; i <= 8; i++) {
+        const t = -1.3 + i * (2.6 / 8);
         floorPairs.push([[t, y0, z0], [t, y1, z0]], [[x0, t, z0], [x1, t, z0]]);
-        rearPairs.push([[t, y1, z0], [t, y1, z1]], [[x0, y1, t * (z1 - z0) / 2.6 + (z1 + z0) / 2], [x1, y1, t * (z1 - z0) / 2.6 + (z1 + z0) / 2]]);
+        rearPairs.push([[t, y1, z0], [t, y1, z1]], [[x0, y1, z0 + (t + 1.3) * (z1 - z0) / 2.6], [x1, y1, z0 + (t + 1.3) * (z1 - z0) / 2.6]]);
         sidePairs.push([[x0, t, z0], [x0, t, z1]]);
       }
-      [makeLineSegments(floorPairs, palette.gridSoft, 0.35, 1), makeLineSegments(rearPairs, palette.gridSoft, 0.22, 1), makeLineSegments(sidePairs, palette.gridSoft, 0.18, 1)].filter(Boolean).forEach(o => plotGroup.add(o));
-      // A subtle zero plane is useful for signed Greeks and exposures.
+      [
+        makeLineSegments(floorPairs, palette.gridSoft, 0.42, 1),
+        makeLineSegments(rearPairs, palette.gridSoft, 0.25, 1),
+        makeLineSegments(sidePairs, palette.gridSoft, 0.22, 1)
+      ].filter(Boolean).forEach(o => plotGroup.add(o));
+
       if (mesh.scale.signed) {
         const zeroPairs = [[[x0, y0, 0], [x1, y0, 0]], [[x0, y0, 0], [x0, y1, 0]], [[x1, y1, 0], [x0, y1, 0]]];
-        const zeroLine = makeLineSegments(zeroPairs, palette.zero, 0.58, 5);
+        const zeroLine = makeLineSegments(zeroPairs, palette.zero, 0.68, 5);
         if (zeroLine) plotGroup.add(zeroLine);
       }
 
-      // X ticks: moneyness buckets. Y ticks: expiry/DTE. Z ticks: metric values.
-      const xIdx = [...new Set([0, Math.round((mesh.bins.length - 1) * 0.25), Math.round((mesh.bins.length - 1) * 0.5), Math.round((mesh.bins.length - 1) * 0.75), mesh.bins.length - 1])];
+      // X ticks are moneyness; the zero bucket is explicitly tagged as Spot.
+      const xIdx = [...new Set([0, Math.round((mesh.bins.length - 1) * 0.25), Math.round((mesh.bins.length - 1) * 0.5), Math.round((mesh.bins.length - 1) * 0.75), mesh.bins.length - 1, mesh.spotIndex].filter(i => i >= 0))].sort((a, b) => a - b);
       xIdx.forEach(i => {
         const x = (i / Math.max(1, mesh.bins.length - 1) * 2 - 1) * 1.25;
-        const pct = Number(mesh.bins[i]);
-        const label = Math.abs(pct) < 0.001 ? 'ATM 0%' : `${pct > 0 ? '+' : ''}${fmt(pct, 1)}%`;
-        addTextSprite(label, [x, y0 - 0.12, z0 - 0.02], pct === 0 ? '#70dfc1' : '#91a8c0');
+        const pct = Number(mesh.bins[i]), isSpot = i === mesh.spotIndex;
+        const label = isSpot ? `SPOT ${fmt(pct, 1)}%` : `${pct > 0 ? '+' : ''}${fmt(pct, 1)}%`;
+        const tick = makeLineSegments([[[x, y0, z0], [x, y0 - 0.055, z0]]], isSpot ? palette.spot : palette.axisX, 0.95, 8);
+        if (tick) plotGroup.add(tick);
+        addTextSprite(label, [x, y0 - 0.20, z0 - 0.08], isSpot ? '#f2c56d' : '#a8c6d8', 'tick');
       });
-      const yIdx = [...new Set([0, Math.floor((mesh.rows.length - 1) / 2), mesh.rows.length - 1])];
-      yIdx.forEach(i => {
-        const row = mesh.rows[i], y = mesh.vertices[i]?.[0]?.y ?? 0;
-        addTextSprite(`${fmt(Number(row?.dte), 0)}D`, [x0 - 0.18, y * 1.25, z0 - 0.02], '#9baeff');
+      if (mesh.spotX !== null && mesh.spotIndex < 0) {
+        const x = mesh.spotX * 1.25;
+        const tick = makeLineSegments([[[x, y0, z0], [x, y0 - 0.055, z0]]], palette.spot, 0.95, 8);
+        if (tick) plotGroup.add(tick);
+        addTextSprite('SPOT 0%', [x, y0 - 0.20, z0 - 0.08], '#f2c56d', 'tick');
+      }
+
+      // Include an explicit 0DTE origin, then divide the full expiry range into readable intervals.
+      (mesh.dteTicks || [0, mesh.maxDte]).forEach(dte => {
+        const y = dteToAxis(dte, mesh.maxDte) * 1.25;
+        const isZero = dte <= 1e-9;
+        const tick = makeLineSegments([[[x0, y, z0], [x0 - 0.065, y, z0]]], isZero ? palette.axisZ : palette.axisY, 0.95, 8);
+        if (tick) plotGroup.add(tick);
+        addTextSprite(formatDteTick(dte), [x0 - 0.24, y, z0 - 0.08], isZero ? '#e3bd70' : '#aebaff', 'tick');
       });
-      const zValues = mesh.scale.signed
-        ? [-mesh.scale.abs, 0, mesh.scale.abs]
-        : [mesh.scale.min, (mesh.scale.min + mesh.scale.max) / 2, mesh.scale.max];
+
+      const zValuesRaw = mesh.scale.signed
+        ? [-mesh.scale.abs, -mesh.scale.abs * 0.5, 0, mesh.scale.abs * 0.5, mesh.scale.abs]
+        : [0, 0.25, 0.5, 0.75, 1].map(t => mesh.scale.min + (mesh.scale.max - mesh.scale.min) * t);
+      const zValues = zValuesRaw.filter((value, index, all) => all.findIndex(other => Math.abs(other - value) <= Math.max(1e-12, Math.abs(value) * 1e-9)) === index);
       zValues.forEach(value => {
         const z = (normalizeZ(value, mesh.scale) ?? 0) * 1.18;
-        addTextSprite(formatter(value), [x0 - 0.2, y0 - 0.14, z], value === 0 && mesh.scale.signed ? '#b9c9db' : '#e4c27c');
+        const tick = makeLineSegments([[ [x0, y0, z], [x0 - 0.065, y0, z] ]], value === 0 && mesh.scale.signed ? palette.zero : palette.axisZ, 0.9, 8);
+        if (tick) plotGroup.add(tick);
+        addTextSprite(formatter(value), [x0 - 0.25, y0 - 0.17, z], value === 0 && mesh.scale.signed ? '#d0d8e5' : '#e8cc91', 'tick');
       });
-      addTextSprite('X  STRIKE / SPOT', [0, y0 - 0.42, z0 - 0.04], '#65cfe2', 'axis');
-      addTextSprite('Y  EXPIRY / DTE', [x0 - 0.56, 0, z0 - 0.05], '#8ea5ff', 'axis');
-      addTextSprite(`Z  ${metricLabel.toUpperCase()}`, [x0 - 0.45, y0 - 0.46, 0.22], '#e5c27a', 'axis');
+
+      // Larger axis titles, positioned outside the tick labels.
+      addTextSprite('X  STRIKE / SPOT', [0, y0 - 0.57, z0 - 0.10], '#65d7e8', 'axis');
+      addTextSprite('Y  EXPIRY / DTE', [x0 - 0.63, 0, z0 - 0.10], '#9aabff', 'axis');
+      addTextSprite(`Z  ${metricLabel.toUpperCase()}`, [x0 - 0.60, y0 - 0.60, 0.16], '#f0ce85', 'axis');
+    }
+
+    function addSpotMarker() {
+      if (!(mesh.spot > 0) || mesh.spotIndex < 0) return;
+      const points = [];
+      mesh.vertices.forEach((row, rowIndex) => {
+        const vertex = resolveSpotVertex(row, mesh);
+        if (!vertex || vertex.z === null) return;
+        points.push({ rowIndex, vertex, x: (mesh.spotX ?? 0) * 1.25, y: vertex.y * 1.25, z: vertex.z * 1.18 + 0.025 });
+      });
+      if (!points.length) return;
+
+      // Dashed floor guide marks the Spot/ATM plane across the expiry axis.
+      const guide = [];
+      for (let y = -1.24; y < 1.24; y += 0.16) guide.push([[mesh.spotX * 1.25, y, -1.055], [mesh.spotX * 1.25, Math.min(1.24, y + 0.075), -1.055]]);
+      const guideLine = makeLineSegments(guide, palette.spot, 0.52, 6);
+      if (guideLine) plotGroup.add(guideLine);
+
+      // Connect only adjacent observed expiry rows; missing rows remain visible gaps.
+      const ridge = [];
+      for (let i = 1; i < points.length; i++) {
+        if (points[i].rowIndex === points[i - 1].rowIndex + 1) {
+          ridge.push([[points[i - 1].x, points[i - 1].y, points[i - 1].z], [points[i].x, points[i].y, points[i].z]]);
+        }
+      }
+      const ridgeLine = makeLineSegments(ridge, palette.spot, 0.88, 7);
+      if (ridgeLine) plotGroup.add(ridgeLine);
+
+      points.forEach((point, index) => {
+        const isFront = index === 0;
+        if (isFront) {
+          const halo = new THREE.Mesh(
+            new THREE.SphereGeometry(0.092, 18, 14),
+            new THREE.MeshBasicMaterial({ color: 0xf2c56d, transparent: true, opacity: 0.22, depthWrite: false })
+          );
+          halo.position.set(point.x, point.y, point.z); halo.renderOrder = 10; plotGroup.add(halo);
+        }
+        const dot = new THREE.Mesh(
+          new THREE.SphereGeometry(isFront ? 0.060 : 0.039, 18, 14),
+          new THREE.MeshStandardMaterial({ color: 0xffd27b, emissive: 0x8b5c1c, emissiveIntensity: 0.8, metalness: 0.12, roughness: 0.28 })
+        );
+        dot.position.set(point.x, point.y, point.z + (isFront ? 0.012 : 0)); dot.renderOrder = 11; plotGroup.add(dot);
+      });
+      const first = points[0];
+      const label = `SPOT $${fmt(mesh.spot, 2)}${first.vertex.spotSource === 'interpolated' ? ' · EST.' : ''}`;
+      addTextSprite(label, [first.x + 0.10, first.y - 0.03, first.z + 0.24], '#ffdc98', 'spot');
     }
     function buildPlot() {
       clearPlot();
@@ -418,6 +606,7 @@
         const pointObj = new THREE.Points(pointGeo, pointMat); pointObj.renderOrder = 5; plotGroup.add(pointObj);
       }
       addAxes();
+      addSpotMarker();
       tooltip.hidden = true;
     }
     function resize() {
@@ -469,7 +658,7 @@
         lastPointer = current;
       } else if (pointers.size === 2) {
         const pts = [...pointers.values()], d = Math.hypot(pts[0][0] - pts[1][0], pts[0][1] - pts[1][1]);
-        if (pinchDistance > 0 && d > 0) camera.distance = clamp(camera.distance * pinchDistance / d, 3.05, 9.5);
+        if (pinchDistance > 0 && d > 0) camera.distance = clamp(camera.distance * pinchDistance / d, 3.45, 10.5);
         pinchDistance = d; lastPointer = null;
       }
       tooltip.hidden = true; scheduleDraw();
@@ -490,12 +679,12 @@
       if (!pointers.size) { dragging = false; lastPointer = null; canvas.classList.remove('is-dragging'); }
       else { lastPointer = [...pointers.values()][0]; }
     };
-    const onWheel = event => { event.preventDefault(); camera.distance = clamp(camera.distance * (event.deltaY > 0 ? 1.09 : 0.917), 3.05, 9.5); scheduleDraw(); };
+    const onWheel = event => { event.preventDefault(); camera.distance = clamp(camera.distance * (event.deltaY > 0 ? 1.09 : 0.917), 3.45, 10.5); scheduleDraw(); };
     const onHostClick = event => {
       const button = event.target?.closest?.('[data-3d-action]'); if (!button) return;
       const action = button.dataset['3dAction'];
-      if (action === 'plus') camera.distance = clamp(camera.distance * 0.86, 3.05, 9.5);
-      else if (action === 'minus') camera.distance = clamp(camera.distance / 0.86, 3.05, 9.5);
+      if (action === 'plus') camera.distance = clamp(camera.distance * 0.86, 3.45, 10.5);
+      else if (action === 'minus') camera.distance = clamp(camera.distance / 0.86, 3.45, 10.5);
       else { camera.yaw = defaults.yaw; camera.pitch = defaults.pitch; camera.distance = defaults.distance; }
       scheduleDraw();
     };
@@ -562,5 +751,5 @@
     return dispose;
   }
 
-  return { makeMesh, projectPoint, mount, mountThree };
+  return { makeMesh, projectPoint, mount, mountThree, buildDteTicks, dteToAxis, formatDteTick, resolveSpotVertex };
 });

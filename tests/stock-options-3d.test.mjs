@@ -39,4 +39,44 @@ assert.notEqual(p1.x, p2.x, 'changing X changes projected point');
 assert.ok(Number.isFinite(p1.y));
 const empty = chart3d.makeMesh({ bins: [-5,0], rows: [{ dte: 7, cells: [{value:null},{value:null}] }, { dte: 14, cells: [{value:null},{value:null}] }] });
 assert.equal(empty.faces.length, 0, 'missing cells do not create fictional faces');
+
+
+const dteDataset = {
+  spot: 100, bins: [-5, 0, 5], metric: 'iv', config: { kind: 'rate' },
+  rows: [
+    { expiry: '2026-02-15', dte: 14, cells: [{ value: .24 }, { value: .22 }, { value: .25 }] },
+    { expiry: '2026-01-02', dte: .25, cells: [{ value: .30 }, { value: .28 }, { value: .32 }] },
+    { expiry: '2026-01-08', dte: 7, cells: [{ value: .26 }, { value: .23 }, { value: .27 }] }
+  ]
+};
+const dteMesh = chart3d.makeMesh(dteDataset);
+assert.deepEqual(dteMesh.rows.map(row => row.dte), [.25, 7, 14], 'expiry rows are ordered by DTE');
+assert.equal(dteMesh.minDte, 0, 'expiry axis always starts at zero');
+assert.equal(dteMesh.vertices[0][0].y, (0.25 / 14) * 2 - 1, '0DTE expiry remains at its actual fractional DTE position');
+assert.ok(dteMesh.dteTicks[0] === 0, 'DTE tick list includes an explicit 0DTE origin');
+assert.ok(dteMesh.dteTicks.includes(14), 'DTE tick list includes the farthest expiry');
+assert.equal(chart3d.formatDteTick(0), '0DTE');
+assert.equal(chart3d.dteToAxis(0, 14), -1);
+assert.equal(chart3d.dteToAxis(14, 14), 1);
+
+const exactSpotRow = chart3d.resolveSpotVertex(dteMesh.vertices[0], dteMesh);
+assert.equal(dteMesh.spotIndex, 1, 'zero-moneyness bucket is identified as Spot');
+assert.equal(exactSpotRow.spotSource, 'observed', 'spot marker uses observed ATM cell when available');
+assert.equal(exactSpotRow.strikePrice, 100, 'spot marker maps to the underlying spot price');
+assert.equal(exactSpotRow.x, 0, 'spot marker is placed at zero moneyness');
+const interpolatedSpotRow = chart3d.resolveSpotVertex([
+  { ...dteMesh.vertices[0][0], labelX: -5, value: .30 },
+  { ...dteMesh.vertices[0][1], value: null, z: null },
+  { ...dteMesh.vertices[0][2], labelX: 5, value: .32, z: dteMesh.vertices[0][2].z }
+], dteMesh);
+assert.equal(interpolatedSpotRow?.spotSource, 'interpolated', 'Spot marker may interpolate only between valid cells on either side of ATM');
+assert.equal(interpolatedSpotRow?.strikePrice, 100);
+const noZeroBinMesh = chart3d.makeMesh({
+  spot: 100, bins: [-5, 5], config: { kind: 'rate' },
+  rows: [{ expiry: '2026-01-02', dte: .4, cells: [{ value: .30 }, { value: .34 }] }]
+});
+assert.equal(noZeroBinMesh.spotIndex, -1, 'a nearby bucket is not mislabeled as an observed exact ATM strike');
+assert.equal(noZeroBinMesh.spotX, 0, 'Spot axis coordinate is computed between the surrounding moneyness buckets');
+assert.equal(chart3d.resolveSpotVertex(noZeroBinMesh.vertices[0], noZeroBinMesh)?.spotSource, 'interpolated', 'Spot point interpolates only when valid buckets bracket zero');
+
 console.log('Stock Options 3D Greek/Surface tests: passed');
