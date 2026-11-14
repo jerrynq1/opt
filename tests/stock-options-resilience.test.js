@@ -52,6 +52,22 @@ function seedLoaded(s, expiry = '2026-11-20') {
   s.quotes = new Map([[SYM, { optionSymbol: SYM, side: 'C', strike: 500, openInterest: 10, iv: 0.2, multiplier: 100, last: 1 }]]);
 }
 
+test('activate() starts the independent Spot socket before expiry discovery resolves', async () => {
+  const { t, sockets } = makeHarness(hang);
+  const s = t.sessions.gld;
+  const activation = t.activate(s);
+
+  assert.equal(sockets.length, 1, 'Spot WebSocket should open immediately on activation');
+  assert.match(sockets[0].url, /api\/stock-price-feed$/, 'Cloudflare Spot relay is the first endpoint');
+  assert.equal(s.priceActivationAt > 0, true);
+  assert.equal(s.priceFeedState, 'connecting');
+
+  t.deactivate(s);
+  await activation;
+  assert.equal(s.active, false);
+  assert.equal(sockets[0].closed, true, 'deactivation must still close the early Spot socket');
+});
+
 test('request() retries a transient 5xx once for POST and then succeeds', async () => {
   let n = 0;
   const { t, calls } = makeHarness(() => (++n < 2 ? json({ error: 'bad gateway' }, 502) : json({ ok: true, data: {} })));
