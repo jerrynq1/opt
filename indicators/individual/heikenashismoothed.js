@@ -1,0 +1,8 @@
+/* ATAS indicator module: Heiken Ashi Smoothed (HeikenAshiSmoothed) | source: Technical/HeikenAshiSmoothed.cs */
+(function(){
+  'use strict';
+  window.ATASIndicatorFiles = window.ATASIndicatorFiles || {};
+  const { C, I, period, srcParam, line, hist, fill, n, safe, atRoll, atSum, atMax, atMin, atMeanDev, atTR, atATR, atROC, atMom, atHLC3, atMedian, atEMA, atDEMA, atTEMA, atHMA, atZLEMA, atKAMA, atATAS_AMA, atCCI, atStoch, atDMI, atOBV, atADL, atSAR, atMedianWin, atLinRegEnd, atPFE, atVHF, atStochRsi } = window.ATASIndicatorRuntime;
+    I('atas_heiken_ashi_smoothed', 'Heiken Ashi Smoothed (proxy)', 'ov', 'Two-stage Wilder/weighted smoothing of OHLC followed by Heiken Ashi calculation; plotted as smoothed HA close/open lines.', [['period', 'Smoothing', 10, 'i', { min: 1 }]], [C.d, C.e], ['HA Open', 'HA Close'], (A, p) => { const o = rma(A.o, p.period), h = rma(A.h, p.period), l = rma(A.l, p.period), c = rma(A.c, p.period), haC = c.map((v, i) => (o[i] + h[i] + l[i] + v) / 4), haO = Array(c.length).fill(null); for (let i = 0; i < c.length; i++) haO[i] = i ? (haO[i - 1] + haC[i - 1]) / 2 : (o[i] + c[i]) / 2; return [line(ema(haO, p.period), 0), line(ema(haC, p.period), 1)]; });
+  window.ATASIndicatorFiles["heikenashismoothed"] = { ...{"id": "heikenashismoothed", "name": "Heiken Ashi Smoothed", "sourceClass": "HeikenAshiSmoothed", "sourceFile": "Technical/HeikenAshiSmoothed.cs", "group": "technical", "requirement": "ohlcv", "status": "ported", "conversion": "approx_proxy", "addKey": "atas_heiken_ashi_smoothed"}, moduleFile: "indicators/individual/heikenashismoothed.js", moduleType: "primary" };
+})();

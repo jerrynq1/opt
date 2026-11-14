@@ -1,0 +1,5 @@
+/* Compatibility indicator registration retained from the prior QuantLab catalogue. */
+(function(){'use strict';
+const { C, I, period, srcParam, line, hist, fill, n, safe, atRoll, atSum, atMax, atMin, atMeanDev, atTR, atATR, atROC, atMom, atHLC3, atMedian, atEMA, atDEMA, atTEMA, atHMA, atZLEMA, atKAMA, atATAS_AMA, atCCI, atStoch, atDMI, atOBV, atADL, atSAR, atMedianWin, atLinRegEnd, atPFE, atVHF, atStochRsi } = window.ATASIndicatorRuntime;
+  I('atas_swing_levels', 'Swing High / Low Levels (legacy alias)', 'ov', 'Alias of confirmed swing high/low levels.', [['left', 'Left bars', 3, 'i', { min: 1 }], ['right', 'Right bars', 3, 'i', { min: 1 }]], [C.d, C.e], ['Swing High', 'Swing Low'], (A, p) => { const hi = Array(A.c.length).fill(null), lo = Array(A.c.length).fill(null); for (let i = p.left; i + p.right < A.c.length; i++) { const k = i + p.right; if (A.h.slice(k - p.left, k + p.right + 1).every((v, j) => j === p.left ? true : v < A.h[k])) hi[k] = A.h[k]; if (A.l.slice(k - p.left, k + p.right + 1).every((v, j) => j === p.left ? true : v > A.l[k])) lo[k] = A.l[k]; } return [line(hi, 0), line(lo, 1)]; });
+})();
