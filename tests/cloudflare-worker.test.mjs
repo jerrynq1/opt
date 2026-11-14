@@ -33,6 +33,16 @@ assert.ok(lastUpstream.init.headers.get('x-trace-id'));
 assert.equal(lastUpstream.init.headers.get('x-trace-id'), lastUpstream.init.headers.get('x-ui-request-trace'));
 assert.equal(lastUpstream.init.headers.get('User-Agent'), 'test-browser/1.0');
 
+response = await worker.fetch(new Request('https://worker.example/api/binance-stock-proxy/bapi/equity/v1/public/equity/option/get-exchange-info?symbol=QQQ&rootSymbol=QQQ', { headers: { Origin: origin } }), env);
+assert.equal(response.status, 200);
+assert.match(lastUpstream.url, /get-exchange-info\?symbol=QQQ/);
+assert.match(lastUpstream.init.headers.get('Referer'), /EQ_QQQ/);
+
+response = await worker.fetch(new Request('https://worker.example/api/binance-stock-proxy/en/stocks/options/EQ_QQQ', { headers: { Origin: origin } }), env);
+assert.equal(response.status, 200);
+assert.match(lastUpstream.url, /\/en\/stocks\/options\/EQ_QQQ$/);
+assert.match(lastUpstream.init.headers.get('Referer'), /EQ_QQQ/);
+
 response = await worker.fetch(new Request('https://worker.example/api/binance-stock-proxy/bapi/equity/v1/friendly/equity/option/get-option-quote', {
   method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' },
   body: JSON.stringify({ occSymbols: ['QQQ  261218C00600000'] })
@@ -57,6 +67,16 @@ assert.equal(response.status, 403);
 
 response = await worker.fetch(new Request('https://worker.example/api/binance-stock-proxy/bapi/equity/v1/public/equity/option/chain-symbols?symbol=AAPL&rootSymbol=AAPL&expirationDate=2026-12-18', { headers: { Origin: origin } }), env);
 assert.equal(response.status, 400);
+
+response = await worker.fetch(new Request('https://worker.example/api/binance-stock-proxy/bapi/equity/v1/public/equity/option/get-exchange-info?symbol=QQQ&rootSymbol=QQQ', { headers: { Origin: origin } }), env);
+assert.equal(response.status, 200);
+assert.match(lastUpstream.url, /get-exchange-info\?symbol=QQQ/);
+assert.match(lastUpstream.init.headers.get('Referer'), /EQ_QQQ/);
+
+response = await worker.fetch(new Request('https://worker.example/api/binance-stock-proxy/en/stocks/options/EQ_QQQ', { headers: { Origin: origin } }), env);
+assert.equal(response.status, 200);
+assert.match(lastUpstream.url, /\/en\/stocks\/options\/EQ_QQQ$/);
+assert.match(lastUpstream.init.headers.get('Referer'), /EQ_QQQ/);
 
 response = await worker.fetch(new Request('https://worker.example/api/binance-stock-proxy/bapi/equity/v1/friendly/equity/option/get-option-quote', {
   method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' },
