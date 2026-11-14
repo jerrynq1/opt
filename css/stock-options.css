@@ -225,18 +225,21 @@
 .stock-options-view .so-3d-actions{display:flex;align-items:center;gap:5px}
 .stock-options-view .so-3d-actions button{min-width:29px;height:26px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:rgba(120,145,170,.08);color:var(--ink);font:700 11px ui-monospace,monospace;cursor:pointer}
 .stock-options-view .so-3d-actions button:hover{border-color:var(--win);background:rgba(75,224,168,.09)}
-.stock-options-view .so-3d-stage{position:relative;width:100%;height:420px;min-height:340px;overflow:hidden;touch-action:pan-y}
-.stock-options-view .so-3d-canvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none;outline:none}
+.stock-options-view .so-3d-stage{position:relative;width:100%;height:460px;min-height:340px;overflow:hidden;touch-action:pan-y;background:radial-gradient(ellipse at 48% 38%,rgba(31,70,95,.16),transparent 62%),linear-gradient(180deg,rgba(5,13,23,.34),rgba(4,10,18,.08))}
+.stock-options-view .so-3d-canvas{display:block;width:100%;height:100%;cursor:grab;touch-action:none;outline:none;background:transparent}
 .stock-options-view .so-3d-canvas.is-dragging{cursor:grabbing}
+.stock-options-view .so-3d-stage:after{content:"WEBGL · X STRIKE  /  Y EXPIRY  /  Z METRIC";position:absolute;right:12px;bottom:10px;pointer-events:none;color:rgba(142,169,195,.42);font:8px ui-monospace,monospace;letter-spacing:.08em}
 .stock-options-view .so-3d-canvas:focus-visible{outline:2px solid rgba(75,224,168,.65);outline-offset:-3px}
 .stock-options-view .so-3d-tooltip{position:absolute;z-index:3;pointer-events:none;display:flex;flex-direction:column;gap:4px;min-width:150px;max-width:220px;padding:8px 10px;border:1px solid rgba(119,160,195,.35);border-radius:7px;background:rgba(5,13,23,.95);box-shadow:0 8px 24px rgba(0,0,0,.35);color:var(--ink);font:10px ui-monospace,monospace}
 .stock-options-view .so-3d-tooltip[hidden]{display:none}
 .stock-options-view .so-3d-tooltip>span,.stock-options-view .so-3d-tooltip>small{color:var(--mut);font-size:9px}
 .stock-options-view .so-3d-tooltip>strong{color:#75dfc0;font-size:14px}
 .stock-options-view .so-3d-axis-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:7px 10px;border-top:1px solid rgba(128,148,172,.13);color:var(--mut);font:8px ui-monospace,monospace;letter-spacing:.25px}
-.stock-options-view .so-3d-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:210px;padding:22px;text-align:center;color:var(--mut);font-size:11px;line-height:1.55}
+.stock-options-view .so-3d-axis-footer .axis-x{color:#65cfe2}.stock-options-view .so-3d-axis-footer .axis-y{color:#91a7ff}.stock-options-view .so-3d-axis-footer .axis-z{color:#e4c27c}
+.stock-options-view .so-3d-empty{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:210px;padding:22px;text-align:center;color:var(--mut);font-size:11px;line-height:1.55;background:rgba(5,12,21,.84);z-index:2}
+.stock-options-view .so-3d-empty[hidden]{display:none!important}
 .stock-options-view .so-3d-empty small{font:9px ui-monospace,monospace;opacity:.78}
-@media(max-width:700px){.stock-options-view .so-greeks-3d-lab,.stock-options-view .so-surface-lab{padding:13px 10px}.stock-options-view .so-3d-stage{height:360px;min-height:300px}.stock-options-view .so-3d-legend{flex-wrap:wrap}.stock-options-view .so-3d-legend small{width:100%;margin-left:27px}.stock-options-view .so-3d-axis-footer{justify-content:flex-start;gap:6px 14px}}
+@media(max-width:700px){.stock-options-view .so-greeks-3d-lab,.stock-options-view .so-surface-lab{padding:13px 10px}.stock-options-view .so-3d-stage{height:390px;min-height:300px}.stock-options-view .so-3d-legend{flex-wrap:wrap}.stock-options-view .so-3d-legend small{width:100%;margin-left:27px}.stock-options-view .so-3d-axis-footer{justify-content:flex-start;gap:6px 14px}}
 
 .stock-options-view .so-3d-legend>i.is-signed{background:linear-gradient(90deg,#df6b80 0%,#7b8ca2 50%,#43d2a1 100%)}
 .stock-options-view .so-3d-legend>i.is-iv{background:linear-gradient(90deg,#326fba,#56a6de,#b98af1)}

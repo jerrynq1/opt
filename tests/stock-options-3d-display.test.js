@@ -10,9 +10,9 @@ const sw = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'css/stock-options.css'), 'utf8');
 
 test('Options page loads the 3D renderer before stock-options UI', () => {
-  assert.match(html, /stock-options-surfaces\.js"><\/script><script src="js\/stock-options-3d\.js"><\/script><script src="js\/stock-options\.js/);
+  assert.match(html, /stock-options-surfaces\.js"><\/script><script src="https:\/\/cdn\.jsdelivr\.net\/npm\/three@0\.128\.0\/build\/three\.min\.js" crossorigin="anonymous"><\/script><script src="js\/stock-options-3d\.js"><\/script><script src="js\/stock-options\.js/);
   assert.match(sw, /"\.\/js\/stock-options-3d\.js"/);
-  assert.match(sw, /ict-quantlab-shell-v35/);
+  assert.match(sw, /ict-quantlab-shell-v36/);
 });
 
 test('Greeks area is a dedicated 3D surface with model metric and side controls', () => {
@@ -35,6 +35,6 @@ test('Option IV/Exposure/Volume/OI surfaces render through the 3D chart module',
 
 test('3D chart includes canvas rotation, zoom, axis and tooltip styling', () => {
   const renderer = fs.readFileSync(path.join(root, 'js/stock-options-3d.js'), 'utf8');
-  for (const token of ['projectPoint', 'pointerdown', 'pointermove', 'wheel', 'data-3d-action', 'EXPIRY / DTE', 'mesh.faces', 'zTicks', 'strikePrice']) assert.ok(renderer.includes(token), `Missing renderer feature ${token}`);
+  for (const token of ['projectPoint', 'pointerdown', 'pointermove', 'wheel', 'data-3d-action', 'EXPIRY / DTE', 'mesh.faces', 'zTicks', 'strikePrice', 'THREE.WebGLRenderer', 'MeshStandardMaterial', 'camera3d.up.set(0, 0, 1)', 'CanvasTexture', 'WEBGL · TRUE 3D MESH']) assert.ok(renderer.includes(token), `Missing renderer feature ${token}`);
   for (const selector of ['so-3d-host', 'so-3d-stage', 'so-3d-canvas', 'so-3d-tooltip', 'so-3d-actions', 'so-3d-axis-footer']) assert.match(css, new RegExp(`\\.${selector}\\b`));
 });
