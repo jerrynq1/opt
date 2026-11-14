@@ -112,6 +112,44 @@
         </div>
         <div class="so-scope-status" id="${p}-scope-status"></div>
       </div>
+      <section class="card so-vol-card" aria-label="IV Surface and Volatility Analysis">
+        <div class="so-vol-head">
+          <div><span class="so-vol-eyebrow">B · IV SURFACE & VOLATILITY</span><h3>Volatility Analytics</h3><p>Mark IV được ưu tiên; IV suy ra từ mid chỉ dùng làm fallback và được đánh dấu riêng.</p></div>
+          <span class="so-vol-status" id="${p}-vol-status">Đang chờ Option IV…</span>
+        </div>
+        <div class="so-vol-kpis" id="${p}-vol-kpis">
+          <article><span>ATM IMPLIED VOLATILITY</span><strong>—</strong><small>Expiry đang chọn</small></article>
+          <article><span>25Δ RISK REVERSAL</span><strong>—</strong><small>Call 25Δ − Put 25Δ</small></article>
+          <article><span>25Δ BUTTERFLY</span><strong>—</strong><small>(Call 25Δ + Put 25Δ) / 2 − ATM</small></article>
+          <article><span>EXPECTED MOVE · 1σ</span><strong>—</strong><small>ATM IV × √T × Spot</small></article>
+        </div>
+        <div class="so-vol-grid">
+          <div class="so-vol-panel">
+            <div class="so-vol-panel-title"><div><h4>25-Delta Skew</h4><small>So sánh IV hai cánh với ATM</small></div><span id="${p}-vol-skew-source">—</span></div>
+            <div class="so-vol-wing-grid" id="${p}-vol-wings">
+              <div><span>PUT 25Δ IV</span><b>—</b><small>Put wing</small></div>
+              <div><span>ATM IV</span><b>—</b><small>Near-the-money</small></div>
+              <div><span>CALL 25Δ IV</span><b>—</b><small>Call wing</small></div>
+            </div>
+            <div class="so-vol-skew-lines" id="${p}-vol-skew-lines"></div>
+          </div>
+          <div class="so-vol-panel">
+            <div class="so-vol-panel-title"><div><h4>Expected Move</h4><small>Ước lượng 1 độ lệch chuẩn đến expiry</small></div><span id="${p}-vol-dte">DTE —</span></div>
+            <div class="so-vol-move" id="${p}-vol-move"><strong>—</strong><span>Chưa đủ IV / Spot / DTE</span></div>
+            <div class="so-vol-range" id="${p}-vol-range">Range: —</div>
+            <p class="so-vol-footnote">Xấp xỉ ATM IV × √(thời gian năm hóa). Đây là dải biến động mô hình 1σ, không phải dự báo giá hay xác suất chắc chắn.</p>
+          </div>
+        </div>
+        <div class="so-vol-surface-wrap">
+          <div class="so-vol-panel-title"><div><h4>IV Surface · Delta Buckets</h4><small>IV theo kỳ hạn và delta; ô trống nghĩa là chưa có quote phù hợp</small></div><span id="${p}-vol-surface-coverage">—</span></div>
+          <div class="opt-table-wrap"><table class="so-vol-table"><thead><tr><th>EXPIRY</th><th>DTE</th><th>10Δ PUT</th><th>25Δ PUT</th><th>ATM</th><th>25Δ CALL</th><th>10Δ CALL</th><th>25Δ RR</th></tr></thead><tbody id="${p}-vol-surface"><tr><td colspan="8" class="opt-empty">Đang chờ IV quotes…</td></tr></tbody></table></div>
+        </div>
+        <div class="so-vol-term-wrap">
+          <div class="so-vol-panel-title"><div><h4>IV Term Structure</h4><small>ATM IV theo thời gian đáo hạn</small></div><span id="${p}-vol-term-count">1 expiry</span></div>
+          <div class="so-vol-term-chart" id="${p}-vol-term"><div class="opt-empty">Chọn Analysis Scope → Weekly hoặc All Expiries để xem đường cong nhiều kỳ hạn.</div></div>
+        </div>
+        <p class="so-vol-disclaimer" id="${p}-vol-note">Risk Reversal = IV Call 25Δ − IV Put 25Δ. Butterfly = trung bình hai IV 25Δ trừ ATM IV. Put Skew / Call Skew lần lượt là IV cánh Put / Call trừ ATM IV. Nếu thiếu delta provider, delta được xấp xỉ bằng Black–Scholes với r = q = 0.</p>
+      </section>
       <div class="card so-level-card">
         <div class="opt-card-title"><div><h3>Key Levels</h3><small id="${p}-levels-sub">Ước lượng từ OI và Greeks của expiry được chọn</small></div><button class="btn ghost sm" type="button" id="${p}-copy">Copy Levels</button></div>
         <div class="opt-levels-grid so-levels" id="${p}-levels"><div class="opt-empty">Đang chờ dữ liệu OI…</div></div>
@@ -165,6 +203,7 @@
           <p><strong>Gamma Flip / Zero Gamma:</strong> Giữ OI, IV và DTE cố định; giả định giá underlying tại từng mức, tính lại Gamma từng hợp đồng bằng Black–Scholes, sau đó tổng hợp Net GEX = Σ(Call +, Put −) × OI × multiplier × giá giả định² × 0.01. Gamma Flip / Zero Gamma là nghiệm làm tổng Net GEX đổi dấu. Mô hình dùng r = 0, q = 0, đáo hạn lúc 16:00 America/New_York và nội suy/bisection quanh điểm đổi dấu. Đây là mô hình ước lượng theo quy ước Call+/Put−, không phải vị thế dealer đã xác minh. Cần OI, multiplier, IV và expiry đầy đủ.</p>
           <p><strong>Max Pain:</strong> với mỗi giá settlement ứng viên K, tính Σ[Call OI × multiplier × max(K − strike, 0)] + Σ[Put OI × multiplier × max(strike − K, 0)] trên toàn bộ hợp đồng của đúng expiry. Chọn settlement có tổng payout thấp nhất. Nếu nhiều strike cùng mức thấp nhất, QuantLab hiển thị strike đại diện thấp nhất và công bố toàn bộ các strike đồng hạng. Chỉ tính khi Option Chain hoàn tất; OI null trên quote đã nhận được giả định bằng 0, và mọi contract có OI dương phải có multiplier hợp lệ. Không cộng volume hoặc premium vào Max Pain.</p>
           <p><strong>Spot reference:</strong> Binance Equity raw Price Stream <code>/equity/ws/price</code> được dùng làm giá tham chiếu cho KPI, Exposure và các Key Levels.</p>
+          <p><strong>IV Surface & Volatility:</strong> ATM IV được nội suy theo log-moneyness quanh Spot từ Call và Put rồi lấy trung bình hai phía khi có đủ dữ liệu. 25Δ Risk Reversal = IV Call 25Δ − IV Put 25Δ; 25Δ Butterfly = (IV Call 25Δ + IV Put 25Δ)/2 − ATM IV. Put Skew / Call Skew = IV cánh 25Δ tương ứng − ATM IV. Expected Move 1σ ≈ Spot × ATM IV × √T. Term Structure và Surface dùng các expiry đã tải trong Analysis Scope hiện tại; chọn Weekly hoặc All Expiries để mở rộng kỳ hạn. Provider IV được ưu tiên; nếu thiếu, QuantLab có thể suy IV từ Mid bằng Black–Scholes (r=q=0) và gắn nhãn mid-derived. Delta thiếu được ước lượng bằng Black–Scholes. Đây là phép đo smile/skew theo snapshot, không phải volatility surface arbitrage-free; chất lượng phụ thuộc IV/quote coverage và thời điểm feed.</p>
           <p><strong>Giả định dữ liệu:</strong> Khi OCC quote đã nhận đầy đủ nhưng Binance trả OI hoặc Volume là <code>null</code>, QuantLab giả định giá trị 0 cho đến khi có số liệu thực. Giá trị thô vẫn được giữ để phân biệt observed zero và assumed zero; khi Binance gửi OI/Volume thực, các tổng OI, GEX, GEX Ratio, Gamma Flip và Max Pain tự tính lại. OCC quote hoàn toàn chưa nhận được vẫn không bị giả định bằng 0. Endpoint quote có thể trả dữ liệu trễ; độ trễ phụ thuộc quyền dữ liệu tài khoản.</p>
           <p><strong>Không có trong nguồn hiện tại:</strong> option trade prints/flow tape và Vanna/Charm không nằm trong quote response được ghi nhận, nên dashboard không tự ước lượng hoặc hiển thị hai loại dữ liệu này như dữ liệu Binance.</p>
         </div>
@@ -1203,10 +1242,89 @@
         `<td>${x.maxPain?fmt(x.maxPain.strike,2)+(x.maxPain.isTie?'*':''):'—'}</td><td title="${esc(x.error||x.maxPainReason||'')}">${statusText[x.status]||x.status}</td></tr>`;
     }).join('');
   }
-  function renderScopeViews(s){try{renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);updateChainMeta(s);renderScope(s);}catch(e){}}
+  function collectVolatilityInputs(s,now=Date.now()){
+    const expiries=scopeExpiries(s,now),inputs=[];
+    for(const expiry of expiries){
+      if(expiry===s.expiry){
+        if(s.quotesExpiry===s.expiry&&s.quotes?.size)inputs.push({expiry,quotes:[...s.quotes.values()]});
+        continue;
+      }
+      const sub=s.scopeData?.get(expiry);
+      if(sub?.quotes?.size)inputs.push({expiry,quotes:[...sub.quotes.values()]});
+    }
+    return {inputs,expected:expiries.length};
+  }
+  function volFmt(value){return value===null||!Number.isFinite(Number(value))?'—':`${(Number(value)*100).toFixed(2)}%`;}
+  function volPoints(value){return value===null||!Number.isFinite(Number(value))?'—':`${value>0?'+':''}${(Number(value)*100).toFixed(2)} vol pts`;}
+  function renderVolTermChart(rows){
+    if(!rows||rows.length<2)return '<div class="so-vol-empty">Cần ít nhất 2 expiry đã tải. Chọn <b>Analysis Scope → Weekly</b> hoặc <b>All Expiries</b> phía trên để mở rộng Term Structure.</div>';
+    const valid=rows.filter(row=>row.atmIV!==null&&Number.isFinite(row.dte));
+    if(valid.length<2)return '<div class="so-vol-empty">Chưa đủ ATM IV ở ít nhất hai kỳ hạn để dựng Term Structure.</div>';
+    const w=620,h=190,pad={l:44,r:18,t:18,b:38};
+    const minX=Math.min(...valid.map(x=>x.dte)),maxX=Math.max(...valid.map(x=>x.dte));
+    const minY=Math.max(0,Math.min(...valid.map(x=>x.atmIV))-0.025),maxY=Math.max(...valid.map(x=>x.atmIV))+0.025;
+    const x=v=>pad.l+(maxX === minX ? 0.5 : (v-minX)/(maxX-minX))*(w-pad.l-pad.r);
+    const y=v=>pad.t+(maxY === minY ? 0.5 : (maxY-v)/(maxY-minY))*(h-pad.t-pad.b);
+    const points=valid.map(row=>`${x(row.dte).toFixed(1)},${y(row.atmIV).toFixed(1)}`).join(' ');
+    const grid=[0,.5,1].map(f=>{const value=minY+(maxY-minY)*f,yy=y(value);return `<line x1="${pad.l}" y1="${yy}" x2="${w-pad.r}" y2="${yy}" class="so-vol-gridline"/><text x="${pad.l-8}" y="${yy+4}" text-anchor="end" class="so-vol-axis">${(value*100).toFixed(1)}%</text>`;}).join('');
+    const marks=valid.map(row=>`<circle cx="${x(row.dte)}" cy="${y(row.atmIV)}" r="4" class="so-vol-point"><title>${esc(row.expiry)} · ${row.dte.toFixed(1)} DTE · ATM IV ${volFmt(row.atmIV)}</title></circle><text x="${x(row.dte)}" y="${h-12}" text-anchor="middle" class="so-vol-axis">${Math.round(row.dte)}d</text>`).join('');
+    return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="ATM implied volatility term structure">${grid}<polyline points="${points}" class="so-vol-line"/>${marks}</svg><div class="so-vol-chart-legend">ATM IV · ${valid.length} loaded expiries · x-axis: DTE</div>`;
+  }
+  function renderVolatilityAnalysis(s){
+    const p=`so-${s.cfg.key}`,status=$(`${p}-vol-status`);if(!status)return;
+    const {inputs,expected}=collectVolatilityInputs(s),api=window.StockOptionsVolatility;
+    if(!api?.calculate){status.textContent='Volatility module unavailable';return;}
+    const result=api.calculate({spot:s.price,expiries:inputs});
+    const current=result.expiries.find(row=>row.expiry===s.expiry)||null;
+    const kpis=$(`${p}-vol-kpis`),wings=$(`${p}-vol-wings`),skew=$(`${p}-vol-skew-lines`),move=$(`${p}-vol-move`),range=$(`${p}-vol-range`);
+    const coverage=`${inputs.length}/${expected} expiries loaded · ${result.ivCount}/${result.quoteCount} quotes with usable IV`;
+    status.textContent=coverage;
+    if(kpis){
+      const expectedMove=current?.expectedMove,movePct=current?.expectedMovePct;
+      const cards=[
+        ['ATM IMPLIED VOLATILITY',volFmt(current?.atmIV??null),current?`${current.expiry} · ${current.sourceLabel}`:'Expiry đang chọn chưa có đủ IV/Spot'],
+        ['25Δ RISK REVERSAL',volPoints(current?.rr25??null),current?'Call 25Δ − Put 25Δ':'Cần IV hai cánh 25Δ'],
+        ['25Δ BUTTERFLY',volPoints(current?.bf25??null),current?'½(Call 25Δ + Put 25Δ) − ATM':'Cần ATM và hai cánh 25Δ'],
+        ['EXPECTED MOVE · 1σ',expectedMove===null||expectedMove===undefined?'—':`±${fmt(expectedMove,2)}`,movePct===null||movePct===undefined?'Cần ATM IV và DTE':`±${(movePct*100).toFixed(2)}% · đến ${current.expiry}`]
+      ];
+      kpis.innerHTML=cards.map(([label,value,sub])=>`<article><span>${label}</span><strong>${esc(value)}</strong><small>${esc(sub)}</small></article>`).join('');
+    }
+    if(wings){
+      wings.innerHTML=[['PUT 25Δ IV',current?.put25IV],['ATM IV',current?.atmIV],['CALL 25Δ IV',current?.call25IV]].map(([label,value])=>`<div><span>${label}</span><b>${volFmt(value??null)}</b><small>${value===null||value===undefined?'Chưa có quote phù hợp': 'Provider / model delta bucket'}</small></div>`).join('');
+    }
+    if(skew){
+      const pSkew=current?.putSkew??null,cSkew=current?.callSkew??null;
+      skew.innerHTML=`<div><span>PUT SKEW · 25Δ PUT − ATM</span><b class="${pSkew===null?'':pSkew>0?'is-warn':'is-good'}">${volPoints(pSkew)}</b></div><div><span>CALL SKEW · 25Δ CALL − ATM</span><b class="${cSkew===null?'':cSkew>0?'is-warn':'is-good'}">${volPoints(cSkew)}</b></div>`;
+    }
+    const source=$(`${p}-vol-skew-source`);if(source)source.textContent=current?`${current.providerIVCount} provider IV · ${current.midDerivedIVCount} mid-derived · ${current.modelDeltaCount} model delta`:'No IV sample';
+    const dte=$(`${p}-vol-dte`);if(dte)dte.textContent=current?`${current.dte.toFixed(1)} DTE`:'DTE —';
+    if(move){
+      move.innerHTML=current?.expectedMove!==null&&current?.expectedMove!==undefined?`<strong>±${fmt(current.expectedMove,2)}</strong><span>±${(current.expectedMovePct*100).toFixed(2)}% quanh Spot ${fmt(s.price,2)}</span>`:'<strong>—</strong><span>Cần đủ ATM IV, Spot và DTE</span>';
+    }
+    if(range){
+      range.textContent=current?.expectedMove!==null&&current?.expectedMove!==undefined&&s.price>0?`1σ range xấp xỉ: ${fmt(Math.max(0,s.price-current.expectedMove),2)} – ${fmt(s.price+current.expectedMove,2)}`:'Range: —';
+    }
+    const surface=$(`${p}-vol-surface`);
+    const rows=result.expiries;
+    const cellValues=rows.flatMap(row=>Object.values(row.surface)).filter(value=>Number.isFinite(value));
+    const low=cellValues.length?Math.min(...cellValues):0,high=cellValues.length?Math.max(...cellValues):1;
+    const heat=value=>{if(value===null||value===undefined||!Number.isFinite(value))return '—';const alpha=.07+((high === low ? 0.5 : (value-low)/(high-low))*.24);return `<span class="so-vol-heat" style="--iv-alpha:${alpha.toFixed(3)}">${volFmt(value)}</span>`;};
+    if(surface){
+      surface.innerHTML=rows.length?rows.map(row=>`<tr class="${row.expiry===s.expiry?'is-selected':''}"><td>${esc(row.expiry)}${row.expiry===s.expiry?' <em>Selected</em>':''}</td><td>${row.dte.toFixed(1)}</td><td>${heat(row.surface.put10)}</td><td>${heat(row.surface.put25)}</td><td>${heat(row.surface.atm)}</td><td>${heat(row.surface.call25)}</td><td>${heat(row.surface.call10)}</td><td class="${row.rr25===null?'':row.rr25>0?'pos-t':'neg-t'}">${volPoints(row.rr25)}</td></tr>`).join(''):'<tr><td colspan="8" class="opt-empty">Chưa có expiry nào chứa IV hợp lệ.</td></tr>';
+    }
+    const surfaceCoverage=$(`${p}-vol-surface-coverage`);if(surfaceCoverage)surfaceCoverage.textContent=coverage;
+    const term=$(`${p}-vol-term`);if(term)term.innerHTML=renderVolTermChart(rows);
+    const termCount=$(`${p}-vol-term-count`);if(termCount)termCount.textContent=`${rows.length} / ${expected} expiries`;
+    const note=$(`${p}-vol-note`);if(note){
+      const scopeText=s.scope==='selected'?'Term Structure hiện chỉ có expiry đang chọn; chọn Analysis Scope → Weekly hoặc All Expiries để tải thêm kỳ hạn.':`Term Structure dùng dữ liệu đã tải theo Analysis Scope: ${scopeLabels[s.scope]||s.scope}.`;
+      note.textContent=`${scopeText} · ${result.providerIVCount} provider IV, ${result.midDerivedIVCount} IV suy ra từ mid. Delta thiếu được ước lượng BSM (r=q=0). Surface là snapshot theo dữ liệu hiện có, không phải surface arbitrage-free.`;
+    }
+  }
+
+  function renderScopeViews(s){try{renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderVolatilityAnalysis(s);updateChainMeta(s);renderScope(s);}catch(e){}}
 
   function renderAll(s){
-    renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderChain(s);updateChainMeta(s);renderScope(s);
+    renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderChain(s);renderVolatilityAnalysis(s);updateChainMeta(s);renderScope(s);
     try{if(typeof window.crossAssetMapDataUpdated==='function')window.crossAssetMapDataUpdated(s.cfg.key)}catch(e){}
   }
   function metric(value,label,sub,cls=''){
@@ -1778,5 +1896,5 @@
   window.stockOptionsCrossAssetSnapshot=crossAssetSnapshot;
   window.stockOptionsCrossAssetSetExpiry=crossAssetSetExpiry;
   window.stockOptionsSetScope=(key,scope)=>{const s=sessions[key];if(!s)throw new Error('Nguồn ETF không hợp lệ: '+key);setScope(s,scope);};
-  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,price:s.price,previousClose:s.previousClose,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,priceAgeMs:s.priceAgeMs,priceReceivedAgeMs:s.priceReceivedAgeMs,priceType:s.priceType,marketPhase:s.marketPhase,priceFeedState:s.priceFeedState,priceFeedDetail:s.priceFeedDetail,priceSource:s.priceSource,priceEndpointIndex:s.priceEndpointIndex,priceActivationAt:s.priceActivationAt,priceConnectStartedAt:s.priceConnectStartedAt,priceSocketOpenedAt:s.priceSocketOpenedAt,priceUpstreamConnectedAt:s.priceUpstreamConnectedAt,priceFirstMessageAt:s.priceFirstMessageAt,priceFirstSnapshotAt:s.priceFirstSnapshotAt,priceStartupMs:s.priceStartupMs,priceSocketState:s.priceSocket?.readyState??null,optionFeedState:s.optionFeedState,optionFeedError:s.optionFeedError,optionSocketState:s.socket?.readyState??null,quotes:s.quotes.size,contracts:c.totalContracts,quotesExpiry:s.quotesExpiry,complete:c.complete,hydrating:s.hydrating,missingQuoteSymbols:c.missingQuoteSymbols.slice(0,20),lastHydrationIncompleteSymbols:s.lastHydrationIncompleteSymbols||[],incompleteContractDetails:(s.lastHydrationIncompleteSymbols||[]).slice(0,12).map(symbol=>{const q=s.quotes.get(symbol)||{},m=s.contractMeta?.get(symbol)||{};return {symbol,side:q.side??m.side,strike:q.strike??m.strike,oi:q.openInterest??m.openInterest,iv:q.iv??m.iv,gamma:q.gamma??m.gamma,multiplier:q.multiplier??m.multiplier,effectiveMultiplier:effectiveMultiplier(q.optionSymbol?q:m)}}),quoteSamples:[...s.quotes.values()].slice(0,3).map(q=>({symbol:q.optionSymbol,side:q.side,strike:q.strike,oi:q.openInterest,iv:q.iv,gamma:q.gamma,multiplier:q.multiplier,effectiveMultiplier:effectiveMultiplier(q)})),chainListInvalidCount:s.chainListInvalidCount,chainListDuplicateCount:s.chainListDuplicateCount,displayStrikes:s.displayStrikes,oiKnown:c.oiKnown,oiMissing:c.oiMissing,oiAssumedZero:c.oiAssumedZero,volumeKnown:c.volumeKnown,volumeAssumedZero:c.volumeAssumedZero,oiObservedCoverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiMissingSamples:c.oiMissingSamples,multiplierKnown:c.multiplierKnown,multiplierAssumed:c.multiplierAssumed,multiplierMissing:c.multiplierMissing,missingMultiplierSamples:c.missingMultiplierSamples,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,missingGreekSamples:c.missingGreekSamples,gexCoverage:c.gexCoverage,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexComplete:c.gexComplete,oiComplete:c.oiComplete,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,maxPainTiedStrikes:c.maxPain?.tiedStrikes||[],maxPainComplete:c.maxPainComplete,gexRatio:c.gexRatio,price:s.price}] }));
+  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,price:s.price,previousClose:s.previousClose,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,priceAgeMs:s.priceAgeMs,priceReceivedAgeMs:s.priceReceivedAgeMs,priceType:s.priceType,marketPhase:s.marketPhase,priceFeedState:s.priceFeedState,priceFeedDetail:s.priceFeedDetail,priceSource:s.priceSource,priceEndpointIndex:s.priceEndpointIndex,priceActivationAt:s.priceActivationAt,priceConnectStartedAt:s.priceConnectStartedAt,priceSocketOpenedAt:s.priceSocketOpenedAt,priceUpstreamConnectedAt:s.priceUpstreamConnectedAt,priceFirstMessageAt:s.priceFirstMessageAt,priceFirstSnapshotAt:s.priceFirstSnapshotAt,priceStartupMs:s.priceStartupMs,priceSocketState:s.priceSocket?.readyState??null,optionFeedState:s.optionFeedState,optionFeedError:s.optionFeedError,optionSocketState:s.socket?.readyState??null,quotes:s.quotes.size,contracts:c.totalContracts,quotesExpiry:s.quotesExpiry,complete:c.complete,hydrating:s.hydrating,missingQuoteSymbols:c.missingQuoteSymbols.slice(0,20),lastHydrationIncompleteSymbols:s.lastHydrationIncompleteSymbols||[],incompleteContractDetails:(s.lastHydrationIncompleteSymbols||[]).slice(0,12).map(symbol=>{const q=s.quotes.get(symbol)||{},m=s.contractMeta?.get(symbol)||{};return {symbol,side:q.side??m.side,strike:q.strike??m.strike,oi:q.openInterest??m.openInterest,iv:q.iv??m.iv,gamma:q.gamma??m.gamma,multiplier:q.multiplier??m.multiplier,effectiveMultiplier:effectiveMultiplier(q.optionSymbol?q:m)}}),quoteSamples:[...s.quotes.values()].slice(0,3).map(q=>({symbol:q.optionSymbol,side:q.side,strike:q.strike,oi:q.openInterest,iv:q.iv,gamma:q.gamma,multiplier:q.multiplier,effectiveMultiplier:effectiveMultiplier(q)})),chainListInvalidCount:s.chainListInvalidCount,chainListDuplicateCount:s.chainListDuplicateCount,displayStrikes:s.displayStrikes,oiKnown:c.oiKnown,oiMissing:c.oiMissing,oiAssumedZero:c.oiAssumedZero,volumeKnown:c.volumeKnown,volumeAssumedZero:c.volumeAssumedZero,oiObservedCoverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiMissingSamples:c.oiMissingSamples,multiplierKnown:c.multiplierKnown,multiplierAssumed:c.multiplierAssumed,multiplierMissing:c.multiplierMissing,missingMultiplierSamples:c.missingMultiplierSamples,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,missingGreekSamples:c.missingGreekSamples,gexCoverage:c.gexCoverage,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexComplete:c.gexComplete,oiComplete:c.oiComplete,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,maxPainTiedStrikes:c.maxPain?.tiedStrikes||[],maxPainComplete:c.maxPainComplete,gexRatio:c.gexRatio,volatility:window.StockOptionsVolatility?.calculate?.({spot:s.price,expiries:collectVolatilityInputs(s).inputs})||null,price:s.price}] }));
 })();
