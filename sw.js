@@ -1,5 +1,5 @@
 /* ICT QuantLab offline shell. Bump CACHE_VERSION whenever the app shell changes. */
-const CACHE_VERSION = "ict-quantlab-shell-v30";
+const CACHE_VERSION = "ict-quantlab-shell-v31";
 const SHELL = [
   "./", "./index.html", "./manifest.webmanifest",
   "./img/logo.png", "./img/pwa-192.png", "./img/pwa-512.png",
@@ -10,7 +10,7 @@ const SHELL = [
   "./js/core.js", "./js/symbols.js", "./js/timezone.js", "./js/ctrader.js",
   "./js/chart.js", "./js/candle-style.js", "./js/indicators-defs.js",
   "./js/indicators-custom.js", "./js/pine-indicators-defs.js", "./js/indicators-engine.js",
-  "./js/connection-ui.js", "./js/stock-options-config.js", "./js/stock-options-volatility.js", "./js/stock-options.js",
+  "./js/connection-ui.js", "./js/stock-options-config.js", "./js/stock-options-volatility.js", "./js/stock-options-surfaces.js", "./js/stock-options.js",
   "./js/cross-asset-map.js", "./js/init.js", "./js/drawings-core.js",
   "./js/market-model-indicators.js", "./js/volume-profile.js", "./js/hvn-profile.js",
   "./js/killzones.js", "./js/ict-2022.js", "./js/crt.js", "./js/tpo.js",

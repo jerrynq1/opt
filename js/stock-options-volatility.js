@@ -1,7 +1,7 @@
 /* ================= STOCK OPTIONS VOLATILITY ANALYTICS =================
    Pure IV/skew/term-structure calculations for the Binance Equity Options UI.
    Provider IV is preferred. Mid-derived BSM IV is an explicitly labelled fallback.
-   Rates/dividend yield are assumed zero only for model-derived delta/IV fallback.
+   Risk-free rate is an explicit r=0 fallback; QQQ uses the supplied 0.45% continuous dividend-yield assumption, GLD 0%.
 */
 (function (root, factory) {
   'use strict';
@@ -78,54 +78,105 @@
     return 0.5 * (1 + erf(x / Math.SQRT2));
   }
 
-  function d1Value(spot, strike, time, sigma) {
-    if (!(spot > 0 && strike > 0 && time > 0 && sigma > 0)) return null;
-    return (Math.log(spot / strike) + 0.5 * sigma * sigma * time) / (sigma * Math.sqrt(time));
+  function d1Value(spot, strike, time, sigma, rate = 0, dividendYield = 0) {
+    if (!(spot > 0 && strike > 0 && time > 0 && sigma > 0) || !Number.isFinite(rate) || !Number.isFinite(dividendYield)) return null;
+    return (Math.log(spot / strike) + (rate - dividendYield + 0.5 * sigma * sigma) * time) / (sigma * Math.sqrt(time));
   }
 
-  function bsmDelta(spot, strike, time, sigma, side) {
-    const d1 = d1Value(spot, strike, time, sigma);
+  function normalPdf(x) {
+    return Number.isFinite(x) ? Math.exp(-0.5 * x * x) / SQRT_2PI : null;
+  }
+
+  function bsmDelta(spot, strike, time, sigma, side, rate = 0, dividendYield = 0) {
+    if (side !== 'C' && side !== 'P') return null;
+    const d1 = d1Value(spot, strike, time, sigma, rate, dividendYield);
     if (d1 === null) return null;
-    const callDelta = cdf(d1); // r = q = 0 approximation
-    return side === 'P' ? callDelta - 1 : callDelta;
+    const discountedCallDelta = Math.exp(-dividendYield * time) * cdf(d1);
+    return side === 'P'
+      ? Math.exp(-dividendYield * time) * (cdf(d1) - 1)
+      : discountedCallDelta;
   }
 
-  function bsmPrice(spot, strike, time, sigma, side) {
-    if (!(spot > 0 && strike > 0 && time > 0 && sigma > 0)) return null;
+  function bsmPrice(spot, strike, time, sigma, side, rate = 0, dividendYield = 0) {
+    if (!(spot > 0 && strike > 0 && time > 0 && sigma > 0) || !['C', 'P'].includes(side) || !Number.isFinite(rate) || !Number.isFinite(dividendYield)) return null;
     const rootTime = Math.sqrt(time);
-    const d1 = (Math.log(spot / strike) + 0.5 * sigma * sigma * time) / (sigma * rootTime);
+    const d1 = d1Value(spot, strike, time, sigma, rate, dividendYield);
+    if (d1 === null) return null;
     const d2 = d1 - sigma * rootTime;
+    const spotDiscount = Math.exp(-dividendYield * time);
+    const strikeDiscount = Math.exp(-rate * time);
     return side === 'P'
-      ? strike * cdf(-d2) - spot * cdf(-d1)
-      : spot * cdf(d1) - strike * cdf(d2);
+      ? strike * strikeDiscount * cdf(-d2) - spot * spotDiscount * cdf(-d1)
+      : spot * spotDiscount * cdf(d1) - strike * strikeDiscount * cdf(d2);
+  }
+
+  // Continuous annual dividend-yield assumptions supplied for the two ETF underlyings.
+  // These are used only when QuantLab must derive model Greeks; provider Greeks remain preferred elsewhere.
+  function dividendYieldForSymbol(symbol = '') {
+    const key = String(symbol || '').trim().toUpperCase();
+    if (key === 'QQQ') return 0.0045;
+    if (key === 'GLD') return 0;
+    return 0;
+  }
+
+  // Vanna = d(Delta)/d(sigma), where sigma is decimal volatility (1.00 = 100 vol points).
+  // Charm is d(Delta)/d(calendar time): the change in Delta as the clock advances and T decays.
+  // Returned Charm is per year; callers convert to per-calendar-day exposure explicitly.
+  function bsmVannaCharm(spot, strike, time, sigma, side, rate = 0, dividendYield = 0) {
+    if (!(spot > 0 && strike > 0 && time > 0 && sigma > 0) || !['C', 'P'].includes(side) || !Number.isFinite(rate) || !Number.isFinite(dividendYield)) return null;
+    const rootTime = Math.sqrt(time);
+    const d1 = d1Value(spot, strike, time, sigma, rate, dividendYield);
+    if (d1 === null) return null;
+    const d2 = d1 - sigma * rootTime;
+    const discount = Math.exp(-dividendYield * time);
+    const pdf = normalPdf(d1);
+    if (pdf === null) return null;
+    const vanna = -discount * pdf * d2 / sigma;
+    const timeTerm = (2 * (rate - dividendYield) * time - d2 * sigma * rootTime) / (2 * time * sigma * rootTime);
+    const charm = side === 'C'
+      ? dividendYield * discount * cdf(d1) - discount * pdf * timeTerm
+      : -dividendYield * discount * cdf(-d1) - discount * pdf * timeTerm;
+    const delta = side === 'C' ? discount * cdf(d1) : discount * (cdf(d1) - 1);
+    if (![vanna, charm, delta].every(Number.isFinite)) return null;
+    return { vanna, charm, delta, d1, d2, vannaUnit: 'delta per 1.00 decimal volatility', charmUnit: 'delta per calendar year' };
   }
 
   function quoteMid(q) {
     const directMid = n(q?.mid);
     const bid = n(q?.bid), ask = n(q?.ask);
-    if (bid !== null && ask !== null && bid > 0 && ask >= bid) {
-      // Do not invert a provider Mid that contradicts its own two-sided book.
-      // A valid in-book Mid is retained; otherwise use the contemporaneous NBBO midpoint.
+    const hasBid = bid !== null, hasAsk = ask !== null;
+    if (hasBid || hasAsk) {
+      // Once a book is present, require a valid two-sided NBBO. Do not fall back
+      // to a stale/indicative Mid when one side is zero, missing or crossed.
+      if (!hasBid || !hasAsk || bid <= 0 || ask <= 0 || ask < bid) return null;
       if (directMid !== null && directMid > 0 && directMid >= bid && directMid <= ask) {
         return { price: directMid, source: 'mid' };
       }
       const midpoint = (bid + ask) / 2;
       return midpoint > 0 ? { price: midpoint, source: 'bid-ask midpoint' } : null;
     }
+    // A standalone positive Mid can be used only when the feed supplies no book fields.
     if (directMid !== null && directMid > 0) return { price: directMid, source: 'mid' };
     return null;
   }
 
-  function impliedVolFromMid(price, spot, strike, time, side) {
+  function impliedVolFromMid(price, spot, strike, time, side, rate = 0, dividendYield = 0) {
     if (!(price > 0 && spot > 0 && strike > 0 && time > 0 && (side === 'C' || side === 'P'))) return null;
-    const intrinsic = side === 'C' ? Math.max(spot - strike, 0) : Math.max(strike - spot, 0);
-    if (price + Math.max(0.01, spot * 1e-6) < intrinsic) return null;
+    // European BSM lower bound must use discounted spot/strike with q/r;
+    // raw intrinsic (S-K or K-S) is not correct when carry is non-zero.
+    const discountedSpot = spot * Math.exp(-dividendYield * time);
+    const discountedStrike = strike * Math.exp(-rate * time);
+    const lowerBound = side === 'C'
+      ? Math.max(discountedSpot - discountedStrike, 0)
+      : Math.max(discountedStrike - discountedSpot, 0);
+    const boundTolerance = Math.max(1e-8, Math.abs(lowerBound) * 1e-10);
+    if (price + boundTolerance < lowerBound) return null;
     let low = 0.0001, high = 5;
-    const maxPrice = bsmPrice(spot, strike, time, high, side);
+    const maxPrice = bsmPrice(spot, strike, time, high, side, rate, dividendYield);
     if (maxPrice === null || price > maxPrice) return null;
     for (let i = 0; i < 72; i++) {
       const mid = (low + high) / 2;
-      const model = bsmPrice(spot, strike, time, mid, side);
+      const model = bsmPrice(spot, strike, time, mid, side, rate, dividendYield);
       if (model === null) return null;
       if (model < price) low = mid;
       else high = mid;
@@ -134,12 +185,12 @@
     return Number.isFinite(sigma) && sigma > 0.0001001 && sigma <= 5 ? sigma : null;
   }
 
-  function resolveQuoteIV(q, spot, time) {
+  function resolveQuoteIV(q, spot, time, rate = 0, dividendYield = 0) {
     const provider = ivSigma(q?.iv);
     if (provider !== null) return { iv: provider, source: 'provider', providerSource: q?.providerIVSource || 'mark' };
     const mid = quoteMid(q);
     if (!mid) return { iv: null, source: 'missing' };
-    const derived = impliedVolFromMid(mid.price, spot, Number(q.strike), time, q.side);
+    const derived = impliedVolFromMid(mid.price, spot, Number(q.strike), time, q.side, rate, dividendYield);
     return derived === null
       ? { iv: null, source: 'missing' }
       : { iv: derived, source: 'mid-derived' };
@@ -202,9 +253,9 @@
     return q.side === 'P' ? -Math.abs(delta) : Math.abs(delta);
   }
 
-  function normalizedDelta(q, spot, time, sigma) {
+  function normalizedDelta(q, spot, time, sigma, rate = 0, dividendYield = 0) {
     const provider = normalizedProviderDelta(q);
-    return provider !== null ? provider : bsmDelta(spot, Number(q.strike), time, sigma, q.side);
+    return provider !== null ? provider : bsmDelta(spot, Number(q.strike), time, sigma, q.side, rate, dividendYield);
   }
 
   function strikeFromOcc(symbol) {
@@ -219,13 +270,13 @@
       .sort((a, b) => a.x - b.x);
     if (!valid.length) return null;
 
-    const exact = valid.find(row => Math.abs(row.x) < 1e-9);
-    if (exact) return exact.iv;
+    const exactRows = valid.filter(row => Math.abs(row.x) < 1e-9);
+    if (exactRows.length) return average(exactRows.map(row => row.iv));
 
     const lower = [...valid].reverse().find(row => row.x < 0);
     const upper = valid.find(row => row.x > 0);
-    // ATM must be bracketed by observations around Spot. Do not silently label a
-    // far-OTM/ITM single quote as ATM when one side of the smile is absent.
+    // ATM must be bracketed by observations around the supplied target (the
+    // caller passes the Forward). Do not label a far-wing single quote as ATM.
     if (!lower || !upper) return null;
     const width = upper.x - lower.x;
     if (!(width > 0) || width > maxBracketLogWidth) return null;
@@ -276,8 +327,10 @@
     return { iv, strike, delta: wantedSign * target, method: 'delta-interpolated' };
   }
 
-  function expiryMetrics(expiry, quotes, spot, now, symbol = '') {
+  function expiryMetrics(expiry, quotes, spot, now, symbol = '', metadata = {}) {
     const time = timeToExpiry(expiry, now, symbol);
+    const rate = 0; // no live risk-free curve is supplied by the current option feed.
+    const dividendYield = dividendYieldForSymbol(symbol);
     if (!(spot > 0) || time === null) return null;
     const valid = [];
     let providerIVCount = 0, midDerivedIVCount = 0, providerDeltaCount = 0, modelDeltaCount = 0;
@@ -286,10 +339,10 @@
       const side = raw?.side === 'C' || raw?.side === 'P' ? raw.side : null;
       if (!(strike > 0) || !side) continue;
       const q = { ...raw, strike, side };
-      const resolved = resolveQuoteIV(q, spot, time);
+      const resolved = resolveQuoteIV(q, spot, time, rate, dividendYield);
       if (resolved.iv === null) continue;
       const suppliedDelta = normalizedProviderDelta(q);
-      const delta = suppliedDelta !== null ? suppliedDelta : bsmDelta(spot, strike, time, resolved.iv, side);
+      const delta = suppliedDelta !== null ? suppliedDelta : bsmDelta(spot, strike, time, resolved.iv, side, rate, dividendYield);
       if (resolved.source === 'provider') providerIVCount++;
       else midDerivedIVCount++;
       if (suppliedDelta !== null) providerDeltaCount++;
@@ -299,8 +352,11 @@
 
     const calls = valid.filter(row => row.side === 'C');
     const puts = valid.filter(row => row.side === 'P');
-    const atmCall = interpolateAtSpot(calls, spot);
-    const atmPut = interpolateAtSpot(puts, spot);
+    // ATM for an option smile is defined at the forward, not raw spot. With the
+    // current r=0 fallback this is S*exp(-qT); the supplied QQQ yield is included.
+    const forward = spot * Math.exp((rate - dividendYield) * time);
+    const atmCall = interpolateAtSpot(calls, forward);
+    const atmPut = interpolateAtSpot(puts, forward);
     const atmValues = [atmCall, atmPut].filter(value => Number.isFinite(value));
     const atmIV = atmValues.length ? atmValues.reduce((sum, value) => sum + value, 0) / atmValues.length : null;
     const put25 = interpolateAtDelta(valid, 'P', 0.25);
@@ -355,8 +411,8 @@
     const cleanIVCount = skewCurve.reduce((sum, item) => sum + item.callCleanCount + item.putCleanCount, 0);
     const rawSkewIVCount = skewCurve.reduce((sum, item) => sum + item.callCount + item.putCount, 0);
     const cleanValid = valid.filter(row => row.skewClean);
-    const cleanAtmCall = interpolateAtSpot(cleanValid.filter(row => row.side === 'C'), spot);
-    const cleanAtmPut = interpolateAtSpot(cleanValid.filter(row => row.side === 'P'), spot);
+    const cleanAtmCall = interpolateAtSpot(cleanValid.filter(row => row.side === 'C'), forward);
+    const cleanAtmPut = interpolateAtSpot(cleanValid.filter(row => row.side === 'P'), forward);
     const cleanAtmValues = [cleanAtmCall, cleanAtmPut].filter(Number.isFinite);
     const cleanAtmIV = cleanAtmValues.length
       ? cleanAtmValues.reduce((sum, value) => sum + value, 0) / cleanAtmValues.length : null;
@@ -367,11 +423,16 @@
     const expectedMovePct = atmIV !== null ? atmIV * Math.sqrt(time) : null;
 
     return {
-      expiry, time, dte, quoteCount: Array.isArray(quotes) ? quotes.length : 0,
+      expiry, time, dte, rate, dividendYield, forward,
+      chainComplete: typeof metadata.complete === 'boolean' ? metadata.complete : null,
+      expectedContracts: Number.isFinite(Number(metadata.expectedContracts)) ? Number(metadata.expectedContracts) : null,
+      loadedContracts: Number.isFinite(Number(metadata.loadedContracts)) ? Number(metadata.loadedContracts) : (Array.isArray(quotes) ? quotes.length : 0),
+      chainStatus: metadata.status || (metadata.complete === true ? 'complete' : metadata.complete === false ? 'partial' : 'unmarked'),
+      quoteCount: Array.isArray(quotes) ? quotes.length : 0,
       ivCount: valid.length, providerIVCount, midDerivedIVCount, providerDeltaCount, modelDeltaCount,
       ivCoverage: quotes?.length ? valid.length / quotes.length : 0,
       atmIV, atmCallIV: atmCall, atmPutIV: atmPut, atmSideCount,
-      atmMethod: atmSideCount === 2 ? 'call-put-bracketed' : atmSideCount === 1 ? 'single-side-bracketed' : 'unavailable',
+      atmMethod: atmSideCount === 2 ? 'call-put-forward-bracketed' : atmSideCount === 1 ? 'single-side-forward-bracketed' : 'unavailable',
       put10IV: put10?.iv ?? null, put25IV: put25?.iv ?? null,
       call25IV: call25?.iv ?? null, call10IV: call10?.iv ?? null,
       put25Delta: put25?.delta ?? null, call25Delta: call25?.delta ?? null,
@@ -389,16 +450,47 @@
     };
   }
 
+  // Constant-maturity ATM IV is interpolated in total variance (IV² × T), not IV.
+  // It is only available when two loaded expiries bracket the target tenor; no extrapolation.
+  function constantMaturity(rows = [], tenorsDays = [7, 14, 30, 60], options = {}) {
+    const maxBracketDays = Number.isFinite(options.maxBracketDays) ? Math.max(1, options.maxBracketDays) : 60;
+    const points = (Array.isArray(rows) ? rows : [])
+      .filter(row => row && row.chainComplete !== false && row.atmIV !== null && Number.isFinite(row.atmIV) && row.atmIV > 0 && row.atmSideCount === 2 && row.dte > 0)
+      .map(row => ({ dte: Number(row.dte), iv: Number(row.atmIV), expiry: row.expiry, time: Number(row.time) }))
+      .filter(row => Number.isFinite(row.dte) && row.dte > 0 && Number.isFinite(row.time) && row.time > 0)
+      .sort((a, b) => a.dte - b.dte);
+    return (Array.isArray(tenorsDays) ? tenorsDays : []).map(days => {
+      const targetDays = Number(days), targetTime = targetDays / 365.25;
+      if (!(targetDays > 0)) return { days: targetDays, iv: null, status: 'invalid-tenor', sources: [] };
+      const exact = points.find(point => Math.abs(point.dte - targetDays) < 0.25);
+      if (exact) return { days: targetDays, iv: exact.iv, status: 'observed-near-tenor', sources: [exact.expiry], bracketDays: 0 };
+      const lower = [...points].reverse().find(point => point.dte < targetDays);
+      const upper = points.find(point => point.dte > targetDays);
+      if (!lower || !upper) return { days: targetDays, iv: null, status: 'unbracketed', sources: [lower?.expiry, upper?.expiry].filter(Boolean), reason: 'Không ngoại suy ngoài các expiry đã tải.' };
+      const gap = upper.dte - lower.dte;
+      if (gap > maxBracketDays) return { days: targetDays, iv: null, status: 'wide-bracket', sources: [lower.expiry, upper.expiry], bracketDays: gap, reason: `Khoảng expiry ${gap.toFixed(1)} ngày quá rộng.` };
+      const weight = (targetDays - lower.dte) / gap;
+      const lowerVariance = lower.iv * lower.iv * lower.time;
+      const upperVariance = upper.iv * upper.iv * upper.time;
+      const totalVariance = lowerVariance + (upperVariance - lowerVariance) * weight;
+      const iv = totalVariance > 0 && targetTime > 0 ? Math.sqrt(totalVariance / targetTime) : null;
+      return { days: targetDays, iv: Number.isFinite(iv) ? iv : null, status: 'interpolated-total-variance', sources: [lower.expiry, upper.expiry], bracketDays: gap, weight, totalVariance };
+    });
+  }
+
   function calculate({ spot, symbol = '', expiries = [], now = Date.now() } = {}) {
     const underlying = n(spot);
     const underlyingSymbol = String(symbol || '').toUpperCase();
     const rows = (Array.isArray(expiries) ? expiries : [])
-      .map(item => expiryMetrics(item?.expiry, item?.quotes, underlying, now, underlyingSymbol))
+      .map(item => expiryMetrics(item?.expiry, item?.quotes, underlying, now, underlyingSymbol, item || {}))
       .filter(Boolean)
       .sort((a, b) => a.expiry.localeCompare(b.expiry));
     return {
       spot: underlying,
+      riskFreeRate: 0,
+      dividendYield: dividendYieldForSymbol(underlyingSymbol),
       expiries: rows,
+      constantMaturity: constantMaturity(rows),
       loadedExpiries: rows.length,
       quoteCount: rows.reduce((sum, row) => sum + row.quoteCount, 0),
       ivCount: rows.reduce((sum, row) => sum + row.ivCount, 0),
@@ -407,5 +499,5 @@
     };
   }
 
-  return { calculate, ivSigma, timeToExpiry, expiryAtNewYorkClose, bsmDelta, bsmPrice, impliedVolFromMid, normalizedProviderDelta, interpolateAtSpot, interpolateAtDelta };
+  return { calculate, constantMaturity, ivSigma, timeToExpiry, expiryAtNewYorkClose, bsmDelta, bsmPrice, impliedVolFromMid, resolveQuoteIV, bsmVannaCharm, dividendYieldForSymbol, normalizedProviderDelta, interpolateAtSpot, interpolateAtDelta };
 });

@@ -24,6 +24,10 @@ test('iOS install metadata and bottom navigation mount point are present', () =>
     'apple-mobile-web-app-title', 'rel="manifest"', 'apple-touch-icon',
     'id="mobileBottomNav"', 'id="pwaHelpDialog"', 'id="pwaInstallButton"'
   ]) assert.ok(html.includes(token), `missing ${token}`);
+  assert.ok(html.includes('js/stock-options-volatility.js'));
+  assert.ok(html.includes('js/stock-options-surfaces.js'));
+  assert.ok(html.indexOf('js/stock-options-volatility.js') < html.indexOf('js/stock-options.js'));
+  assert.ok(html.indexOf('js/stock-options-surfaces.js') < html.indexOf('js/stock-options.js'));
   assert.ok(html.includes('js/pwa.js'));
 });
 
@@ -36,7 +40,7 @@ test('mobile tab order is QQQ, GLD, Chart, Indicators, Connection with Chart cen
 
 test('PWA service worker precaches app shell but does not cache live trading APIs', () => {
   const sw = read('sw.js');
-  assert.match(sw, /ict-quantlab-shell-v30/);
+  assert.match(sw, /ict-quantlab-shell-v31/);
   assert.match(sw, /\"\.\/js\/pwa\.js\"/);
   assert.match(sw, /if \(request\.method !== \"GET\"\) return/);
   assert.match(sw, /Market APIs and cTrader sockets remain live-only/);

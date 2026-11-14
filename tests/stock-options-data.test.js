@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const volatilityApi = require('../js/stock-options-volatility.js');
 
 function loadStockOptionsHelpers() {
   let source = fs.readFileSync(path.join(__dirname, '..', 'js', 'stock-options.js'), 'utf8');
@@ -20,7 +21,7 @@ function loadStockOptionsHelpers() {
     if (!elements.has(id)) elements.set(id, { id, value: 'gamma', innerHTML: '', textContent: '' });
     return elements.get(id);
   }};
-  const window = {};
+  const window = { StockOptionsVolatility: volatilityApi };
   vm.runInNewContext(source, { window, document, location: { port: '8787' }, console }, { filename: 'stock-options.js' });
   return { ...window.__stockOptionsTest, elements };
 }
@@ -108,6 +109,20 @@ test('exposure uses the actual multiplier supplied by Binance', () => {
   assert.equal(result.multiplierMissing, 0);
 });
 
+
+test('DEX normalizes provider Delta expressed in percentage units', () => {
+  const session = {
+    price: 100, contracts: [{ os: 'QQQ261110C00100000' }, { os: 'QQQ261110P00100000' }],
+    quotes: new Map([
+      ['c', { optionSymbol:'c', side:'C', strike:100, multiplier:10, openInterest:10, volume:0, delta:50 }],
+      ['p', { optionSymbol:'p', side:'P', strike:100, multiplier:10, openInterest:10, volume:0, delta:-40 }]
+    ])
+  };
+  const result = helpers.calc(session);
+  assert.equal(result.dist[0].callDex, 5000);
+  assert.equal(result.dist[0].putDex, 4000);
+  assert.equal(result.delta, 1000);
+});
 
 test('bilateral exposure keeps Call and Put Greeks separate for the mirrored profile', () => {
   const session = {
@@ -376,15 +391,18 @@ test('Gamma Flip chooses the crossing nearest to the current Spot from cached BS
   assert.equal(helpers.calc(session,now).gammaFlip,95);
 });
 
-test('Gamma Flip BSM cache key ignores option last/bid/ask ticks but changes with IV or OI', () => {
+test('Gamma Flip cache key ignores last ticks, but tracks provider IV/OI and mid inputs when IV is derived', () => {
   const base={optionSymbol:'c',side:'C',strike:100,multiplier:100,openInterest:10,iv:.25,last:1,bid:.9,ask:1.1};
   const initial=helpers.gammaFlipInputKey([base]);
   const quoteTick=helpers.gammaFlipInputKey([{...base,last:1.2,bid:1.1,ask:1.3}]);
   const ivUpdate=helpers.gammaFlipInputKey([{...base,iv:.3}]);
   const oiUpdate=helpers.gammaFlipInputKey([{...base,openInterest:11}]);
-  assert.equal(initial,quoteTick);
+  assert.equal(initial,quoteTick, 'a provider-IV contract does not depend on changing option bid/ask for BSM repricing');
   assert.notEqual(initial,ivUpdate);
   assert.notEqual(initial,oiUpdate);
+  const derivedBase={...base,iv:null,bid:.9,ask:1.1,mid:1};
+  const derivedKey=helpers.gammaFlipInputKey([derivedBase]);
+  assert.notEqual(derivedKey,helpers.gammaFlipInputKey([{...derivedBase,bid:.95,ask:1.15}]), 'NBBO changes invalidate mid-derived Gamma Flip cache');
 });
 
 test('Gamma Flip stays unavailable when any contract lacks IV even if live Gamma is present', () => {
@@ -398,6 +416,19 @@ test('Gamma Flip stays unavailable when any contract lacks IV even if live Gamma
   assert.equal(result.gammaFlipComplete,false);
   assert.equal(result.gammaFlip,null);
   assert.equal(result.gammaFlipCoverage,.5);
+});
+
+test('Gamma Flip can derive IV from a valid option mid when Provider IV is absent', () => {
+  const expiry='2026-11-20', now=Date.parse('2026-11-12T12:00:00Z');
+  const t=volatilityApi.timeToExpiry(expiry,now,'QQQ');
+  const rows=[
+    {optionSymbol:'QQQ261120C00110000',side:'C',strike:110,multiplier:100,openInterest:100,iv:null,mid:volatilityApi.bsmPrice(100,110,t,.30,'C',0,.0045)},
+    {optionSymbol:'QQQ261120P00090000',side:'P',strike:90,multiplier:100,openInterest:100,iv:null,mid:volatilityApi.bsmPrice(100,90,t,.30,'P',0,.0045)}
+  ];
+  const result=helpers.gammaFlipOf(rows,100,expiry,now,'QQQ');
+  assert.equal(result.complete,true);
+  assert.ok(result.level>90&&result.level<100);
+  assert.equal(result.coverage,1);
 });
 
 test('Zero Gamma uses the 16:00 America/New_York option expiry close for DTE', () => {

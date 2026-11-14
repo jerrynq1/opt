@@ -152,7 +152,34 @@
           <div class="so-vol-panel-title"><div><h4>IV Term Structure</h4><small>ATM IV theo thời gian đáo hạn</small></div><span id="${p}-vol-term-count">1 expiry</span></div>
           <div class="so-vol-term-chart" id="${p}-vol-term"><div class="opt-empty">Chọn Analysis Scope → Weekly hoặc All Expiries để xem đường cong nhiều kỳ hạn.</div></div>
         </div>
-        <p class="so-vol-disclaimer" id="${p}-vol-note">Risk Reversal = IV Call 25Δ − IV Put 25Δ. Butterfly = trung bình hai IV 25Δ trừ ATM IV. Put Skew / Call Skew lần lượt là IV cánh Put / Call trừ ATM IV. Nếu thiếu delta provider, delta được xấp xỉ bằng Black–Scholes với r = q = 0.</p>
+        <div class="so-vol-cm-wrap">
+          <div class="so-vol-panel-title"><div><h4>Constant Maturity IV</h4><small>7D · 14D · 30D · 60D · nội suy Total Variance, không ngoại suy</small></div><span id="${p}-vol-cm-meta">—</span></div>
+          <div class="so-vol-cm-grid" id="${p}-vol-cm"><div class="so-vol-empty">Chọn Weekly hoặc All Expiries để tải đủ expiry bao quanh các tenor chuẩn.</div></div>
+        </div>
+        <p class="so-vol-disclaimer" id="${p}-vol-note">Risk Reversal = IV Call 25Δ − IV Put 25Δ. Butterfly = trung bình hai IV 25Δ trừ ATM IV. Put Skew / Call Skew lần lượt là IV cánh Put / Call trừ ATM IV. Nếu thiếu delta provider, delta được xấp xỉ bằng Black–Scholes với r = 0%; q = 0.45% cho QQQ và 0% cho GLD.</p>
+      </section>
+      <section class="card so-surface-lab" aria-label="Multi-expiry option surfaces">
+        <div class="so-surface-head">
+          <div><span class="so-vol-eyebrow">C · MULTI-EXPIRY SURFACES</span><h3>Option Surface Lab</h3><p>Expiry × moneyness · chỉ dùng các chain đã tải trong Analysis Scope.</p></div>
+          <span class="so-surface-status" id="${p}-surface-status">Đang chờ dữ liệu…</span>
+        </div>
+        <div class="so-surface-tabs" id="${p}-surface-tabs" role="tablist" aria-label="Chọn loại surface">
+          <button type="button" data-surface-tab="iv" class="is-active" role="tab" aria-selected="true">IV Surface</button>
+          <button type="button" data-surface-tab="exposure" role="tab" aria-selected="false">Exposure Surface</button>
+          <button type="button" data-surface-tab="volume" role="tab" aria-selected="false">Volume Surface</button>
+          <button type="button" data-surface-tab="oi" role="tab" aria-selected="false">OI Surface</button>
+        </div>
+        <div class="so-surface-controls">
+          <label id="${p}-surface-exposure-control">EXPOSURE METRIC
+            <select id="${p}-surface-exposure-metric"><option value="gamma">GEX · Gamma</option><option value="delta">DEX · Delta</option><option value="vega">Vega</option><option value="theta">Theta</option><option value="vanna">Vanna</option><option value="charm">Charm</option></select>
+          </label>
+          <label>SIDE
+            <select id="${p}-surface-side"><option value="both">Call + Put</option><option value="call">Calls only</option><option value="put">Puts only</option></select>
+          </label>
+          <span class="so-surface-axis-note">X: Strike / Spot moneyness · Y: Expiry</span>
+        </div>
+        <div class="so-surface-heatmap" id="${p}-surface-heatmap"><div class="so-vol-empty">Chọn Analysis Scope → Weekly hoặc All Expiries để tạo surface nhiều kỳ hạn.</div></div>
+        <div class="so-surface-foot" id="${p}-surface-foot">Ô trống = chưa có quote hợp lệ trong bucket. Surface là snapshot, không phải dữ liệu giao dịch Long/Short.</div>
       </section>
       <div class="card so-level-card">
         <div class="opt-card-title"><div><h3>Key Levels</h3><small id="${p}-levels-sub">Ước lượng từ OI và Greeks của expiry được chọn</small></div><button class="btn ghost sm" type="button" id="${p}-copy">Copy Levels</button></div>
@@ -169,7 +196,7 @@
             <div class="so-exposure-windowbar">
               <div class="so-exposure-windowtitle"><span class="so-exposure-dots"><i></i><i></i><i></i></span><span>EXPOSURE</span></div>
               <div class="so-exposure-windowcontrols"><span class="so-exposure-feed">${cfg.symbol} · OPTIONS</span>
-                <select id="${p}-exposure-metric" class="opt-exposure-select" aria-label="Chọn loại Exposure"><option value="gamma">GEX · Gamma</option><option value="delta">DEX · Delta</option><option value="vega">VGEX · Vega</option><option value="theta">THEX · Theta</option></select>
+                <select id="${p}-exposure-metric" class="opt-exposure-select" aria-label="Chọn loại Exposure"><option value="gamma">GEX · Gamma</option><option value="delta">DEX · Delta</option><option value="vega">VGEX · Vega</option><option value="theta">THEX · Theta</option><option value="vanna">VANNA · Vanna</option><option value="charm">CHARM · Charm</option></select>
               </div>
             </div>
             <div class="so-exposure-caption"><div><strong id="${p}-exposure-title">GAMMA EXPOSURE</strong><span id="${p}-exposure-subtitle">Calls → right · Puts ← left</span></div><small id="${p}-exposure-units">USD notional per 1% move</small></div>
@@ -202,14 +229,16 @@
         <div class="opt-method" id="${p}-method" hidden>
           <p><strong>Nguồn Option Chain:</strong> Binance Stock Options <code>option/chain-symbols</code> liệt kê OCC symbols theo ngày đáo hạn; <code>get-option-quote</code> trả Bid/Ask/Mid, volume, OI, multiplier, IV và Greeks.</p>
           <p><strong>Contract size:</strong> multiplier được đọc từ quote hoặc contract metadata. Với OCC root QQQ/GLD chuẩn, nếu cả hai nguồn không gửi multiplier, QuantLab ghi rõ giả định chuẩn 100 shares; adjusted OCC roots không dùng giả định này. OI hoặc Volume trả <code>null</code> được giả định bằng 0 cho analytics khi OCC quote đã nhận đầy đủ; giá trị thô vẫn giữ null và được đánh dấu assumed-zero cho tới khi Binance gửi số liệu thực.</p>
-          <p><strong>GEX:</strong> Σ(Gamma × OI × multiplier × Spot² × 0.01), Call dương và Put âm. Nếu Binance không trả Gamma cho contract, QuantLab tự tính Gamma bằng Black–Scholes từ IV, strike, Spot và DTE (r = q = 0); chỉ khi thiếu cả Gamma provider lẫn IV hợp lệ thì contract đó mới bị tính là thiếu GEX. <strong>DEX:</strong> Σ(Delta × OI × multiplier × Spot). Vega và Theta tổng hợp từ Greek × OI × multiplier.</p>
+          <p><strong>GEX:</strong> Σ(Gamma × OI × multiplier × Spot² × 0.01), Call dương và Put âm. Nếu Binance không trả Gamma cho contract, QuantLab tự tính Gamma bằng Black–Scholes từ IV, strike, Spot và DTE (r = 0%; q theo underlying: QQQ 0.45%, GLD 0%); chỉ khi thiếu cả Gamma provider lẫn IV hợp lệ thì contract đó mới bị tính là thiếu GEX. <strong>DEX:</strong> Σ(Delta × OI × multiplier × Spot). Vega và Theta tổng hợp từ Greek × OI × multiplier. <strong>Vanna Exposure:</strong> BSM ∂Delta/∂σ × OI × multiplier × Spot × 0.01, đơn vị USD delta-notional thay đổi trên mỗi +1 vol point. <strong>Charm Exposure:</strong> BSM ∂Delta/∂calendar-time × OI × multiplier × Spot / 365.25, đơn vị USD delta-notional thay đổi mỗi ngày lịch. Vanna/Charm không áp quy tắc Call+/Put−; OI không xác định holder Long/Short.</p>
           <p><strong>Key Levels:</strong> Call/Put OI Wall được tính riêng từ OI lớn nhất của từng phía. CW là strike có Net GEX dương lớn nhất; PW là strike có Net GEX âm lớn nhất theo trị tuyệt đối. Net GEX theo strike được tự tính từ Gamma provider hoặc Gamma BSM suy ra từ IV nếu provider bỏ trống. GEX 1–10 xếp các strike còn lại theo |Net GEX| sau khi loại CW, PW, Call/Put OI Wall, Max Pain và Gamma Flip nếu trùng strike. GEX Ratio = tổng Call GEX / |tổng Put GEX|. Ratio > 1: Call Gamma trội, thiên hướng ổn định và biên độ hẹp; ratio < 1: Put Gamma trội, rủi ro biến động mạnh và trượt giá cao. Đây là heuristic theo quy ước Call+/Put−, không xác nhận dealer positioning.</p>
-          <p><strong>Gamma Flip / Zero Gamma:</strong> Giữ OI, IV và DTE cố định; giả định giá underlying tại từng mức, tính lại Gamma từng hợp đồng bằng Black–Scholes, sau đó tổng hợp Net GEX = Σ(Call +, Put −) × OI × multiplier × giá giả định² × 0.01. Gamma Flip / Zero Gamma là nghiệm làm tổng Net GEX đổi dấu. Mô hình dùng r = 0, q = 0, đáo hạn lúc 16:00 America/New_York và nội suy/bisection quanh điểm đổi dấu. Đây là mô hình ước lượng theo quy ước Call+/Put−, không phải vị thế dealer đã xác minh. Cần OI, multiplier, IV và expiry đầy đủ.</p>
+          <p><strong>Gamma Flip / Zero Gamma:</strong> Giữ OI, IV và DTE cố định; giả định giá underlying tại từng mức, tính lại Gamma từng hợp đồng bằng Black–Scholes, sau đó tổng hợp Net GEX = Σ(Call +, Put −) × OI × multiplier × giá giả định² × 0.01. Gamma Flip / Zero Gamma là nghiệm làm tổng Net GEX đổi dấu. Mô hình dùng r = 0%, q = 0.45% cho QQQ và 0% cho GLD; GLD/QQQ dùng mốc 16:15 ET, mã thông thường 16:00 ET; nội suy/bisection quanh điểm đổi dấu. Đây là mô hình ước lượng theo quy ước Call+/Put−, không phải vị thế dealer đã xác minh. Cần OI, multiplier, IV và expiry đầy đủ.</p>
           <p><strong>Max Pain:</strong> với mỗi giá settlement ứng viên K, tính Σ[Call OI × multiplier × max(K − strike, 0)] + Σ[Put OI × multiplier × max(strike − K, 0)] trên toàn bộ hợp đồng của đúng expiry. Chọn settlement có tổng payout thấp nhất. Nếu nhiều strike cùng mức thấp nhất, QuantLab hiển thị strike đại diện thấp nhất và công bố toàn bộ các strike đồng hạng. Chỉ tính khi Option Chain hoàn tất; OI null trên quote đã nhận được giả định bằng 0, và mọi contract có OI dương phải có multiplier hợp lệ. Không cộng volume hoặc premium vào Max Pain.</p>
           <p><strong>Spot reference:</strong> Binance Equity raw Price Stream <code>/equity/ws/price</code> được dùng làm giá tham chiếu cho KPI, Exposure và các Key Levels.</p>
-          <p><strong>IV Surface & Volatility:</strong> ATM IV được nội suy theo log-moneyness quanh Spot từ Call và Put rồi lấy trung bình hai phía khi có đủ dữ liệu. 25Δ Risk Reversal = IV Call 25Δ − IV Put 25Δ; 25Δ Butterfly = (IV Call 25Δ + IV Put 25Δ)/2 − ATM IV. Put Skew / Call Skew = IV cánh 25Δ tương ứng − ATM IV. Expected Move 1σ ≈ Spot × ATM IV × √T. Term Structure và Surface dùng các expiry đã tải trong Analysis Scope hiện tại; chọn Weekly hoặc All Expiries để mở rộng kỳ hạn. Provider IV được ưu tiên; nếu thiếu, QuantLab có thể suy IV từ Mid bằng Black–Scholes (r=q=0) và gắn nhãn mid-derived. Delta thiếu được ước lượng bằng Black–Scholes. Đây là phép đo smile/skew theo snapshot, không phải volatility surface arbitrage-free; chất lượng phụ thuộc IV/quote coverage và thời điểm feed.</p>
+          <p><strong>Dividend / model carry:</strong> QQQ dùng continuous dividend yield q = 0.45%/năm; GLD q = 0%. Risk-free rate r = 0% là giả định vì feed hiện tại không cung cấp đường cong lãi suất. Các Vanna/Charm model Greeks dùng các carry này; provider Greeks của Binance vẫn được giữ nguyên cho GEX/DEX/Vega/Theta.</p>
+          <p><strong>Option Surface Lab:</strong> Mỗi hàng là expiry, mỗi cột là bucket moneyness theo % so với Spot hiện tại. IV dùng median IV hợp lệ trong bucket; GEX dùng Call+/Put−; DEX giữ Delta tự nhiên; Vanna/Charm là BSM model exposure; Volume/OI là tổng contract trong bucket. Ô thiếu không bị zero-fill. Partial chain được gắn trạng thái partial.</p>
+          <p><strong>IV Surface & Volatility:</strong> ATM IV được nội suy theo log-moneyness quanh Forward F = S·e^((r−q)T) từ Call và Put rồi lấy trung bình hai phía khi có đủ dữ liệu. 25Δ Risk Reversal = IV Call 25Δ − IV Put 25Δ; 25Δ Butterfly = (IV Call 25Δ + IV Put 25Δ)/2 − ATM IV. Put Skew / Call Skew = IV cánh 25Δ tương ứng − ATM IV. Expected Move 1σ ≈ Spot × ATM IV × √T. Constant Maturity IV nội suy Total Variance (IV² × T) giữa hai expiry hoàn chỉnh bao quanh tenor; không ngoại suy và không dùng expiry partial. Provider IV được ưu tiên; nếu thiếu, QuantLab có thể suy IV từ Mid/NBBO bằng Black–Scholes với r=0% và q theo underlying (QQQ 0.45%, GLD 0%), gắn nhãn mid-derived. Delta thiếu được ước lượng bằng cùng giả định carry. Đây là phép đo smile/skew theo snapshot, không phải volatility surface arbitrage-free; chất lượng phụ thuộc IV/quote coverage và thời điểm feed.</p>
           <p><strong>Giả định dữ liệu:</strong> Khi OCC quote đã nhận đầy đủ nhưng Binance trả OI hoặc Volume là <code>null</code>, QuantLab giả định giá trị 0 cho đến khi có số liệu thực. Giá trị thô vẫn được giữ để phân biệt observed zero và assumed zero; khi Binance gửi OI/Volume thực, các tổng OI, GEX, GEX Ratio, Gamma Flip và Max Pain tự tính lại. OCC quote hoàn toàn chưa nhận được vẫn không bị giả định bằng 0. Endpoint quote có thể trả dữ liệu trễ; độ trễ phụ thuộc quyền dữ liệu tài khoản.</p>
-          <p><strong>Không có trong nguồn hiện tại:</strong> option trade prints/flow tape và Vanna/Charm không nằm trong quote response được ghi nhận, nên dashboard không tự ước lượng hoặc hiển thị hai loại dữ liệu này như dữ liệu Binance.</p>
+          <p><strong>Giới hạn dữ liệu:</strong> Binance quote hiện không cung cấp option trade prints/flow tape trong dữ liệu mà QuantLab đọc. Vanna và Charm được QuantLab suy ra bằng Black–Scholes từ IV, DTE, Spot, r=0% và q theo underlying; đây là model Greeks, không phải Provider Greeks. Exposure nhân model Greek với OI và multiplier, nhưng OI không cho biết vị thế Long/Short của holder hay dealer, vì vậy không được diễn giải như dealer positioning đã xác minh.</p>
         </div>
       </div>`;
   }
@@ -881,17 +910,17 @@
     const t=(end-now)/(365.25*86400000);
     return Number.isFinite(t)&&t>0?t:null;
   }
-  function bsmGamma(spot,strike,time,sigma){
-    if(!(spot>0&&strike>0&&time>0&&sigma>0))return null;
+  function bsmGamma(spot,strike,time,sigma,rate=0,dividendYield=0){
+    if(!(spot>0&&strike>0&&time>0&&sigma>0)||!Number.isFinite(rate)||!Number.isFinite(dividendYield))return null;
     const root=Math.sqrt(time),den=sigma*root;
-    const d1=(Math.log(spot/strike)+.5*sigma*sigma*time)/den; // r = q = 0 approximation
-    const gamma=Math.exp(-.5*d1*d1)/(spot*den*Math.sqrt(2*Math.PI));
+    const d1=(Math.log(spot/strike)+(rate-dividendYield+.5*sigma*sigma)*time)/den;
+    const gamma=Math.exp(-dividendYield*time)*Math.exp(-.5*d1*d1)/(spot*den*Math.sqrt(2*Math.PI));
     return Number.isFinite(gamma)?gamma:null;
   }
   // Binance may omit per-contract Gamma even while IV, OI and contract size are
   // present. Derive the missing Greek from IV and time-to-expiry instead of
   // suppressing every GEX-derived level for the expiry.
-  function resolveGamma(q,spot,time){
+  function resolveGamma(q,spot,time,rate=0,dividendYield=0){
     const provider=num(q.gamma);
     // Vanilla-option Gamma is non-negative for both Calls and Puts; direction
     // is applied later from the option side, so normalize signed feeds here.
@@ -899,11 +928,16 @@
     // and is derived from IV when possible.
     if(provider!==null&&Math.abs(provider)>0)return {gamma:Math.abs(provider),source:'provider'};
     const sigma=ivSigma(q.iv);
-    const derived=spot>0&&time!==null&&sigma!==null?bsmGamma(spot,q.strike,time,sigma):null;
+    const derived=spot>0&&time!==null&&sigma!==null?bsmGamma(spot,q.strike,time,sigma,rate,dividendYield):null;
     return derived!==null?{gamma:derived,source:'bsm-iv'}:{gamma:null,source:'missing'};
   }
   function gammaFlipInputKey(rows){
-    return rows.map(q=>[q.optionSymbol||'',q.strike??'',q.side||'',q.openInterest??'',q.multiplier??'',q.iv??''].join(':')).join('|');
+    return rows.map(q=>{
+      const hasProviderIV=ivSigma(q.iv)!==null;
+      // Bid/ask/mid only affect the cache when IV must be derived from a quote.
+      const modelPriceInputs=hasProviderIV?'':[q.bid??'',q.ask??'',q.mid??''].join(':');
+      return [q.optionSymbol||'',q.strike??'',q.side||'',q.openInterest??'',q.multiplier??'',q.iv??'',modelPriceInputs].join(':');
+    }).join('|');
   }
   function gammaFlipOf(rows,spot,expiry,now=Date.now(),symbol=''){
     // Multi-expiry rows carry their own `_expiry`: every contract is repriced with its own DTE.
@@ -911,23 +945,34 @@
     const time=multi?1:yearsToExpiry(expiry,now,symbol);
     if(time===null)return {level:null,complete:false,reason:'Thiếu DTE hợp lệ',coverage:0};
     const timeOf=q=>multi?yearsToExpiry(q._expiry,now,symbol):time;
+    const modelRate=0,modelDividendYield=window.StockOptionsVolatility?.dividendYieldForSymbol?.(symbol)??(/^(QQQ)$/i.test(String(symbol||''))?0.0045:0);
+    const volatilityApi=window.StockOptionsVolatility;
     const valid=rows.filter(q=>Number.isFinite(q.strike)&&q.strike>0&&(q.side==='C'||q.side==='P'));
     const invalidCount=rows.length-valid.length;
     // Received contracts with null OI are treated as zero until Binance reports a value.
     // Zero-OI contracts do not contribute to repriced Net GEX and need no IV/multiplier.
     const invalidOI=valid.filter(q=>q.openInterest!==null&&q.openInterest!==undefined&&(!Number.isFinite(q.openInterest)||q.openInterest<0));
     const active=valid.filter(q=>Number.isFinite(q.openInterest)&&q.openInterest>0);
-    const eligible=active.filter(q=>effectiveMultiplier(q).value!==null&&ivSigma(q.iv)!==null&&timeOf(q)!==null);
+    const sigmaByQuote=new Map(),timeByQuote=new Map(),multiplierByQuote=new Map();
+    for(const q of active){
+      const t=timeOf(q);timeByQuote.set(q,t);
+      const multiplier=effectiveMultiplier(q).value;multiplierByQuote.set(q,multiplier);
+      const resolved=volatilityApi?.resolveQuoteIV&&t!==null
+        ?volatilityApi.resolveQuoteIV(q,spot,t,modelRate,modelDividendYield)
+        :{iv:ivSigma(q.iv)};
+      const sigma=resolved?.iv!==null&&resolved?.iv!==undefined?Number(resolved.iv):null;
+      if(sigma!==null&&Number.isFinite(sigma)&&sigma>0)sigmaByQuote.set(q,sigma);
+    }
+    const eligible=active.filter(q=>multiplierByQuote.get(q)!==null&&sigmaByQuote.has(q)&&timeByQuote.get(q)!==null);
     const coverage=active.length?eligible.length/active.length:1;
-    if(!valid.length||invalidCount>0||invalidOI.length>0||eligible.length!==active.length)return {level:null,crosses:[],complete:false,reason:'Contract OI > 0 cần multiplier hợp lệ (Binance hoặc standard 100-share OCC) và IV hợp lệ; OI null được giả định 0',coverage};
+    if(!valid.length||invalidCount>0||invalidOI.length>0||eligible.length!==active.length)return {level:null,crosses:[],complete:false,reason:'Contract OI > 0 cần multiplier hợp lệ (Binance hoặc standard 100-share OCC), DTE và Provider/Mid-derived IV hợp lệ; OI null được giả định 0',coverage};
     if(!eligible.length)return {level:null,crosses:[],complete:true,reason:'Không có contract OI dương để tính Zero Gamma',coverage};
-    const tq=new Map(eligible.map(q=>[q,timeOf(q)]));
     const netAt=price=>{
       let total=0;
       for(const q of eligible){
-        const g=bsmGamma(price,q.strike,tq.get(q),ivSigma(q.iv));
+        const g=bsmGamma(price,q.strike,timeByQuote.get(q),sigmaByQuote.get(q),modelRate,modelDividendYield);
         if(g===null)return null;
-        const multiplier=effectiveMultiplier(q).value;
+        const multiplier=multiplierByQuote.get(q);
         if(multiplier===null)return null;
         const value=g*q.openInterest*multiplier*price*price*.01;
         total+=q.side==='P'?-value:value;
@@ -961,7 +1006,8 @@
     const orderedCrosses=crosses.sort((a,b)=>a-b);
     const level=spot>0&&orderedCrosses.length?orderedCrosses.slice().sort((a,b)=>Math.abs(a-spot)-Math.abs(b-spot))[0]:null;
     const closeLabel=/^(GLD|QQQ)$/i.test(String(symbol||''))?'16:15':'16:00';
-    const methodLabel=multi?`Gamma Flip / Zero Gamma · BSM repricing · DTE riêng từng hợp đồng · OI/IV cố định · r=q=0 · ${closeLabel} New York`:`Gamma Flip / Zero Gamma · BSM repricing · OI/IV cố định · r=q=0 · ${closeLabel} New York expiry · bisection-refined`;
+    const carryLabel=`r=0% assumption · q=${(modelDividendYield*100).toFixed(2)}%`;
+    const methodLabel=multi?`Gamma Flip / Zero Gamma · BSM repricing · DTE riêng từng hợp đồng · OI/IV cố định · ${carryLabel} · ${closeLabel} New York`:`Gamma Flip / Zero Gamma · BSM repricing · OI/IV cố định · ${carryLabel} · ${closeLabel} New York expiry · bisection-refined`;
     return {level,crosses:orderedCrosses,complete:true,reason:!orderedCrosses.length?'Không có zero-cross trong dải giá giả định':!(spot>0)?'Cần Spot hiện tại để chọn zero-cross gần nhất':methodLabel,coverage,range:[lo,hi],timeToExpiry:multi?null:time};
   }
   function calcSingle(s,now=Date.now(),opts={}){
@@ -970,7 +1016,7 @@
     let callOI=0,putOI=0,oiKnown=0,oiMissing=0,oiAssumedZero=0,volumeKnown=0,volumeAssumedZero=0,ivKnown=0,ivMissing=0,multiplierMissing=0,multiplierAssumed=0,multiplierKnown=0,maxPainMultiplierMissing=0,callVol=0,putVol=0;
     let invalidContractCount=0;
     const oiMissingSamples=[],missingIVSamples=[],missingMultiplierSamples=[],missingGreekSamples=[];
-    const per=new Map();let delta=spot!==null?0:null,gamma=spot!==null?0:null,vega=0,theta=0;
+    const per=new Map();let delta=spot!==null?0:null,gamma=spot!==null?0:null,vega=0,theta=0,vannaExposure=0,charmExposure=0,vannaKnown=0,charmKnown=0;
     let gexKnown=0,gexMissing=0,gammaProviderKnown=0,gammaDerivedKnown=0;
     for(const q of rows){
       const side=q.side==='P'?'P':q.side==='C'?'C':null;
@@ -979,7 +1025,7 @@
         if(oiMissingSamples.length<5)oiMissingSamples.push(q.optionSymbol||'(unknown OCC)');
         continue;
       }
-      const p=per.get(strikeKey(q.strike))||{strike:q.strike,gex:0,dex:0,vgex:0,thex:0,callOI:0,putOI:0,callVol:0,putVol:0,callGex:0,putGex:0,callDex:0,putDex:0,callVgex:0,putVgex:0,callThex:0,putThex:0,callPainOI:0,putPainOI:0,gammaProviderKnown:0,gammaDerivedKnown:0};
+      const p=per.get(strikeKey(q.strike))||{strike:q.strike,gex:0,dex:0,vgex:0,thex:0,vannaEx:0,charmEx:0,callOI:0,putOI:0,callVol:0,putVol:0,callGex:0,putGex:0,callDex:0,putDex:0,callVgex:0,putVgex:0,callThex:0,putThex:0,callVannaEx:0,putVannaEx:0,callCharmEx:0,putCharmEx:0,callPainOI:0,putPainOI:0,gammaProviderKnown:0,gammaDerivedKnown:0};
       const volumeValid=q.volume!==null&&q.volume!==undefined&&Number.isFinite(q.volume)&&q.volume>=0;
       const volume=volumeValid?q.volume:0;
       if(volumeValid)volumeKnown++;else volumeAssumedZero++;
@@ -995,12 +1041,19 @@
       else if(oi>0){multiplierKnown++;if(mi.source==='standard-100-assumption')multiplierAssumed++;}
       if(oi===0){if(side==='C')p.callPainOI+=0;else p.putPainOI+=0;gexKnown++;continue;}
       if(m!==null){if(side==='C')p.callPainOI+=oi*m;else p.putPainOI+=oi*m;}
-      if(ivSigma(q.iv)!==null)ivKnown++;
-      else if(missingIVSamples.length<5)missingIVSamples.push(q.optionSymbol||strikeKey(q.strike));
-      if(ivSigma(q.iv)===null)ivMissing++;
+      const volApi=window.StockOptionsVolatility;
+      const greekTime=q._expiry?yearsToExpiry(q._expiry,now,s.cfg?.symbol):time;
+      const dividendYield=volApi?.dividendYieldForSymbol?.(s.cfg?.symbol)??(/^(QQQ)$/i.test(s.cfg?.symbol)?0.0045:0);
+      let sigma=ivSigma(q.iv);
+      if(sigma===null&&volApi?.resolveQuoteIV&&greekTime!==null&&spot!==null){
+        const resolvedIV=volApi.resolveQuoteIV(q,spot,greekTime,0,dividendYield);
+        sigma=resolvedIV?.iv??null;
+      }
+      if(sigma!==null)ivKnown++;
+      else {ivMissing++;if(missingIVSamples.length<5)missingIVSamples.push(q.optionSymbol||strikeKey(q.strike));}
       if(m===null)continue;
       if(spot!==null){
-        const resolved=resolveGamma(q,spot,q._expiry?yearsToExpiry(q._expiry,now,s.cfg?.symbol):time);
+        const resolved=resolveGamma({ ...q, iv:sigma },spot,greekTime,0,dividendYield);
         if(resolved.gamma!==null){
           const raw=resolved.gamma*oi*m*spot*spot*.01;
           const v=side==='P'?-raw:raw;
@@ -1014,9 +1067,34 @@
           if(missingGreekSamples.length<5)missingGreekSamples.push(q.optionSymbol||strikeKey(q.strike));
         }
       }else{gexMissing++;}
-      if(spot!==null&&q.delta!=null&&Number.isFinite(q.delta)){const raw=q.delta*oi*m*spot;p.dex+=raw;if(side==='C')p.callDex+=Math.abs(raw);else p.putDex+=Math.abs(raw);delta+=raw;}
+      if(spot!==null){
+        let deltaValue=volApi?.normalizedProviderDelta?.(q)??null;
+        if(deltaValue===null){
+          // Keep the dashboard's DEX available in isolated/test contexts too;
+          // provider Delta may be decimal (0.45) or percent (45).
+          let rawDelta=num(q.delta);
+          if(rawDelta!==null){if(Math.abs(rawDelta)>1.5)rawDelta/=100;if(Math.abs(rawDelta)>1.001)rawDelta=null;}
+          if(rawDelta!==null)deltaValue=side==='P'?-Math.abs(rawDelta):Math.abs(rawDelta);
+        }
+        if(deltaValue===null&&sigma!==null&&greekTime!==null&&volApi?.bsmDelta)deltaValue=volApi.bsmDelta(spot,q.strike,greekTime,sigma,side,0,dividendYield);
+        if(deltaValue!==null&&Number.isFinite(deltaValue)){const raw=deltaValue*oi*m*spot;p.dex+=raw;if(side==='C')p.callDex+=Math.abs(raw);else p.putDex+=Math.abs(raw);delta+=raw;}
+      }
       if(q.vega!=null&&Number.isFinite(q.vega)){const raw=q.vega*oi*m;p.vgex+=raw;if(side==='C')p.callVgex+=Math.abs(raw);else p.putVgex+=Math.abs(raw);vega+=raw;}
       if(q.theta!=null&&Number.isFinite(q.theta)){const raw=q.theta*oi*m;p.thex+=raw;if(side==='C')p.callThex+=Math.abs(raw);else p.putThex+=Math.abs(raw);theta+=raw;}
+      // Vanna and Charm are model-derived because the current Binance quote payload
+      // does not supply these Greeks. Use the user-provided ETF dividend yields.
+      if(spot!==null){
+        const model=volApi?.bsmVannaCharm&&sigma!==null&&greekTime!==null
+          ?volApi.bsmVannaCharm(spot,q.strike,greekTime,sigma,side,0,dividendYield):null;
+        if(model){
+          const vannaRaw=model.vanna*oi*m*spot*.01; // USD delta-notional per +1 vol point
+          const charmRaw=model.charm*oi*m*spot/365.25; // USD delta-notional per calendar day
+          p.vannaEx+=vannaRaw;p.charmEx+=charmRaw;
+          if(side==='C'){p.callVannaEx+=vannaRaw;p.callCharmEx+=charmRaw;}
+          else{p.putVannaEx+=vannaRaw;p.putCharmEx+=charmRaw;}
+          vannaExposure+=vannaRaw;charmExposure+=charmRaw;vannaKnown++;charmKnown++;
+        }
+      }
     }
     const dist=[...per.values()].sort((a,b)=>a.strike-b.strike);
     const calls=dist.filter(x=>x.callOI>0).sort((a,b)=>b.callOI-a.callOI);
@@ -1068,7 +1146,7 @@
     const gexRatioState=!gexAvailable?'unavailable':gexProvisional?'provisional':putGexAbsTotal===0?(callGexTotal>0?'call-only':'no-gex'):'ready';
     const gexRatioBias=gexRatioState==='call-only'?'call-dominant':gexRatioState==='no-gex'?'balanced':gexRatio===null?null:gexRatio>1?'call-dominant':gexRatio<1?'put-dominant':'balanced';
     const oiMissingQuotes=missingQuoteSymbols.length;
-    return {rows,dist,callOI,putOI,oiKnown,oiMissing,oiAssumedZero,volumeKnown,volumeAssumedZero,multiplierMissing,multiplierKnown,multiplierAssumed,multiplierCoverage,maxPainMultiplierMissing,invalidContractCount,missingQuoteSymbols,oiMissingSamples,missingMultiplierSamples,missingGreekSamples,totalContracts,callVol,putVol,volume:callVol+putVol,delta,gamma,vega,theta,
+    return {rows,dist,callOI,putOI,oiKnown,oiMissing,oiAssumedZero,volumeKnown,volumeAssumedZero,multiplierMissing,multiplierKnown,multiplierAssumed,multiplierCoverage,maxPainMultiplierMissing,invalidContractCount,missingQuoteSymbols,oiMissingSamples,missingMultiplierSamples,missingGreekSamples,totalContracts,callVol,putVol,volume:callVol+putVol,delta,gamma,vega,theta,vannaExposure,charmExposure,vannaKnown,charmKnown,
       callOIWall,putOIWall,gexCallWall,gexPutWall,
       gammaFlip,gammaFlipComplete:flipCalc.complete&&spot>0,gammaFlipReason:spot>0?flipCalc.reason:'Chờ Spot underlying để chọn Gamma Flip gần nhất',gammaFlipCoverage:flipCalc.coverage,
       callGexTotal,putGexTotal,putGexAbsTotal,gexRatio,gexRatioState,gexRatioBias,
@@ -1270,11 +1348,19 @@
     const expiries=scopeExpiries(s,now),inputs=[];
     for(const expiry of expiries){
       if(expiry===s.expiry){
-        if(s.quotesExpiry===s.expiry&&s.quotes?.size)inputs.push({expiry,quotes:[...s.quotes.values()]});
+        if(s.quotesExpiry===s.expiry&&s.quotes?.size){
+          const quotes=[...s.quotes.values()],expected=s.contractSymbols instanceof Set?s.contractSymbols.size:quotes.length;
+          const complete=s.chainComplete===true&&quotes.length>=expected;
+          inputs.push({expiry,quotes,complete,expectedContracts:expected,loadedContracts:quotes.length,status:complete?'complete':'partial'});
+        }
         continue;
       }
       const sub=s.scopeData?.get(expiry);
-      if(sub?.quotes?.size)inputs.push({expiry,quotes:[...sub.quotes.values()]});
+      if(sub?.quotes?.size){
+        const quotes=[...sub.quotes.values()],expected=sub.contractSymbols instanceof Set?sub.contractSymbols.size:quotes.length;
+        const complete=sub.chainComplete===true&&quotes.length>=expected;
+        inputs.push({expiry,quotes,complete,expectedContracts:expected,loadedContracts:quotes.length,status:complete?'complete':'partial',error:sub.error||''});
+      }
     }
     return {inputs,expected:expiries.length};
   }
@@ -1282,7 +1368,7 @@
   function volPoints(value){return value===null||!Number.isFinite(Number(value))?'—':`${value>0?'+':''}${(Number(value)*100).toFixed(2)} vol pts`;}
   function renderVolTermChart(rows){
     if(!rows||rows.length<2)return '<div class="so-vol-empty">Cần ít nhất 2 expiry đã tải. Chọn <b>Analysis Scope → Weekly</b> hoặc <b>All Expiries</b> phía trên để mở rộng Term Structure.</div>';
-    const valid=rows.filter(row=>row.atmIV!==null&&row.atmSideCount===2&&Number.isFinite(row.dte));
+    const valid=rows.filter(row=>row.chainComplete!==false&&row.atmIV!==null&&row.atmSideCount===2&&Number.isFinite(row.dte));
     if(valid.length<2)return '<div class="so-vol-empty">Cần ít nhất 2 expiry có ATM IV được bracketed từ cả Call và Put để dựng Term Structure. Expiry single-side hoặc thiếu dữ liệu được loại khỏi đường.</div>';
     const w=620,h=190,pad={l:44,r:18,t:18,b:38};
     const minX=Math.min(...valid.map(x=>x.dte)),maxX=Math.max(...valid.map(x=>x.dte));
@@ -1470,7 +1556,7 @@
     if(kpis){
       const expectedMove=current?.expectedMove,movePct=current?.expectedMovePct;
       const cards=[
-        ['ATM IMPLIED VOLATILITY',volFmt(current?.atmIV??null),current?`${current.expiry} · ${current.atmSideCount===2?'Call/Put bracketed':current.atmSideCount===1?'single-side bracketed':'ATM unavailable'} · ${current.sourceLabel}`:'Expiry đang chọn chưa có đủ IV/Spot'],
+        ['ATM IMPLIED VOLATILITY',volFmt(current?.atmIV??null),current?`${current.expiry} · ${current.chainComplete===false?'PARTIAL / PROVISIONAL · ':''}${current.atmSideCount===2?'Call/Put forward-bracketed':current.atmSideCount===1?'single-side forward-bracketed':'ATM unavailable'} · ${current.sourceLabel}`:'Expiry đang chọn chưa có đủ IV/Spot'],
         ['25Δ RISK REVERSAL',volPoints(current?.rr25??null),current?'Call 25Δ − Put 25Δ':'Cần IV hai cánh 25Δ'],
         ['25Δ BUTTERFLY',volPoints(current?.bf25??null),current?'½(Call 25Δ + Put 25Δ) − ATM':'Cần ATM và hai cánh 25Δ'],
         ['EXPECTED MOVE · 1σ',expectedMove===null||expectedMove===undefined?'—':`±${fmt(expectedMove,2)}`,movePct===null||movePct===undefined?'Cần ATM IV và DTE':`±${(movePct*100).toFixed(2)}% · đến ${current.expiry}`]
@@ -1502,17 +1588,121 @@
     }
     const surfaceCoverage=$(`${p}-vol-surface-coverage`);if(surfaceCoverage)surfaceCoverage.textContent=coverage;
     const term=$(`${p}-vol-term`);if(term)term.innerHTML=renderVolTermChart(rows);
-    const termCount=$(`${p}-vol-term-count`);if(termCount)termCount.textContent=`${rows.length} / ${expected} expiries`;
+    const termCount=$(`${p}-vol-term-count`);if(termCount)termCount.textContent=`${rows.filter(row=>row.chainComplete!==false&&row.atmSideCount===2).length} / ${expected} full two-sided ATM expiries`;
+    const cmRows=result.constantMaturity||[];
+    const cm=$(`${p}-vol-cm`),cmMeta=$(`${p}-vol-cm-meta`);
+    if(cm){
+      cm.innerHTML=cmRows.length?cmRows.map(item=>{
+        const label=item.iv===null?'—':volFmt(item.iv);
+        const source=item.sources?.length?item.sources.join(' ↔ '):(item.status==='unbracketed'?'Chưa có expiry hai phía':'');
+        const state=item.status==='interpolated-total-variance'?'INTERPOLATED':item.status==='observed-near-tenor'?'OBSERVED':item.status==='wide-bracket'?'BRACKET WIDE':'UNAVAILABLE';
+        return `<article class="so-vol-cm-item ${item.iv===null?'is-unavailable':''}" title="${esc(item.reason||source)}"><span>${item.days}D CONSTANT MATURITY</span><strong>${label}</strong><small>${state}</small><em>${esc(source||item.reason||'—')}</em></article>`;
+      }).join(''):'<div class="so-vol-empty">Chưa có Constant Maturity IV. Cần ít nhất hai expiry có ATM Call/Put bao quanh tenor mục tiêu.</div>';
+    }
+    if(cmMeta)cmMeta.textContent=`${cmRows.filter(x=>x.iv!==null).length}/${cmRows.length} tenors available`;
     const note=$(`${p}-vol-note`);if(note){
       const scopeText=s.scope==='selected'?'Term Structure hiện chỉ có expiry đang chọn; chọn Analysis Scope → Weekly hoặc All Expiries để tải thêm kỳ hạn.':`Term Structure dùng dữ liệu đã tải theo Analysis Scope: ${scopeLabels[s.scope]||s.scope}.`;
-      note.textContent=`${scopeText} · ${result.providerIVCount} provider IV, ${result.midDerivedIVCount} IV suy ra từ mid. ATM cần strike bao quanh Spot; 10Δ/25Δ được nội suy giữa hai Delta bao quanh, không ngoại suy. Delta thiếu được ước lượng BSM (r=q=0). KPI dùng IV hợp lệ thô; Clean/Raw chỉ ảnh hưởng biểu đồ Skew. Surface là snapshot theo dữ liệu hiện có, không phải surface arbitrage-free.`;
+      const partialRows=rows.filter(row=>row.chainComplete===false).length;
+      note.textContent=`${scopeText} · ${result.providerIVCount} provider IV, ${result.midDerivedIVCount} IV suy ra từ mid. ATM cần strike bao quanh Forward (F = S·e^((r−q)T)); 10Δ/25Δ được nội suy giữa hai Delta bao quanh, không ngoại suy. Delta thiếu được ước lượng BSM với r=0% và q theo underlying (QQQ 0.45%, GLD 0%). KPI dùng IV hợp lệ thô; Clean/Raw chỉ ảnh hưởng biểu đồ Skew. Constant Maturity IV nội suy Total Variance (IV² × T) giữa hai expiry bao quanh, không ngoại suy; đây là tenor tổng hợp, không phải contract listed. Surface là snapshot theo dữ liệu hiện có, không phải surface arbitrage-free${partialRows?`; ${partialRows} expiry partial được loại khỏi Term Structure/Constant Maturity`:''}.`;
     }
   }
 
-  function renderScopeViews(s){try{renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderVolatilityAnalysis(s);updateChainMeta(s);renderScope(s);}catch(e){}}
+  const SURFACE_LABELS={iv:'IV Surface',exposure:'Exposure Surface',volume:'Volume Surface',oi:'Open Interest Surface'};
+  const SURFACE_FORMATS={
+    iv:value=>`${(value*100).toFixed(1)}%`,
+    gamma:value=>`${value>=0?'+':''}${compact(value)}`,
+    delta:value=>`${value>=0?'+':''}${compact(value)}`,
+    vega:value=>`${value>=0?'+':''}${compact(value)}`,
+    theta:value=>`${value>=0?'+':''}${compact(value)}`,
+    vanna:value=>`${value>=0?'+':''}${compact(value)}`,
+    charm:value=>`${value>=0?'+':''}${compact(value)}`,
+    volume:value=>compact(value),
+    oi:value=>compact(value)
+  };
+  function collectSurfaceInputs(s){
+    const expiries=scopeExpiries(s),inputs=[];
+    for(const expiry of expiries){
+      const selected=expiry===s.expiry,src=selected?s:s.scopeData.get(expiry);
+      if(!src)continue;
+      const quotes=src.quotes instanceof Map?[...src.quotes.values()]:[];
+      if(!quotes.length)continue;
+      const expected=src.contractSymbols instanceof Set?src.contractSymbols.size:quotes.length;
+      const loaded=quotes.length;
+      inputs.push({expiry,quotes,expectedContracts:expected,loadedContracts:loaded,complete:src.chainComplete===true&&loaded>=expected,status:src.chainComplete===true&&loaded>=expected?'complete':'partial',error:selected?src.chainLoadError:src.error||''});
+    }
+    return {inputs,expected:expiries.length};
+  }
+  function renderSurfaceHeatmap(result,activeTab){
+    if(!result?.rows?.length)return '<div class="so-vol-empty">Chưa có expiry nào được tải trong Analysis Scope. Chọn Weekly hoặc All Expiries, sau đó đợi tải chain hoàn tất.</div>';
+    const cells=result.rows.flatMap(row=>row.cells).filter(cell=>Number.isFinite(cell.value));
+    if(!cells.length)return '<div class="so-vol-empty">Chưa có dữ liệu hợp lệ cho surface đang chọn. Kiểm tra OI, multiplier, IV hoặc provider Greeks.</div>';
+    const signed=result.config?.kind==='signed';
+    const values=cells.map(cell=>Math.abs(cell.value));
+    values.sort((a,b)=>a-b);
+    const scale=values[Math.min(values.length-1,Math.floor((values.length-1)*.92))]||1;
+    const allVals=cells.map(cell=>cell.value),min=Math.min(...allVals),max=Math.max(...allVals);
+    const heat=(cell)=>{
+      if(!Number.isFinite(cell.value))return 'background:rgba(100,116,139,.035)';
+      const intensity=Math.max(.08,Math.min(.88,Math.sqrt(Math.abs(cell.value)/Math.max(scale,1e-12))*.78));
+      if(signed)return cell.value>=0?`background:rgba(38,190,139,${(intensity*.48).toFixed(3)})`:`background:rgba(224,91,115,${(intensity*.48).toFixed(3)})`;
+      const t=max===min?.5:(cell.value-min)/(max-min);
+      if(activeTab==='iv')return `background:rgba(${Math.round(38+25*t)},${Math.round(115+85*t)},${Math.round(190+45*t)},${(.10+intensity*.40).toFixed(3)})`;
+      if(activeTab==='volume')return `background:rgba(132,100,220,${(.08+intensity*.45).toFixed(3)})`;
+      if(activeTab==='oi')return `background:rgba(216,157,72,${(.08+intensity*.45).toFixed(3)})`;
+      return `background:rgba(66,150,190,${(.08+intensity*.45).toFixed(3)})`;
+    };
+    const fmtCell=SURFACE_FORMATS[result.metric]||compact;
+    const headers=result.bins.map(bin=>`<div class="so-surface-colhead">${bin===0?'ATM':`${bin>0?'+':''}${bin}%`}</div>`).join('');
+    const rows=result.rows.map(row=>{
+      const state=row.complete?'FULL':`PARTIAL ${row.loadedContracts}/${row.expectedContracts??'?'}`;
+      const cellsHtml=row.cells.map((cell,index)=>{
+        const value=cell.value,display=Number.isFinite(value)?fmtCell(value):'—';
+        const assumed=activeTab==='volume'?(cell.assumedVolumeCount>0?` · ${cell.assumedVolumeCount} volume missing`: ''):(activeTab==='oi'?(cell.assumedOICount>0?` · ${cell.assumedOICount} OI missing`:'' ):(cell.assumedOICount>0?` · ${cell.assumedOICount} OI missing`:''));
+        const coverage=cell.coverage===null?'n/a':`${(cell.coverage*100).toFixed(0)}%`;
+        const strikeText=cell.strikes.length?`${fmt(cell.strikeMin,2)}–${fmt(cell.strikeMax,2)}`:'no strikes';
+        const title=`${row.expiry} · ${result.bins[index]}% moneyness · ${strikeText} · ${cell.usableCount}/${cell.contractCount} usable (${coverage})${assumed}${cell.skippedCount?` · ${cell.skippedCount} skipped`:''}`;
+        return `<div class="so-surface-cell ${Number.isFinite(value)?'has-value':'is-empty'}" style="${heat(cell)}" title="${esc(title)}" data-surface-cell="1" data-expiry="${esc(row.expiry)}"><b>${display}</b><small>${cell.usableCount?`${cell.usableCount}/${cell.contractCount}`:'—'}</small></div>`;
+      }).join('');
+      return `<div class="so-surface-row"><div class="so-surface-rowhead" title="${esc(row.error||state)}"><b>${esc(row.expiry)}</b><small>${row.dte.toFixed(1)} DTE</small><em class="${row.complete?'is-complete':'is-partial'}">${esc(state)}</em></div>${cellsHtml}</div>`;
+    }).join('');
+    const sideLabel=result.side==='both'?'Call + Put':result.side==='call'?'Calls only':'Puts only';
+    return `<div class="so-surface-scroll"><div class="so-surface-grid" style="--surface-cols:${result.bins.length}"><div class="so-surface-row so-surface-header"><div class="so-surface-rowhead">EXPIRY / DTE</div>${headers}</div>${rows}</div></div><div class="so-surface-scale"><span>${esc(result.config?.unit||'')}</span><span>${sideLabel} · ${result.quoteCount} received quotes · ${signed?`range ${fmt(min,1)} → ${fmt(max,1)}`:`range ${fmt(min,1)} → ${fmt(max,1)}`}</span></div>`;
+  }
+  function renderOptionSurfaces(s){
+    const p=`so-${s.cfg.key}`,status=$(`${p}-surface-status`),heatmap=$(`${p}-surface-heatmap`),tabs=$(`${p}-surface-tabs`);
+    if(!heatmap||!tabs)return;
+    const active=['iv','exposure','volume','oi'].includes(s.surfaceTab)?s.surfaceTab:'iv';
+    s.surfaceTab=active;
+    for(const button of tabs.querySelectorAll('[data-surface-tab]')){
+      const selected=button.dataset.surfaceTab===active;button.classList.toggle('is-active',selected);button.setAttribute('aria-selected',selected?'true':'false');
+    }
+    const metricControl=$(`${p}-surface-exposure-control`),metricSelect=$(`${p}-surface-exposure-metric`),sideSelect=$(`${p}-surface-side`);
+    if(metricControl)metricControl.hidden=active!=='exposure';
+    const {inputs,expected}=collectSurfaceInputs(s);
+    const surfaceApi=window.StockOptionsSurfaces;
+    if(!surfaceApi?.build){heatmap.innerHTML='<div class="so-vol-empty">Surface module chưa được tải.</div>';return;}
+    const exposureMetric=metricSelect?.value||'gamma',side=sideSelect?.value||'both';
+    const metric=active==='exposure'?'exposure':active;
+    const result=surfaceApi.build({spot:s.price,symbol:s.cfg.symbol,expiries:inputs,metric,exposureMetric,side});
+    const loaded=result.rows.length;
+    if(status)status.textContent=`${loaded}/${expected} expiry rows · ${result.quoteCount} quotes · ${s.scope==='selected'?'Selected expiry':scopeLabels[s.scope]||s.scope}`;
+    heatmap.innerHTML=renderSurfaceHeatmap(result,active);
+    const foot=$(`${p}-surface-foot`);
+    if(foot){
+      const notes={
+        iv:'IV: median của IV hợp lệ theo bucket moneyness; ưu tiên Provider IV, sau đó Mid-derived BSM. Chọn Calls/Puts để xem riêng skew hai phía.',
+        exposure:`${result.config?.unit||'Exposure'} · q=${(result.dividendYield*100).toFixed(2)}% ${s.cfg.symbol}, r=0% assumption. Vanna/Charm do BSM suy ra; GEX dùng quy ước Call+/Put−. OI không xác định dealer long/short.`,
+        volume:'Volume là tổng contracts Call + Put theo bucket (hoặc chọn riêng một phía). Đây là traded volume, không phải buyer-initiated/seller-initiated flow.',
+        oi:'Open Interest là số hợp đồng đang mở, tổng Call + Put theo bucket. Không diễn giải OI là vị thế dealer hoặc hướng Long/Short.'
+      };
+      foot.textContent=`${notes[active]} Ô trống = không có quan sát hợp lệ; partial chain được đánh dấu ở đầu hàng. X-axis là % Strike/Spot − 1, Y-axis là expiry.`;
+    }
+  }
+
+  function renderScopeViews(s){try{renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderVolatilityAnalysis(s);renderOptionSurfaces(s);updateChainMeta(s);renderScope(s);}catch(e){}}
 
   function renderAll(s){
-    renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderChain(s);renderVolatilityAnalysis(s);updateChainMeta(s);renderScope(s);
+    renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderChain(s);renderVolatilityAnalysis(s);renderOptionSurfaces(s);updateChainMeta(s);renderScope(s);
     try{if(typeof window.crossAssetMapDataUpdated==='function')window.crossAssetMapDataUpdated(s.cfg.key)}catch(e){}
   }
   function metric(value,label,sub,cls=''){
@@ -1559,13 +1749,15 @@
       gamma:{callField:'callGex',putField:'putGex',title:'GAMMA EXPOSURE',subtitle:'Call GEX → right · Put GEX ← left',units:'USD notional per 1% underlying move',note:'Call và Put được tách riêng theo option side. Put GEX mang dấu âm trong aggregate; cột trái hiển thị độ lớn tuyệt đối. OI không xác định holder đang Long hay Short.'},
       delta:{callField:'callDex',putField:'putDex',title:'DELTA EXPOSURE',subtitle:'Call DEX → right · Put DEX ← left',units:'USD delta notional',note:'Cột Call/Put biểu thị độ lớn Delta Notional riêng theo từng option side; aggregate vẫn giữ dấu Delta native từ provider. OI không xác định holder đang Long hay Short.'},
       vega:{callField:'callVgex',putField:'putVgex',title:'VEGA EXPOSURE',subtitle:'Call Vega → right · Put Vega ← left',units:'Vega × OI × contract multiplier',note:'Call và Put Vega được tách theo option side, hiển thị độ lớn tuyệt đối. Đây là Greek × OI × multiplier, không phải vị thế Long/Short đã xác minh.'},
-      theta:{callField:'callThex',putField:'putThex',title:'THETA EXPOSURE',subtitle:'Call Theta → right · Put Theta ← left',units:'Theta × OI × contract multiplier',note:'Call và Put Theta được tách theo option side, hiển thị độ lớn tuyệt đối. Aggregate vẫn giữ dấu Theta native từ provider; không phải P/L dự báo.'}
+      theta:{callField:'callThex',putField:'putThex',title:'THETA EXPOSURE',subtitle:'Call Theta → right · Put Theta ← left',units:'Theta × OI × contract multiplier',note:'Call và Put Theta được tách theo option side, hiển thị độ lớn tuyệt đối. Aggregate vẫn giữ dấu Theta native từ provider; không phải P/L dự báo.'},
+      vanna:{signedField:'vannaEx',title:'VANNA EXPOSURE',subtitle:'Net Vanna · signed model sensitivity by strike',units:'USD delta-notional per +1 IV point',note:'Vanna = ∂Delta/∂σ từ Black–Scholes × OI × multiplier × Spot × 0.01. Call/Put không bị tự gán dấu Long/Short; OI không tiết lộ phía holder.'},
+      charm:{signedField:'charmEx',title:'CHARM EXPOSURE',subtitle:'Net Charm · calendar-time Delta decay by strike',units:'USD delta-notional change per calendar day',note:'Charm = ∂Delta/∂calendar time từ Black–Scholes × OI × multiplier × Spot / 365.25. q: QQQ 0.45%, GLD 0%; r = 0% giả định. Đây không phải vị thế dealer đã xác minh.'}
     }[metricKey]||null;
     const title=$(`so-${s.cfg.key}-exposure-title`),subtitle=$(`so-${s.cfg.key}-exposure-subtitle`),units=$(`so-${s.cfg.key}-exposure-units`),note=$(`so-${s.cfg.key}-exposure-note`);
     if(config){if(title)title.textContent=config.title;if(subtitle)subtitle.textContent=config.subtitle;if(units)units.textContent=config.units;if(note)note.textContent=config.note;}
     if(!config){el.innerHTML='<div class="opt-empty">Exposure metric không được hỗ trợ.</div>';return;}
 
-    const hasValue=x=>(Number(x[config.callField])||0)!==0||(Number(x[config.putField])||0)!==0;
+    const hasValue=x=>config.signedField?Number.isFinite(Number(x[config.signedField]))&&Math.abs(Number(x[config.signedField]))>0:((Number(x[config.callField])||0)!==0||(Number(x[config.putField])||0)!==0);
     const candidates=c.dist.filter(hasValue);
     if(!candidates.length){
       const waitingSpot=s.price===null&&(metricKey==='gamma'||metricKey==='delta');
@@ -1581,7 +1773,7 @@
     }else{
       visible=candidates.slice().sort((a,b)=>((Number(b[config.callField])||0)+Math.abs(Number(b[config.putField])||0))-((Number(a[config.callField])||0)+Math.abs(Number(a[config.putField])||0))).slice(0,MAX_ROWS).sort((a,b)=>a.strike-b.strike);
     }
-    const max=Math.max(1,...visible.flatMap(x=>[Math.abs(Number(x[config.callField])||0),Math.abs(Number(x[config.putField])||0)]));
+    const max=Math.max(1,...visible.flatMap(x=>config.signedField?[Math.abs(Number(x[config.signedField])||0)]:[Math.abs(Number(x[config.callField])||0),Math.abs(Number(x[config.putField])||0)]));
     const first=visible[0].strike,last=visible[visible.length-1].strike,range=last-first||1;
     const positionFor=value=>{
       const v=Number(value);if(!Number.isFinite(v)||v<first||v>last)return null;
@@ -1593,6 +1785,12 @@
       return `<div class="exposure-marker ${kind}" style="--marker-y:${pos.toFixed(3)}%"><span>${label} <b>${fmt(value,2)}</b></span></div>`;
     };
     const rows=visible.map((x,i)=>{
+      if(config.signedField){
+        const value=Number(x[config.signedField])||0,width=Math.max(0,Math.min(50,Math.abs(value)/max*50));
+        const cls=value>=0?'is-positive':'is-negative';
+        const rowClass=(Number.isFinite(s.price)&&Math.abs(x.strike-s.price)<=range/Math.max(visible.length-1,1)*.55)?' is-near-spot':'';
+        return `<div class="exposure-row exposure-row-signed${rowClass}" style="--row-i:${i}" data-strike="${x.strike}" title="Strike ${fmt(x.strike,2)} · ${config.title}: ${value>=0?'+':''}${compact(value)}"><span class="exposure-strike">${fmt(x.strike,2)}</span><span class="exposure-signed-track"><i class="${cls}" style="--signed-width:${width.toFixed(2)}%"></i></span></div>`;
+      }
       const call=Math.abs(Number(x[config.callField])||0),put=Math.abs(Number(x[config.putField])||0);
       const cw=call>0?Math.max(1,call/max*100):0,pw=put>0?Math.max(1,put/max*100):0;
       const rowClass=(Number.isFinite(s.price)&&Math.abs(x.strike-s.price)<=range/Math.max(visible.length-1,1)*.55)?' is-near-spot':'';
@@ -1606,15 +1804,16 @@
       marker(c.gexPutWall?.strike,'is-gex-put-wall','PW · MAX −GEX')
     ].join('');
     const status=!c.complete?'PARTIAL CHAIN':metricKey==='gamma'&&c.gexProvisional?'GEX PROVISIONAL':metricKey==='gamma'&&!c.gexComplete?'GEX COVERAGE INCOMPLETE':'FULL CHAIN';
-    el.innerHTML=`<div class="exposure-plot" role="img" aria-label="Bilateral ${metricKey.toUpperCase()} exposure by strike. Puts extend left, Calls extend right.">
-      <div class="exposure-axis-head"><span>STRIKE</span><span>PUTS ←</span><span></span><span>→ CALLS</span></div>
-      <div class="exposure-rows">${rows}${lines}</div>
+    const signedMode=!!config.signedField;
+    el.innerHTML=`<div class="exposure-plot ${signedMode?'is-signed-exposure':''}" role="img" aria-label="${signedMode?'Signed':'Bilateral'} ${metricKey.toUpperCase()} exposure by strike.">
+      <div class="exposure-axis-head ${signedMode?'is-signed-axis':''}">${signedMode?'<span>STRIKE</span><span>NEGATIVE ←</span><span>ZERO</span><span>→ POSITIVE</span>':'<span>STRIKE</span><span>PUTS ←</span><span></span><span>→ CALLS</span>'}</div>
+      <div class="exposure-rows ${signedMode?'is-signed-exposure-rows':''}">${rows}${lines}</div>
       <div class="exposure-bottom"><span>${fmt(first,2)} — ${fmt(last,2)}</span><span>${visible.length} STRIKES · ${status}</span><span>MAX ${compact(max)}</span></div>
     </div>`;
   }
   function renderGreeks(s){
     const c=calc(s),el=$(`so-${s.cfg.key}-greeks`);if(!el)return;
-    const lines=[['Delta Notional',c.delta,'USD'],['Gamma Exposure (1%)',c.gamma,'USD'],['Vega × OI',c.vega,'Greek × contracts'],['Theta × OI',c.theta,'Greek × contracts']];
+    const lines=[['Delta Notional',c.delta,'USD'],['Gamma Exposure (1%)',c.gamma,'USD'],['Vega × OI',c.vega,'Greek × contracts'],['Theta × OI',c.theta,'Greek × contracts'],['Vanna Exposure',c.vannaExposure,'USD Δ-notional / +1 vol point'],['Charm Exposure',c.charmExposure,'USD Δ-notional / calendar day']];
     el.innerHTML=lines.map(([name,v,u])=>`<div class="opt-greek-line"><span>${name}<small>${u}</small></span><b>${v===null||!Number.isFinite(v)?'—':compact(v)}</b></div>`).join('')+
       `<p class="opt-footnote">Exposure dùng OI null như 0 cho tới khi Binance gửi số thực; ${c.oiAssumedZero} contract đang zero-fill. Contract OI > 0 nhưng thiếu multiplier (${c.multiplierMissing}) bị loại khỏi Greeks exposure.</p>`;
   }
@@ -2034,6 +2233,12 @@
     const strikeSelect=$(`${p}-strike-count`);if(strikeSelect){strikeSelect.value=String(s.displayStrikes);strikeSelect.onchange=e=>{s.displayStrikes=e.target.value==='all'?'all':Math.max(5,+e.target.value||15);saveDisplayStrikes(s.cfg.key,s.displayStrikes);renderChain(s);};}
     $(`${p}-method-toggle`).onclick=()=>{const box=$(`${p}-method`);box.hidden=!box.hidden;};
     $(`${p}-exposure-metric`).onchange=()=>renderExposure(s);
+    const surfaceTabs=$(`${p}-surface-tabs`),surfaceHeatmap=$(`${p}-surface-heatmap`);
+    if(surfaceTabs){surfaceTabs.onclick=event=>{const tab=event.target?.closest?.('[data-surface-tab]');if(!tab)return;s.surfaceTab=tab.dataset.surfaceTab;renderOptionSurfaces(s);};}
+    const surfaceMetric=$(`${p}-surface-exposure-metric`),surfaceSide=$(`${p}-surface-side`);
+    if(surfaceMetric)surfaceMetric.onchange=()=>renderOptionSurfaces(s);
+    if(surfaceSide)surfaceSide.onchange=()=>renderOptionSurfaces(s);
+    if(surfaceHeatmap)surfaceHeatmap.onclick=event=>{const cell=event.target?.closest?.('[data-surface-cell]');if(!cell)return;const expiry=cell.getAttribute('data-expiry');if(expiry&&expiry!==s.expiry&&s.expirations.some(x=>x.date===expiry)){$(`${p}-expiry`).value=expiry;$(`${p}-expiry`).dispatchEvent(new Event('change'));}};
     $(`${p}-copy`).onclick=()=>{
       const c=calc(s),text=[`${s.cfg.symbol} · ${c.scopeInfo?c.scopeInfo.label:s.expiry}`,`Call OI Wall: ${c.callOIWall?.strike??'—'}`,`Put OI Wall: ${c.putOIWall?.strike??'—'}`,`CW (max +Net GEX): ${c.gexCallWall?.strike??'—'}`,`PW (max |−Net GEX|): ${c.gexPutWall?.strike??'—'}`,`Gamma Flip / Zero Gamma (BSM repriced): ${c.gammaFlip??'—'}`,`Max Pain${c.scopeInfo?` (${c.scopeInfo.maxPainExpiry||'—'}, per expiry)`:''}: ${c.maxPain?.strike??'—'}${c.maxPain?.isTie?` (tied: ${c.maxPain.tiedStrikes.join('/')})`:''}`,`GEX Ratio (Call GEX / |Put GEX|): ${c.gexRatioState==='call-only'?'∞':c.gexRatio===null?'—':c.gexRatio.toFixed(4)+'x'}`,`GEX 1-10: ${c.gexLevels.map(x=>x.strike).join(', ')}`,`Call OI: ${c.callOI}`,`Put OI: ${c.putOI}`,`GEX: ${c.gamma}`,`DEX: ${c.delta}`,`OI observed: ${(c.coverage*100).toFixed(1)}% · zero-filled ${c.oiAssumedZero}`].join('\n');
       if(navigator.clipboard?.writeText)navigator.clipboard.writeText(text).catch(()=>{});else{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();}
@@ -2072,7 +2277,7 @@
       gexCallWall:c.gexCallWall?{strike:c.gexCallWall.strike,gex:c.gexCallWall.gex}:null,
       gexPutWall:c.gexPutWall?{strike:c.gexPutWall.strike,gex:c.gexPutWall.gex}:null,
       gexAvailable:c.gexAvailable,gexComplete:c.gexComplete,gexProvisional:c.gexProvisional,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gammaProviderKnown:c.gammaProviderKnown,gammaDerivedKnown:c.gammaDerivedKnown,gexCoverage:c.gexCoverage,
-      gammaFlip:c.gammaFlipComplete?c.gammaFlip:null,gammaFlipMethod:'Gamma Flip / Zero Gamma · BSM repricing · fixed OI/IV · r=q=0 · expiry 16:00 America/New_York · bisection-refined Net GEX zero-cross',maxPain:c.maxPain?{strike:c.maxPain.strike,tiedStrikes:c.maxPain.tiedStrikes,payout:c.maxPain.payout}:null,gexRatio:c.gexRatio,gexRatioState:c.gexRatioState,gexRatioBias:c.gexRatioBias,callGexTotal:c.callGexTotal,putGexAbsTotal:c.putGexAbsTotal,complete:c.complete&&!expiryMismatch,oiComplete:c.oiComplete&&!expiryMismatch,maxPainComplete:c.maxPainComplete&&!expiryMismatch,
+      gammaFlip:c.gammaFlipComplete?c.gammaFlip:null,gammaFlipMethod:`Gamma Flip / Zero Gamma · BSM repricing · fixed OI/IV · r=0%, q=${(window.StockOptionsVolatility?.dividendYieldForSymbol?.(s.cfg.symbol)??0)*100}% · expiry ${/^(GLD|QQQ)$/i.test(s.cfg.symbol)?'16:15':'16:00'} America/New_York · bisection-refined Net GEX zero-cross`,maxPain:c.maxPain?{strike:c.maxPain.strike,tiedStrikes:c.maxPain.tiedStrikes,payout:c.maxPain.payout}:null,gexRatio:c.gexRatio,gexRatioState:c.gexRatioState,gexRatioBias:c.gexRatioBias,callGexTotal:c.callGexTotal,putGexAbsTotal:c.putGexAbsTotal,complete:c.complete&&!expiryMismatch,oiComplete:c.oiComplete&&!expiryMismatch,maxPainComplete:c.maxPainComplete&&!expiryMismatch,
       gexLevels:c.gexLevels.map((x,i)=>({rank:i+1,strike:x.strike,gex:x.gex})),gexRankedCandidates:c.gexRankedCandidates.map(x=>({strike:x.strike,gex:x.gex})),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gexMethod:{providerGamma:c.gammaProviderKnown,bsmDerivedGamma:c.gammaDerivedKnown},oiWall:c.oiWall?{strike:c.oiWall.strike,oi:c.oiWall.oi}:null,
       dist:c.dist.map(x=>({strike:x.strike,callOI:x.callOI,putOI:x.putOI,callVol:x.callVol,putVol:x.putVol,gex:c.gexComplete?x.gex:null,callGex:c.gexComplete?x.callGex:null,putGex:c.gexComplete?x.putGex:null}))};
   }

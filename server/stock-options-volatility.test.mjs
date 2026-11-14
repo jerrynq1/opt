@@ -151,9 +151,6 @@ assert.ok(Math.abs(seventyFiveMinutes - (75 / (60 * 24 * 365.25))) < 1e-12, 'QQQ
 assert.ok(Number.isFinite(cleanRow.cleanAtmIV));
 assert.equal(cleanRow.cleanIVCount, 5);
 
-console.log('Stock Options Volatility Analytics tests: passed');
-
-
 // Audit: mid-derived IV must retain valid sub-1% vol observations, but not return
 // the arbitrary lower solver bound when the premium contains no time value.
 const lowVolMid = vol.bsmPrice(100, 100, t, 0.005, 'C');
@@ -177,3 +174,80 @@ const bookFallback = vol.calculate({ spot:100, now, expiries:[{ expiry, quotes:[
   bid:fairMid-0.05, ask:fairMid+0.05, mid:0.01
 }]}]});
 assert.ok(Math.abs(bookFallback.expiries[0].atmIV - 0.24) < 1e-5);
+
+
+// Quote inversion must not use a loose Mid when a one-sided/crossed book is present.
+const invalidOneSide = vol.resolveQuoteIV({ side:'C', strike:100, iv:null, bid:0, ask:1, mid:0.5 }, 100, t);
+assert.equal(invalidOneSide.iv, null);
+assert.equal(invalidOneSide.source, 'missing');
+const invalidCross = vol.resolveQuoteIV({ side:'C', strike:100, iv:null, bid:1.2, ask:1.0, mid:1.1 }, 100, t);
+assert.equal(invalidCross.iv, null);
+
+// QQQ ATM is interpolated at the forward S*exp((r-q)T), not raw spot.
+const qqqExpiry = '2026-12-18';
+const qqqTime = vol.timeToExpiry(qqqExpiry, now, 'QQQ');
+const qqqForward = 100 * Math.exp(-0.0045 * qqqTime);
+const lowerK = 99.5, upperK = 100.5;
+const qqqAtm = vol.calculate({ spot:100, symbol:'QQQ', now, expiries:[{ expiry:qqqExpiry, quotes:[
+  { side:'C', strike:lowerK, iv:0.20, delta:0.60 },
+  { side:'C', strike:upperK, iv:0.40, delta:0.40 },
+  { side:'P', strike:lowerK, iv:0.20, delta:-0.40 },
+  { side:'P', strike:upperK, iv:0.40, delta:-0.60 }
+] }] });
+const forwardWeight = Math.log(qqqForward / lowerK) / Math.log(upperK / lowerK);
+const expectedForwardATM = 0.20 + (0.40 - 0.20) * forwardWeight;
+assert.ok(Math.abs(qqqAtm.expiries[0].forward - qqqForward) < 1e-12);
+assert.ok(Math.abs(qqqAtm.expiries[0].atmIV - expectedForwardATM) < 1e-10);
+assert.equal(qqqAtm.dividendYield, 0.0045);
+
+// Partial expiry chains may show provisional single-expiry metrics, but cannot
+// contribute to Constant Maturity interpolation or the Term Structure curve.
+const complete7 = { expiry:'2026-11-21', dte:7, time:7/365.25, atmIV:0.24, atmSideCount:2, chainComplete:true };
+const partial30 = { expiry:'2026-12-14', dte:30, time:30/365.25, atmIV:0.20, atmSideCount:2, chainComplete:false };
+const blockedCM = vol.constantMaturity([complete7, partial30], [14]);
+assert.equal(blockedCM[0].iv, null);
+assert.equal(blockedCM[0].status, 'unbracketed');
+const partialRows = vol.calculate({ spot:100, symbol:'QQQ', now, expiries:[{ expiry:qqqExpiry, complete:false, expectedContracts:200, loadedContracts:20, quotes:[
+  { side:'C', strike:99, iv:.20, delta:.60 }, { side:'C', strike:101, iv:.22, delta:.40 },
+  { side:'P', strike:99, iv:.21, delta:-.40 }, { side:'P', strike:101, iv:.23, delta:-.60 }
+] }] });
+assert.equal(partialRows.expiries[0].chainComplete, false);
+assert.equal(partialRows.constantMaturity.every(item=>item.iv===null), true);
+
+// BSM IV inversion uses discounted intrinsic bounds when carry is non-zero.
+// A deep-ITM European call can be worth less than raw S-K after dividend discount.
+const carryTime = 1;
+const discountedDeepCall = vol.bsmPrice(100, 90, carryTime, 0.001, 'C', 0, 0.10);
+assert.ok(discountedDeepCall > 0 && discountedDeepCall < 10);
+const discountedDeepCallIV = vol.impliedVolFromMid(discountedDeepCall, 100, 90, carryTime, 'C', 0, 0.10);
+assert.ok(discountedDeepCallIV !== null && Math.abs(discountedDeepCallIV - 0.001) < 2e-5,
+  'valid carry-discounted deep ITM call is not rejected by raw intrinsic S-K');
+assert.equal(vol.bsmPrice(100, 100, t, 0.2, 'X'), null);
+assert.equal(vol.bsmDelta(100, 100, t, 0.2, 'X'), null);
+
+// Exact ATM strike duplicates are averaged, not arbitrarily taken from the first row.
+assert.equal(vol.interpolateAtSpot([
+  { strike: 100, iv: 0.20 }, { strike: 100, iv: 0.30 },
+  { strike: 99, iv: 0.22 }, { strike: 101, iv: 0.28 }
+], 100), 0.25);
+
+// Vanna and Charm closed forms are regression-checked against central finite
+// differences of the same BSM Delta implementation, for both option sides.
+for (const side of ['C', 'P']) {
+  const S = 100, K = 105, T = 0.25, sigma = 0.30, rate = 0.04, dividendYield = 0.012;
+  const analytic = vol.bsmVannaCharm(S, K, T, sigma, side, rate, dividendYield);
+  const volStep = 1e-5, timeStep = 1e-6;
+  const vannaFinite = (
+    vol.bsmDelta(S, K, T, sigma + volStep, side, rate, dividendYield) -
+    vol.bsmDelta(S, K, T, sigma - volStep, side, rate, dividendYield)
+  ) / (2 * volStep);
+  // Calendar time advances while remaining time-to-expiry falls.
+  const charmFinite = (
+    vol.bsmDelta(S, K, T - timeStep, sigma, side, rate, dividendYield) -
+    vol.bsmDelta(S, K, T + timeStep, sigma, side, rate, dividendYield)
+  ) / (2 * timeStep);
+  assert.ok(Math.abs(analytic.vanna - vannaFinite) < 2e-5, `${side} Vanna matches dDelta/dsigma finite difference`);
+  assert.ok(Math.abs(analytic.charm - charmFinite) < 2e-5, `${side} Charm matches dDelta/dcalendar-time finite difference`);
+}
+
+console.log('Stock Options Volatility Analytics tests: passed (including Vanna/Charm finite-difference checks)');
