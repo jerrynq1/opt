@@ -15,7 +15,7 @@ function makeHarness(fetchImpl) {
   const marker = '  buildViews();\n  window.stockOptionsSetActive=setActive;';
   assert.ok(source.includes(marker), 'test hook marker not found');
   source = source.replace(marker,
-    '  buildViews();\n  window.__t={request,requestText,loadChain,activate,deactivate,refreshQuotes,crossAssetSnapshot,mergeLiveQuote,loadExpirations,extractExpiryDates,extractExpiryDatesFromHtml,parseExpiryValue,candidateDates,expiryPartStatus,sessions};\n  window.stockOptionsSetActive=setActive;');
+    '  buildViews();\n  window.__t={request,requestText,loadChain,activate,deactivate,refreshQuotes,crossAssetSnapshot,mergeLiveQuote,loadExpirations,extractExpiryDates,extractExpiryDatesFromHtml,parseExpiryValue,candidateDates,expiryPartStatus,subscribe,underlyingPriceRow,handlePrice,sessions};\n  window.stockOptionsSetActive=setActive;');
   const elements = new Map();
   const el = id => { if (!elements.has(id)) elements.set(id, { id, value: '', innerHTML: '', textContent: '', dataset: {}, style: {}, hidden: false, className: '', classList: { add() {}, remove() {}, toggle() {} }, appendChild() {}, querySelector() { return null; }, querySelectorAll() { return []; } }); return elements.get(id); };
   const document = { getElementById: el, body: { dataset: {} }, createElement: () => el('tmp' + Math.random()) };
@@ -25,7 +25,8 @@ function makeHarness(fetchImpl) {
   // Fast timers: the 12s request timeout becomes 20ms, backoff/retry waits become ~2ms.
   const fastTimeout = (fn, ms, ...a) => setTimeout(fn, ms === 12000 ? 20 : Math.min(ms, 2), ...a);
   const intervals = [];
-  class FakeWS { constructor() { this.readyState = 0; this.closed = false; } send() {} close() { this.closed = true; } }
+  const sockets = [];
+  class FakeWS { constructor(url) { this.url=url; this.readyState = 0; this.closed = false; this.sent=[]; sockets.push(this); } send(data) { this.sent.push(JSON.parse(data)); } close() { this.closed = true; } }
   const interval = (fn, ms, ...a) => { const id = setInterval(fn, ms, ...a); intervals.push(id); return id; };
   FakeWS.OPEN = 1;
   const ctx = {
@@ -35,7 +36,7 @@ function makeHarness(fetchImpl) {
     setTimeout: fastTimeout, clearTimeout, setInterval: interval, clearInterval, Intl, Date, Math, JSON, Promise, Map, Set
   };
   vm.runInNewContext(source, ctx, { filename: 'stock-options.js' });
-  return { t: window.__t, calls, intervals };
+  return { t: window.__t, calls, intervals, sockets };
 }
 
 const json = (body, status = 200) => ({ ok: status < 400, status, text: async () => JSON.stringify(body) });
@@ -172,10 +173,11 @@ test('expiry state distinguishes pending, loading, error, partial and complete w
   assert.equal(t.expiryPartStatus({ contractSymbols: new Set(['x']), hydrating: true, loadState: 'loading' }, { complete: false }), 'loading');
   assert.equal(t.expiryPartStatus({ contractSymbols: new Set(), loadState: 'error', error: 'timeout' }, null), 'error');
   assert.equal(t.expiryPartStatus({ contractSymbols: new Set(['x']), hydrating: false, loadState: 'partial' }, { complete: false }), 'partial');
-  assert.equal(t.expiryPartStatus({ contractSymbols: new Set(['x']), hydrating: false, loadState: 'loaded' }, { complete: true, gexComplete: true }), 'ok');
+  assert.equal(t.expiryPartStatus({ contractSymbols: new Set(['x']), hydrating: false, loadState: 'loaded', price: 100 }, { complete: true, gexComplete: true }), 'ok');
   // An OCC quote received with null OI is represented as zero rather than a missing quote.
   const sub = { contractSymbols: new Set(['x']), quotes: new Map([['x', { openInterest: null }]]), contracts: [{ os: 'x' }], chainComplete: true, chainListInvalidCount: 0, price: 100 };
   assert.equal(t.expiryPartStatus({ ...sub, loadState: 'loaded' }, { complete: true, gexComplete: true }), 'ok');
+  assert.equal(t.expiryPartStatus({ ...sub, loadState: 'loaded', price: null }, { complete: true, gexComplete: false }), 'waiting-spot');
 });
 
 test('deactivating during expiry discovery aborts the old activation and prevents timers or sockets', async () => {
@@ -221,4 +223,36 @@ test('cross-asset map refuses a snapshot whose expiry does not match the display
   const snap = { key: 'qqq', symbol: 'QQQ', expiry: '2026-11-27', complete: true, dist: [{ strike: 652, callOI: 1, putOI: 1, gex: 1 }], gexLevels: [] };
   assert.equal(window.crossAssetMapMath.buildMappedMap({ ...snap, expiryMismatch: true }, 652, 4545), null);
   assert.notEqual(window.crossAssetMapMath.buildMappedMap(snap, 652, 4545), null);
+});
+
+
+test('underlying price parser accepts Binance Stocks price snapshot and closed-market phase', () => {
+  const { t } = makeHarness(() => json({}));
+  const quote = t.underlyingPriceRow({
+    e: 'price',
+    rates: [
+      { s: 'QQQ', ac: 'EQ_QQQ', p: '610.25', pc: '608.90', t: 1794681300000, mp: 'C' },
+      { s: 'GLD', ac: 'EQ_GLD', p: '390.45', pc: '389.80', t: null, mp: 'C' }
+    ]
+  }, { symbol: 'GLD', assetCode: 'EQ_GLD' });
+  assert.equal(quote.price, 390.45);
+  assert.equal(quote.previousClose, 389.8);
+  assert.equal(quote.priceTime, null);
+  assert.equal(quote.marketPhase, 'C');
+});
+
+test('subscribe() requests Binance shared price snapshot stream, not an unsupported per-asset symbol_price stream', () => {
+  const { t, sockets } = makeHarness(() => json({}));
+  const s = t.sessions.gld;
+  s.active = true;
+  s.expiry = '2026-11-20';
+  s.expirations = [{ date: '2026-11-20', root: 'GLD' }];
+  t.subscribe(s);
+  const ws = sockets[0];
+  assert.ok(ws, 'WebSocket should be created');
+  ws.readyState = 1;
+  ws.onopen();
+  assert.deepEqual(ws.sent[0].params, ['price', 'GLD_20261120_GLD@optionChainQuoteDelayed']);
+  assert.ok(!ws.sent[0].params.some(x => x.endsWith('@symbol_price')));
+  t.deactivate(s);
 });

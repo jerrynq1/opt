@@ -137,7 +137,7 @@ test('tablet feed pill stays inside its status column and narrow-phone indicator
 test('live Options metadata keeps the same styled chips after quotes load', () => {
   const stock = read('js/stock-options.js');
   assert.match(stock, /meta\.innerHTML=items\.map\(\(\[label,value\]\)=>`<span class="opt-meta-item">/);
-  for (const label of ['OPTIONS FEED', 'REST SOURCE', 'CONTRACT MULTIPLIER', 'OI OBSERVED', 'MISSING DATA', 'SPOT WEBSOCKET']) {
+  for (const label of ['OPTIONS FEED', 'REST SOURCE', 'CONTRACT MULTIPLIER', 'OI OBSERVED', 'MISSING DATA', 'SPOT PRICE FEED']) {
     assert.ok(stock.includes(label));
   }
 });

@@ -9,7 +9,7 @@ function load() {
   let source = fs.readFileSync(path.join(__dirname, '..', 'js', 'stock-options.js'), 'utf8');
   const hook = '  buildViews();\n  window.stockOptionsSetActive=setActive;';
   assert.ok(source.includes(hook), 'test hook anchor present');
-  source = source.replace(hook, '  window.__t={renderScope,renderScopeViews,renderLevels,elements:null,calc,calcSingle,calcAggregate,scopeExpiries,gammaFlipOf,newScopeSub,yearsToExpiry,isoTodayNY,expiryPartStatus};\n  window.stockOptionsSetActive=setActive;');
+  source = source.replace(hook, '  window.__t={renderScope,renderScopeViews,renderLevels,renderBreakdown,elements:null,calc,calcSingle,calcAggregate,scopeExpiries,gammaFlipOf,newScopeSub,yearsToExpiry,isoTodayNY,expiryPartStatus};\n  window.stockOptionsSetActive=setActive;');
   const elements = new Map();
   const document = { getElementById(id) {
     if (!elements.has(id)) elements.set(id, { id, value: 'gamma', innerHTML: '', textContent: '' });
@@ -186,4 +186,21 @@ test('renderScope draws the per-expiry breakdown and shows/hides it with the sco
   s.scope = 'selected'; s.scopeRev++;
   H.renderScope(s);
   assert.equal(H.elements.get('so-qqq-breakdown-card').hidden, true);
+});
+
+
+test('missing Spot does not turn unavailable per-expiry GEX into fake zero values', () => {
+  const d1=addDays(4),d2=addDays(11);
+  const s=session('all',{[d1]:[['C',100,10],['P',100,20]],[d2]:[['C',105,30],['P',95,40]]});
+  s.price=null;
+  for (const sub of s.scopeData.values()) sub.price=null;
+  const result=H.calcAggregate(s,NOW);
+  assert.equal(result.scopeInfo.gexLoaded,0);
+  assert.ok(result.scopeInfo.parts.every(x=>x.gexAvailable===false&&x.netGex===null&&x.gross===null));
+  assert.ok(result.scopeInfo.parts.every(x=>x.status==='waiting-spot'));
+  H.renderBreakdown(s,result);
+  const html=H.elements.get('so-qqq-breakdown').innerHTML;
+  assert.match(html,/<td[^>]*>—<\/td>/);
+  assert.doesNotMatch(html,/<td[^>]*>\+0<\/td>/);
+  assert.match(html,/Chờ Spot/);
 });

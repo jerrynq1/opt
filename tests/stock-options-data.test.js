@@ -231,6 +231,29 @@ test('GEX preview stays provisional when one contract lacks both provider Gamma 
   assert.equal(result.gammaFlip,null);
 });
 
+test('missing underlying Spot blocks BSM GEX even when IV and multiplier coverage are complete', () => {
+  const expiry='2026-12-18', now=Date.parse('2026-11-12T12:00:00Z');
+  const contracts=[{os:'c100'},{os:'p100'}];
+  const quotes=new Map([
+    ['c100',{optionSymbol:'c100',side:'C',strike:100,multiplier:100,openInterest:120,iv:.28,gamma:null,volume:0}],
+    ['p100',{optionSymbol:'p100',side:'P',strike:100,multiplier:100,openInterest:150,iv:.30,gamma:null,volume:0}]
+  ]);
+  const session={cfg:{key:'qqq'},price:null,expiry,chainComplete:true,contracts,quotes};
+  const result=helpers.calc(session,now);
+  assert.equal(result.complete,true);
+  assert.equal(result.ivKnown,2);
+  assert.equal(result.ivMissing,0);
+  assert.equal(result.multiplierMissing,0);
+  assert.equal(result.gammaProviderKnown,0);
+  assert.equal(result.gammaDerivedKnown,0);
+  assert.equal(result.gexComplete,false);
+  assert.equal(result.gexMissing,2);
+  helpers.renderLevels(session);
+  const html=helpers.elements.get('so-qqq-levels').innerHTML;
+  assert.match(html,/Chờ Spot underlying để tính Gamma BSM\/IV và GEX/);
+  assert.match(html,/Chờ Spot underlying từ Binance price stream/);
+});
+
 test('zero provider Gamma falls back to BSM IV instead of creating a false zero-GEX strike', () => {
   const q={optionSymbol:'QQQ261120C00100000',side:'C',strike:100,multiplier:100,openInterest:10,iv:.25,gamma:0};
   const resolved=helpers.resolveGamma(q,100,0.02);
