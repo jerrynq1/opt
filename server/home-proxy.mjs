@@ -10,6 +10,9 @@ import { createEquityPriceFeed } from './equity-price-feed.mjs';
 const PORT = Number(process.env.PORT || 8788);
 const env = { ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS || '*' };
 const spotFeed = createEquityPriceFeed();
+// Warm the shared Binance cache as soon as the scheduled Node gateway starts.
+// Integration tests can opt out so they remain deterministic and offline.
+if (process.env.DISABLE_SPOT_PREWARM !== '1') spotFeed.connect();
 const quickOptions = createQuickOptionsService({ worker, env, spotFeed });
 
 function corsFor(origin = '') {

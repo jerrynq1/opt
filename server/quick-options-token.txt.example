@@ -1,0 +1,4 @@
+PRIVATE TOKEN FILE PLACEHOLDER
+Do not use this file as an actual token.
+Preserve/copy your existing server/quick-options-token.txt from your private installation
+when moving the Node server. If absent, quick-options.mjs will generate a new token.

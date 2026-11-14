@@ -1976,11 +1976,14 @@
       if(!s.active||s.priceHttpBusy)return;
       s.priceHttpBusy=true;
       const controller=typeof AbortController!=='undefined'?new AbortController():null;
+      s.priceHttpController=controller;
       const timeout=setTimeout(()=>controller?.abort(),10000);
       try{
         const url=`${SPOT_SERVER_BASE}/api/spot?symbol=${encodeURIComponent(s.cfg.symbol)}&timeout=8000`;
         const response=await fetch(url,{method:'GET',cache:'no-store',headers:{Accept:'application/json'},signal:controller?.signal});
+        if(!s.active)return;
         const payload=await response.json().catch(()=>null);
+        if(!s.active)return;
         if(!response.ok||!payload?.ok||!(Number(payload.price)>0)){
           throw new Error(payload?.error||`Spot server HTTP ${response.status}`);
         }
@@ -1994,6 +1997,7 @@
           feedState:payload.feedState||null
         });
       }catch(e){
+        if(!s.active)return;
         consecutiveFailures++;
         s.priceFeedDetail=`Node Server Spot API: ${e?.name==='AbortError'?'request timeout':e.message||e}`;
         updateChainMeta(s);
@@ -2004,7 +2008,9 @@
           subscribePrice(s,0);
         }
       }finally{
-        clearTimeout(timeout);s.priceHttpBusy=false;
+        clearTimeout(timeout);
+        if(s.priceHttpController===controller)s.priceHttpController=null;
+        s.priceHttpBusy=false;
       }
     };
     poll();
@@ -2132,6 +2138,7 @@
     }
     for(const key of ['reconnectTimer','priceReconnectTimer','priceSnapshotTimer']){if(s[key]){clearTimeout(s[key]);s[key]=null;}}
     if(s.priceHttpTimer){clearInterval(s.priceHttpTimer);s.priceHttpTimer=null;}
+    if(s.priceHttpController){try{s.priceHttpController.abort();}catch{}s.priceHttpController=null;}
   }
   function scheduleReconnect(s){
     if(!s.active||s.reconnectTimer)return;

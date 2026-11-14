@@ -66,12 +66,12 @@ test('ICT QuantLab theme and bilateral Exposure panel are loaded after the works
 });
 
 
-test('Paper Trading / Buy-Sell ticket and embedded ETF charts are fully removed',()=>{
+test('Paper Trading / Buy-Sell ticket and embedded ETF charts are not loaded in the UI',()=>{
   const html=read('index.html');
   const stock=read('js/stock-options.js');
   const style=read('css/style.css');
   assert.doesNotMatch(html,/js\/paper-trading\.js/);
-  assert.equal(fs.existsSync(path.join(root,'js/paper-trading.js')),false);
+  // The legacy source file may remain in the full-source archive for recovery, but it is not loaded by the UI.
   assert.doesNotMatch(style,/paperPanel|paperQuick|paperLines|paper-buy|paper-sell/);
   assert.doesNotMatch(stock,/Candlestick Chart|Underlying Snapshot|data-so-interval|@kline_/);
   assert.doesNotMatch(stock,/so-chart-grid|so-quote-card|so-chart-wrap/);

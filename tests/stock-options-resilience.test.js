@@ -19,7 +19,7 @@ function makeHarness(fetchImpl) {
   const elements = new Map();
   const el = id => { if (!elements.has(id)) elements.set(id, { id, value: '', innerHTML: '', textContent: '', dataset: {}, style: {}, hidden: false, className: '', classList: { add() {}, remove() {}, toggle() {} }, appendChild() {}, querySelector() { return null; }, querySelectorAll() { return []; } }); return elements.get(id); };
   const document = { getElementById: el, body: { dataset: {} }, createElement: () => el('tmp' + Math.random()) };
-  const window = { BINANCE_STOCK_PROXY: 'https://proxy.test' };
+  const window = { BINANCE_STOCK_PROXY: 'https://proxy.test', BINANCE_STOCK_SPOT_API: 'https://spot.test' };
   const calls = [];
   const fetchStub = (url, opts) => { calls.push({ url: String(url), method: opts?.method || 'GET' }); return fetchImpl(url, opts, calls.length); };
   // Fast timers: the 12s request timeout becomes 20ms, backoff/retry waits become ~2ms.
@@ -28,18 +28,19 @@ function makeHarness(fetchImpl) {
   const sockets = [];
   class FakeWS { constructor(url) { this.url=url; this.readyState = 0; this.closed = false; this.sent=[]; sockets.push(this); } send(data) { this.sent.push(JSON.parse(data)); } close() { this.closed = true; } }
   const interval = (fn, ms, ...a) => { const id = setInterval(fn, ms, ...a); intervals.push(id); return id; };
+  const clearIntervalTracked = id => { const i = intervals.indexOf(id); if (i >= 0) intervals.splice(i, 1); clearInterval(id); };
   FakeWS.OPEN = 1;
   const ctx = {
     window, document, console, location: { port: '8787' },
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     fetch: fetchStub, AbortController, URLSearchParams, WebSocket: FakeWS,
-    setTimeout: fastTimeout, clearTimeout, setInterval: interval, clearInterval, Intl, Date, Math, JSON, Promise, Map, Set
+    setTimeout: fastTimeout, clearTimeout, setInterval: interval, clearInterval: clearIntervalTracked, Intl, Date, Math, JSON, Promise, Map, Set
   };
   vm.runInNewContext(source, ctx, { filename: 'stock-options.js' });
   return { t: window.__t, calls, intervals, sockets };
 }
 
-const json = (body, status = 200) => ({ ok: status < 400, status, text: async () => JSON.stringify(body) });
+const json = (body, status = 200) => ({ ok: status < 400, status, json: async () => body, text: async () => JSON.stringify(body) });
 const html = (body, status = 200) => ({ ok: status < 400, status, text: async () => body });
 const hang = (url, opts) => new Promise((_, reject) => opts.signal.addEventListener('abort', () => reject(new Error('aborted'))));
 const SYM = 'QQQ261120C00500000';
@@ -52,20 +53,65 @@ function seedLoaded(s, expiry = '2026-11-20') {
   s.quotes = new Map([[SYM, { optionSymbol: SYM, side: 'C', strike: 500, openInterest: 10, iv: 0.2, multiplier: 100, last: 1 }]]);
 }
 
-test('activate() starts the direct Binance Spot fallback before expiry discovery resolves when Node API is not configured', async () => {
-  const { t, sockets } = makeHarness(hang);
+test('activate() starts Node Spot polling before expiry discovery resolves', async () => {
+  const { t, calls, sockets } = makeHarness(hang);
   const s = t.sessions.gld;
   const activation = t.activate(s);
 
-  assert.equal(sockets.length, 1, 'Spot WebSocket should open immediately on activation');
-  assert.equal(sockets[0].url, 'wss://nbstream.binance.com/equity/ws/price', 'direct Binance Price Stream is used when Node API is not configured');
+  assert.ok(calls.length >= 2, 'Spot API and expiry discovery should start independently');
+  assert.match(calls[0].url, /^https:\/\/spot\.test\/api\/spot\?symbol=GLD/);
+  assert.match(calls[1].url, /get-exchange-info/);
   assert.equal(s.priceActivationAt > 0, true);
-  assert.equal(s.priceFeedState, 'connecting');
+  assert.equal(s.priceHttpTimer !== null, true);
+  assert.equal(s.priceSocket, null, 'browser WebSocket is not primary when Node API is configured');
+  assert.equal(sockets.length, 0, 'expiry discovery is still pending, so option socket has not started');
 
   t.deactivate(s);
   await activation;
   assert.equal(s.active, false);
-  assert.equal(sockets[0].closed, true, 'deactivation must still close the early Spot socket');
+  assert.equal(s.priceHttpTimer, null);
+});
+
+test('Node Spot API can populate the underlying before expiry discovery resolves', async () => {
+  const { t, calls } = makeHarness((url, opts) => {
+    if (String(url).includes('/api/spot?symbol=GLD')) {
+      return Promise.resolve(json({
+        ok: true, symbol: 'GLD', price: 390.45, previousClose: 389.8,
+        priceTime: Date.now(), marketPhase: 'O', source: 'binance-equity-price-stream',
+        priceAgeMs: 0, receivedAgeMs: 0, feedState: 'live'
+      }));
+    }
+    return hang(url, opts);
+  });
+  const s = t.sessions.gld;
+  const activation = t.activate(s);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(s.price, 390.45);
+  assert.equal(s.priceSource, 'node-server · binance-equity-price-stream');
+  assert.ok(calls.some(x => x.url.includes('/api/spot?symbol=GLD')));
+  t.deactivate(s);
+  await activation;
+});
+
+
+test('deactivate() aborts in-flight Node Spot requests and stops the polling timer', async () => {
+  let aborted = false;
+  const { t, calls, intervals } = makeHarness((url, opts) => {
+    if (String(url).includes('/api/spot?symbol=GLD')) {
+      return new Promise((resolve, reject) => opts.signal.addEventListener('abort', () => { aborted = true; reject(new Error('aborted')); }));
+    }
+    return hang(url, opts);
+  });
+  const s = t.sessions.gld;
+  const activation = t.activate(s);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.ok(calls.some(x => x.url.includes('/api/spot?symbol=GLD')));
+  assert.equal(intervals.length, 1);
+  t.deactivate(s);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(aborted, true);
+  assert.equal(intervals.length, 0);
+  await activation;
 });
 
 test('request() retries a transient 5xx once for POST and then succeeds', async () => {
@@ -257,48 +303,46 @@ test('underlying price parser accepts Binance Stocks price snapshot and closed-m
   assert.equal(quote.marketPhase, 'C');
 });
 
-test('subscribe() isolates the direct Spot socket from the option-chain subscription', () => {
+test('browser fallback uses direct Binance Price Stream and keeps Option Chain independent', () => {
   const { t, sockets } = makeHarness(() => json({}));
   const s = t.sessions.gld;
   s.active = true;
   s.expiry = '2026-11-20';
   s.expirations = [{ date: '2026-11-20', root: 'GLD' }];
   t.subscribe(s);
-  assert.equal(sockets.length, 2, 'Spot and option chain must use independent sockets');
+  assert.equal(sockets.length, 2, 'fallback Spot and option chain use independent sockets');
   const priceWs = sockets.find(x => x.url === 'wss://nbstream.binance.com/equity/ws/price');
   const optionWs = sockets.find(x => x.url === 'wss://nbstream.binance.com/equity/stream');
-  assert.ok(priceWs, 'PWA should use the direct Binance Spot fallback when Node API is not configured');
-  assert.ok(optionWs, 'option stream socket should remain independent');
+  assert.ok(priceWs, 'browser fallback connects directly to Binance, not the blocked Worker relay');
+  assert.ok(optionWs, 'option stream socket remains independent');
   priceWs.readyState = 1; priceWs.onopen();
-  assert.equal(priceWs.sent.length, 0, 'raw Price Stream does not need a client SUBSCRIBE request');
+  assert.equal(priceWs.sent.length, 0, 'raw Binance Price Stream needs no SUBSCRIBE message');
   optionWs.readyState = 1; optionWs.onopen();
   assert.deepEqual(optionWs.sent[0].params, ['GLD_20261120_GLD@optionChainQuoteDelayed']);
-  assert.equal(typeof optionWs.sent[0].id, 'string', 'Stocks Trading WebSocket request IDs should be strings');
-  assert.ok(!optionWs.sent[0].params.includes('price'), 'price stream must not be coupled to option stream acceptance');
+  assert.equal(typeof optionWs.sent[0].id, 'string');
+  assert.ok(!optionWs.sent[0].params.includes('price'));
   t.deactivate(s);
 });
 
-test('direct Binance Spot socket schedules recovery when it closes before a snapshot', () => {
-  const { t, sockets } = makeHarness(() => json({}));
+test('browser direct fallback starts Node polling after the direct socket closes', () => {
+  const { t, sockets, calls } = makeHarness(() => json({ ok: false, error: 'temporary' }, 503));
   const s = t.sessions.gld;
   s.active = true; s.expiry = '2026-11-20'; s.expirations = [{ date: '2026-11-20', root: 'GLD' }];
   t.subscribe(s);
-  const priceWs = sockets.find(x => x.url === 'wss://nbstream.binance.com/equity/ws/price');
+  const priceWs = sockets.find(x => x.url.endsWith('/equity/ws/price'));
   assert.ok(priceWs);
   priceWs.readyState = 1; priceWs.onopen();
   priceWs.readyState = 3; priceWs.onclose();
-  assert.equal(s.priceFeedState, 'error');
-  assert.equal(s.priceSocket, null);
-  assert.ok(s.priceReconnectTimer, 'a reconnect is scheduled after the direct socket closes');
+  assert.ok(calls.some(x => x.url.includes('/api/spot?symbol=GLD')), 'Node API polling is re-enabled after browser socket closes');
   t.deactivate(s);
 });
 
-test('direct Price Stream snapshot updates Spot independently even when option-chain subscription is rejected', () => {
+test('direct Binance Price Stream updates Spot even when Option Chain subscription is rejected', () => {
   const { t, sockets } = makeHarness(() => json({}));
   const s = t.sessions.gld;
   s.active = true; s.expiry = '2026-11-20'; s.expirations = [{ date: '2026-11-20', root: 'GLD' }];
   t.subscribe(s);
-  const priceWs = sockets.find(x => x.url === 'wss://nbstream.binance.com/equity/ws/price');
+  const priceWs = sockets.find(x => x.url.endsWith('/equity/ws/price'));
   const optionWs = sockets.find(x => x.url.endsWith('/equity/stream'));
   priceWs.readyState = 1; priceWs.onopen();
   optionWs.readyState = 1; optionWs.onopen();
@@ -306,19 +350,18 @@ test('direct Price Stream snapshot updates Spot independently even when option-c
   optionWs.onmessage({ data: JSON.stringify({ id, code: -1000, msg: 'option stream rejected' }) });
   assert.equal(s.optionFeedState, 'error');
   priceWs.onmessage({ data: JSON.stringify({ e: 'price', rates: [{ s: 'GLD', ac: 'EQ_GLD', p: '391.25', pc: '390.10', t: null, mp: 'C' }] }) });
-  assert.equal(s.price, 391.25, 'Spot must update despite the option stream RPC error');
+  assert.equal(s.price, 391.25, 'Spot must update independently from Option Chain RPC status');
   assert.equal(s.previousClose, 390.10);
   assert.equal(s.marketPhase, 'C');
-  assert.equal(s.priceFeedState, 'closed', 'closed-market snapshot is labelled closed, not live');
+  assert.equal(s.priceFeedState, 'closed', 'closed-market snapshot must not be labelled live/ok');
   t.deactivate(s);
 });
 
-
-test('direct raw price socket exposes when Binance snapshot does not contain the requested underlying', () => {
+test('raw price socket exposes when Binance snapshot does not contain the requested underlying', () => {
   const { t, sockets } = makeHarness(() => json({}));
   const s = t.sessions.gld; s.active = true;
   t.subscribe(s);
-  const priceWs = sockets.find(x => x.url === 'wss://nbstream.binance.com/equity/ws/price');
+  const priceWs = sockets.find(x => x.url.endsWith('/equity/ws/price'));
   priceWs.readyState = 1; priceWs.onopen();
   priceWs.onmessage({ data: JSON.stringify({ e: 'price', rates: [{ s: 'QQQ', ac: 'EQ_QQQ', p: '610.2' }] }) });
   assert.equal(s.price, null);
