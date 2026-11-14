@@ -1,54 +1,54 @@
-# ATAS Indicators → ICT QuantLab (Vietnamese handoff)
+# ICT QuantLab · ATAS Indicator Library (VI)
 
-## Contents
+## Kết quả đối chiếu source ATAS
 
-- `atas-catalog.json`: machine-readable inventory of every ATAS indicator discovered from the full `Technical/` tree, including nested folders such as `DomV3/`.
-- `atas-catalog.js`: browser-loaded copy of the same catalogue for the Kho Indicator UI.
-- `atas-technical.js`: browser-native JavaScript calculations added to QuantLab. It loads after `js/pine-indicators-defs.js` and before `js/indicators-engine.js`.
+Gói nguồn có 285 file C# và 254 khai báo indicator class có `DisplayName`. Sau audit: **217 mục được giữ trong catalog**, mỗi mục có một file `.js` riêng và implementation/adapter đang dùng được với dữ liệu hiện có; **37 mục bị loại khỏi catalog/UI** vì thiếu feed/renderer cần thiết hoặc trùng với module ICT hiện hữu. Danh sách và lý do nằm trong `REMOVED_INDICATORS_VI.md`.
+Chi tiết kiểm toán cuối cùng, số lượng theo loại port, nguồn dữ liệu và giới hạn triển khai nằm trong `FINAL_RESOURCE_AUDIT_VI.md`.
 
-## Coverage
+## Cấu trúc
 
-The uploaded source archive contains 254 distinct indicator declarations identified by `DisplayName`. All 254 are represented in the catalogue and searchable in the UI. QuantLab now contains 150 browser-native JavaScript indicator definitions in the added module layer; 188 source declarations are linked to those definitions or existing QuantLab modules (some source variants share the same implementation). The source-class/path audit found an exact match: 254 declarations in the ATAS Technical tree, 254 catalogue entries, no missing or extra classes. This is a full inventory integration, not a claim that all 254 have a one-to-one executable port.
+- `atas-catalog.json` / `atas-catalog.js`: catalog chỉ giữ các indicator có implementation dùng được với dữ liệu/renderer hiện tại.
+- `atas-technical-runtime.js`: helper OHLCV.
+- `atas-session-runtime.js`: gom session/day/week/month theo trục thời gian server mà chart cung cấp; không có exchange holiday calendar riêng.
+- `atas-tick-runtime.js`: collector quote-tick/footprint proxy; không phải trade tape.
+- `individual/<id>.js`: mỗi indicator trong catalog có một file JavaScript riêng.
+- `_compat_*.js`: compatibility modules cũ, không phải catalog entries.
+- `atas-registry-finalize.js`: xác minh registry sau khi tất cả modules đã nạp.
 
-Current coverage by source declaration:
+## Nguồn dữ liệu được tận dụng
 
-| Status | Count | Meaning |
-|---|---:|---|
-| Ported | 184 | JavaScript calculation linked; includes 80 clearly flagged nearest/proxy adaptations |
-| Existing | 4 | Reuses an existing QuantLab Orderflow / ICT module |
-| Needs tick/trade/footprint feed | 27 | Requires trade tape, candle price-level volume, bid/ask or footprint data |
-| Needs full depth/MBO | 11 | Requires genuine order-book / MBO data |
-| Needs session calendar | 8 | Requires configured exchange session/timezone |
-| Needs external data | 9 | Requires breadth, external symbol or account source |
-| Visual-only utility | 11 | ATAS-specific candle coloring / drawing / UI behavior |
+1. **OHLCV chart bars** từ cTrader chart: các công thức technical, candle, volatility, volume-bar, session levels. `volume` trên CFD có thể là broker tick volume, không được mặc định coi là centralized executed volume.
+2. **Historical/live BID/ASK quote ticks**: `GetTickData (2145)` và live quote updates; footprint phân loại mỗi quote update thành quote event theo quy tắc của collector. Không có executed size, trade ID hoặc aggressor side đã xác minh.
+3. **cTrader Level II depth quotes**: snapshot bid/ask levels và thay đổi quote entries từ depth stream. Đây là market-depth quote data, không phải MBO từng lệnh hay executed-trade feed.
+4. **Server-time axis** (`A.s`/`A.t`) của chart: session/day/week/month aggregation có thể cấu hình giờ mở; không có holiday/rollover calendar theo exchange.
 
-The 150 registered JavaScript definitions support 188 catalogue entries because multiple ATAS variants/aliases share a QuantLab calculation. The remaining 66 entries are not silently omitted: each remains searchable and disabled with its exact data/renderer blocker shown. The catalogue also includes QuantLab-native entries in the same searchable screen, so its “Tất cả” count can be higher than 254.
+## Phân loại implementation
 
-The catalogue distinguishes:
+- `direct`: công thức/logic được port theo source C# hoặc định nghĩa kỹ thuật trực tiếp.
+- `approx_proxy`: có phép tính chạy được nhưng khác biệt dữ liệu, hành vi renderer hoặc chi tiết triển khai ATAS; xem `detail` trong catalog.
+- `quote_tick_proxy`: sử dụng quote events/quote footprint; tuyệt đối không diễn giải thành traded volume hay true order-flow delta.
+- `existing_module`: liên kết implementation QuantLab đã có từ trước.
 
-- `ported`: JavaScript implementation added using chart OHLCV. `conversion: direct` means the source calculation was ported closely; `conversion: approx_proxy` means the UI explicitly identifies an approximation/proxy, not a guaranteed 1:1 equivalent.
-- `existing`: a corresponding QuantLab module already exists.
-- `approx_proxy`: nearest available QuantLab formula/module; not guaranteed to match ATAS 1:1.
-- `needs_ticks`: requires trade/tick tape or aggressor-side information.
-- `needs_depth`: requires full market depth/MBO or genuine open-interest input.
-- `needs_external`: requires external symbols, COT or account/portfolio data.
-- `needs_session`: requires the same exchange session calendar/timezone as ATAS.
-- `visual_only`: ATAS-specific drawing, UI or renderer utility.
+Một indicator xuất hiện trong catalog đồng nghĩa có implementation chạy được bằng nguồn hiện có, nhưng không có nghĩa tất cả đều parity 1:1 với ATAS. Indicator cần feed/renderer không có sẽ bị loại khỏi catalog/UI, danh sách nằm ở `REMOVED_INDICATORS_VI.md`.
 
-Only entries with a registered QuantLab implementation receive an enabled “Thêm vào chart” control. Other entries remain visible and searchable, with their blockers identified. No remaining entry is labelled pending: each unlinked entry is assigned a feed, account, breadth, session or renderer requirement.
+## Tick / footprint
 
-## Important technical boundary
+Chỉ các module đang bật có nhu cầu quote-tick mới kích hoạt historical/live footprint collector. Bar's Volume Filter chỉ yêu cầu quote feed ở các mode tick/delta/bid/ask; Bars Pattern chỉ yêu cầu khi bật filter footprint; VHF chỉ yêu cầu ở source ticks/bid/ask. Các mode dùng OHLCV không gọi tick loader.
 
-ATAS indicator sources are C#/.NET code that depends on ATAS/OFT APIs and runtime types. The browser PWA does not load those .NET assemblies. The new `atas-technical.js` is a JavaScript adaptation layer that uses the existing QuantLab OHLCV arrays and the current indicator renderer. It does not embed proprietary ATAS assemblies, ATAS UI code, or claim to recreate ATAS trade tape, MBO, order-book, account or session services.
+Mọi quote-derived output được label rõ trong catalog và mô tả indicator. Khi feed thiếu, output là null/unavailable; không zero-fill dữ liệu giả. Historical footprint giữ giới hạn `FP_MAXD` hiện hữu trong source; không tự thay đổi backend hoặc cấu hình server.
 
-For CFD instruments, chart volume and candle-derived up/down estimates are not exchange-native bid/ask trades. A proxy must not be interpreted as verified orderflow. The catalogue preserves these limitations so an item is not presented as fully operational when its required feed is absent.
+## Session / DOM
 
-## Load order
+- Daily Change mặc định so với Previous Day Close.
+- Pivots mặc định dùng ATAS `HighLow` third formula: R3/S3 = PP ± 2 × (High − Low).
+- Open Line mặc định dùng custom server-session start 09:00 theo source ATAS; có thể chỉnh giờ/phút.
+- Initial Balance chỉ vẽ khi timeframe chart không lớn hơn cửa sổ IB; timeframe rộng hơn không đủ thông tin để xác định extrema đầu phiên nên indicator trả rỗng.
+- DOM Power và Order Book Alerts dùng cTrader Level II depth snapshot/event changes. Chúng chỉ hiển thị snapshot/current depth; không tạo lịch sử DOM giả và không gọi dữ liệu đó là MBO.
 
-`indicators-defs.js` → `indicators-custom.js` → `pine-indicators-defs.js` → `indicators/atas-catalog.js` → `indicators/atas-technical.js` → `indicators-engine.js`.
+## Thứ tự nạp và deploy
 
-## Deploy
+`atas-catalog.js` → OHLCV/session/tick runtimes → primary individual modules → aliases/compatibility modules → registry finalizer → `js/indicators-engine.js`. Service Worker cache version được bump mỗi khi shell asset thay đổi. Thay đổi trong bản audit này chỉ thuộc frontend; không yêu cầu restart Node/Worker/Tunnel.
 
-This change is frontend-only. Publish the full static source. `sw.js` was bumped to `ict-quantlab-shell-v45` and the two new JavaScript files were added to the precache shell. After publishing, hard-refresh the browser or close/reopen the installed PWA so it installs the new shell.
+## Kiểm thử
 
-No Node restart, Worker deploy/restart, Cloudflare Tunnel restart, DNS change or port change is required. Keep the current Windows secrets and task configuration untouched.
+`bash tests/run-all.sh` chạy unit/fixture/static wiring tests. Đây không phải live validation trên browser và tài khoản cTrader thực tế. Xem `TICK_DATA_AUDIT_VI.md` và `REMOVED_INDICATORS_VI.md` để biết giới hạn dữ liệu và mục đã loại.
