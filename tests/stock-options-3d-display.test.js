@@ -13,7 +13,7 @@ const rendererSource = fs.readFileSync(path.join(root, 'js/stock-options-3d.js')
 test('Options page loads the 3D renderer before stock-options UI', () => {
   assert.match(html, /stock-options-surfaces\.js"><\/script><script src="https:\/\/cdn\.jsdelivr\.net\/npm\/three@0\.128\.0\/build\/three\.min\.js" crossorigin="anonymous"><\/script><script src="js\/stock-options-3d\.js"><\/script><script src="js\/stock-options\.js/);
   assert.match(sw, /"\.\/js\/stock-options-3d\.js"/);
-  assert.match(sw, /ict-quantlab-shell-v38/);
+  assert.match(sw, /ict-quantlab-shell-v40/);
 });
 
 test('Greeks area is a dedicated 3D surface with model metric and side controls', () => {
@@ -31,7 +31,8 @@ test('Option IV/Exposure/Volume/OI surfaces render through the 3D chart module',
   assert.match(js, /data-surface-tab="exposure"/);
   assert.match(js, /data-surface-tab="volume"/);
   assert.match(js, /data-surface-tab="oi"/);
-  assert.match(js, /X = % Strike\/Spot − 1, Y = DTE\/expiry, Z = selected metric/);
+  assert.ok(js.includes("X = % Strike/Spot − 1, Y = ${result.projection?'remaining DTE/time-to-expiry':'DTE/expiry'}, Z = selected metric"));
+  assert.match(js, /0DTE time-decay projection/);
 });
 
 test('3D chart includes canvas rotation, zoom, axis and tooltip styling', () => {

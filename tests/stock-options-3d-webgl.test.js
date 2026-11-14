@@ -13,7 +13,7 @@ test('pinned Three.js loads before the QuantLab 3D adapter and is cacheable by P
   const three = html.indexOf('https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js');
   const adapter = html.indexOf('js/stock-options-3d.js');
   assert.ok(three >= 0 && adapter > three, 'Three.js script must precede 3D adapter');
-  assert.match(sw, /ict-quantlab-shell-v38/);
+  assert.match(sw, /ict-quantlab-shell-v40/);
   assert.match(sw, /cdn\\\.jsdelivr\\\.net/);
 });
 
@@ -53,10 +53,28 @@ test('Spot is marked on the mesh with a gold ATM ridge and labeled underlying pr
   assert.match(renderer, /spotIndex/);
 });
 
+test('fractional same-day DTE ticks stay distinguishable near expiry', () => {
+  const chart3d = require('../js/stock-options-3d.js');
+  assert.equal(chart3d.formatDteTick(0), '0DTE');
+  assert.equal(chart3d.formatDteTick(0.002), '2.9m');
+  assert.equal(chart3d.formatDteTick(0.004), '5.8m');
+  assert.equal(chart3d.formatDteTick(0.25), '0.25D');
+});
+
+test('single 0DTE expiry builds a multi-slice time-decay surface instead of a one-row profile', () => {
+  assert.match(renderer, /timeDecayProjection/);
+  assert.match(renderer, /TIME-DECAY SURFACE/);
+  assert.match(renderer, /mesh\.timeDecayProjection \? `0DTE · MODEL TIME-DECAY SURFACE/);
+  assert.match(renderer, /TIME SLICES/);
+  assert.match(renderer, /mesh\.dteTicks/);
+  assert.match(renderer, /MODELLED TIME SLICE/);
+  assert.match(renderer, /mesh\.timeDecayProjection \? 'Y  TIME REMAINING' : 'Y  EXPIRY \/ DTE'/);
+});
+
 test('single-expiry WebGL mode draws an observed 3D profile line instead of an empty-mesh warning', () => {
   assert.match(renderer, /SINGLE EXPIRY/);
   assert.match(renderer, /NO SYNTHETIC EXPIRY/);
-  assert.match(renderer, /if \(mesh\.singleExpiry\)/);
+  assert.match(renderer, /if \(mesh\.singleExpiry && !mesh\.timeDecayProjection\)/);
   assert.match(renderer, /profileLine/);
   assert.match(renderer, /if \(indices\.length >= 3\)/);
 });

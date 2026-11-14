@@ -1641,9 +1641,11 @@
     const api=window.StockOptionsSurfaces,renderer=window.StockOptions3D;
     if(!api?.buildGreeks||!renderer?.mount){host.innerHTML='<div class="so-3d-empty">Greeks 3D module chưa được tải.</div>';return;}
     const result=api.buildGreeks({spot:s.price,symbol:s.cfg.symbol,expiries:inputs,metric,side});
-    if(status)status.textContent=`${result.rows.length}/${expected} expiry rows · ${result.quoteCount} quotes · ${side.toUpperCase()}`;
-    renderer.mount(host,result,{metricLabel:result.config?.label||metric,formatValue:GREEK_3D_FORMATS[metric],xLabel:'Strike / Spot moneyness (%)',yLabel:'Expiry (DTE)'});
-    if(foot){const partial=result.rows.filter(row=>!row.complete).length;foot.textContent=`${result.config?.unit||''} · q=${(result.dividendYield*100).toFixed(2)}% · r=0% assumption. Median per-contract Greek in each bucket; Provider Greeks preferred, BSM fallback for missing fields. ${partial?`${partial} expiry rows partial.`:'All loaded rows marked complete.'} ${metric==='rho'?'Rho is BSM-derived only (no Provider Rho field in the current feed).':''}`;}
+    if(status)status.textContent=result.projection?.type==='time-decay'
+      ? `1 expiry · ${result.displayRows||result.rows.length} time slices · ${result.quoteCount} quotes · ${side.toUpperCase()} · MODELLED`
+      : `${result.loadedExpiries??result.rows.length}/${expected} expiry rows · ${result.quoteCount} quotes · ${side.toUpperCase()}`;
+    renderer.mount(host,result,{metricLabel:result.config?.label||metric,formatValue:GREEK_3D_FORMATS[metric],xLabel:'Strike / Spot moneyness (%)',yLabel:result.projection?'Time remaining to expiry (DTE)':'Expiry (DTE)'});
+    if(foot){const partial=result.rows.filter(row=>!row.complete).length;const projectionNote=result.projection?.type==='time-decay'?` 0DTE time-decay projection: ${result.projection.sliceCount} slices from ${result.projection.baseDte.toFixed(3)}D to near expiry; observed IV/Spot held constant, projected slices use BSM (r=0%, q=${(result.dividendYield*100).toFixed(2)}%). The highest-DTE row is the current observed/provider snapshot; lower-DTE rows are model scenarios, not market observations.`:'';foot.textContent=`${result.config?.unit||''} · q=${(result.dividendYield*100).toFixed(2)}% · r=0% assumption. Median per-contract Greek in each bucket; Provider Greeks preferred on the observed row, BSM fallback for missing fields. ${partial?`${partial} rows partial.`:'All loaded rows marked complete.'} ${metric==='rho'?'Rho is BSM-derived only (no Provider Rho field in the current feed).':''}${projectionNote}`;}
   }
 
   const SURFACE_LABELS={iv:'IV Surface',exposure:'Exposure Surface',volume:'Volume Surface',oi:'Open Interest Surface'};
@@ -1687,10 +1689,12 @@
     const exposureMetric=metricSelect?.value||'gamma',side=sideSelect?.value||'both';
     const metric=active==='exposure'?'exposure':active;
     const result=surfaceApi.build({spot:s.price,symbol:s.cfg.symbol,expiries:inputs,metric,exposureMetric,side});
-    const loaded=result.rows.length;
-    if(status)status.textContent=`${loaded}/${expected} expiry rows · ${result.quoteCount} quotes · ${s.scope==='selected'?'Selected expiry':scopeLabels[s.scope]||s.scope}`;
+    const loaded=result.loadedExpiries??result.rows.length;
+    if(status)status.textContent=result.projection?.type==='time-decay'
+      ? `1 expiry · ${result.displayRows||result.rows.length} time slices · ${result.quoteCount} quotes · MODELLED · ${s.scope==='selected'?'Selected expiry':scopeLabels[s.scope]||s.scope}`
+      : `${loaded}/${expected} expiry rows · ${result.quoteCount} quotes · ${s.scope==='selected'?'Selected expiry':scopeLabels[s.scope]||s.scope}`;
     const renderer=window.StockOptions3D;
-    if(renderer?.mount){renderer.mount(surfaceHost,result,{metricLabel:result.config?.label||SURFACE_LABELS[active],formatValue:SURFACE_FORMATS[result.metric]||compact,xLabel:'Strike / Spot moneyness (%)',yLabel:'Expiry (DTE)'});}
+    if(renderer?.mount){renderer.mount(surfaceHost,result,{metricLabel:result.config?.label||SURFACE_LABELS[active],formatValue:SURFACE_FORMATS[result.metric]||compact,xLabel:'Strike / Spot moneyness (%)',yLabel:result.projection?'Time remaining to expiry (DTE)':'Expiry (DTE)'});}
     else surfaceHost.innerHTML='<div class="so-3d-empty">3D renderer chưa được tải.</div>';
     const foot=$(`${p}-surface-foot`);
     if(foot){
@@ -1700,7 +1704,8 @@
         volume:'Volume là tổng contracts Call + Put theo bucket (hoặc chọn riêng một phía). Đây là traded volume, không phải buyer-initiated/seller-initiated flow.',
         oi:'Open Interest là số hợp đồng đang mở, tổng Call + Put theo bucket. Không diễn giải OI là vị thế dealer hoặc hướng Long/Short.'
       };
-      foot.textContent=`${notes[active]} Ô trống = không có quan sát hợp lệ; partial chain được đánh dấu ở đầu hàng. 3D axes: X = % Strike/Spot − 1, Y = DTE/expiry, Z = selected metric.`;
+      const projectionNote=result.projection?.type==='time-decay'?` 0DTE TIME-DECAY PROJECTION: ${result.projection.sliceCount} slices from ${result.projection.baseDte.toFixed(3)}D to near expiry. Exposure metrics are repriced with BSM while Spot, observed IV, OI and multiplier are held constant. IV/Volume/OI are held flat across time; this is a model scenario, not observed future data.`:'';
+      foot.textContent=`${notes[active]} Ô trống = không có quan sát hợp lệ; partial chain được đánh dấu ở từng lát. 3D axes: X = % Strike/Spot − 1, Y = ${result.projection?'remaining DTE/time-to-expiry':'DTE/expiry'}, Z = selected metric.${projectionNote}`;
     }
   }
 

@@ -25,7 +25,10 @@
   function formatDteTick(value) {
     const dte = Math.max(0, Number(value) || 0);
     if (dte < 1e-6) return '0DTE';
-    if (dte < 1) return `${fmt(dte, 2)}D`;
+    // Same-day expiries need finer labels than 0.00D: otherwise several
+    // separate Y-axis ticks all render as the same value near the close.
+    if (dte < 1 / 24) return `${fmt(dte * 1440, 1)}m`;
+    if (dte < 1) return `${fmt(dte, 3)}D`;
     if (dte < 10 && Math.abs(dte - Math.round(dte)) > 1e-6) return `${fmt(dte, 1)}D`;
     return `${Math.round(dte)}D`;
   }
@@ -56,6 +59,8 @@
     });
     const scale = valueScale(rows, dataset?.config?.kind);
     const dtes = rows.map(r => Number(r.dte)).filter(Number.isFinite).map(v => Math.max(0, v));
+    const uniqueExpiryCount = new Set(rows.map(r => String(r.expiry || '')).filter(Boolean)).size;
+    const timeDecayProjection = dataset?.projection?.type === 'time-decay' || rows.some(row => row?.projection?.type === 'time-decay');
     // The expiry axis always begins at 0DTE. Actual same-day contracts remain at
     // their fractional DTE (e.g. 0.28D); no synthetic T=0 option row is invented.
     const minDte = 0;
@@ -64,11 +69,15 @@
     // span so a fractional 0DTE (e.g. 0.28D) sits near the 0DTE origin instead
     // of being stretched to the far end of the Y axis. This changes only the
     // display domain; the row keeps its exact observed DTE.
-    const axisMaxDte = rows.length === 1 && maxDte < 1 ? 1 : maxDte;
-    const singleDte = rows.length === 1 && Number.isFinite(Number(rows[0]?.dte)) ? Math.max(0, Number(rows[0].dte)) : null;
-    const dteTicks = rows.length === 1
+    const singleExpiry = uniqueExpiryCount === 1;
+    // For a projected 0DTE surface, the several rows are modelled remaining-time
+    // slices of one actual expiry. Use the observed current DTE as the top of Y,
+    // and divide that interval into ticks instead of collapsing the axis to one label.
+    const axisMaxDte = singleExpiry && !timeDecayProjection && maxDte < 1 ? 1 : maxDte;
+    const singleDte = singleExpiry && rows.length === 1 && Number.isFinite(Number(rows[0]?.dte)) ? Math.max(0, Number(rows[0].dte)) : null;
+    const dteTicks = singleDte !== null
       ? [...new Set([0, singleDte, axisMaxDte].filter(v => v !== null).map(v => Number(v.toFixed(8))))].sort((a, b) => a - b)
-      : buildDteTicks(maxDte);
+      : buildDteTicks(axisMaxDte);
     const spot = Number.isFinite(Number(dataset?.spot)) && Number(dataset.spot) > 0 ? Number(dataset.spot) : null;
     let spotIndex = -1, spotX = null;
     if (bins.length) {
@@ -88,6 +97,7 @@
         y: dteToAxis(row.dte, axisMaxDte),
         labelX: bins[xi], labelY: Number(row.dte), expiry: row.expiry,
         complete: row.complete !== false, coverage: cell?.coverage ?? null,
+        projection: row?.projection || null,
         usableCount: cell?.usableCount ?? 0, contractCount: cell?.contractCount ?? 0,
         providerCount: cell?.providerCount ?? cell?.sources?.providerGreek ?? 0,
         modelCount: cell?.modelCount ?? cell?.sources?.bsmDerivedGreek ?? 0
@@ -113,12 +123,11 @@
     }, 0));
     const validPointCount = validCounts.reduce((sum, count) => sum + count, 0);
     const profileSegmentCount = profileSegmentCounts.reduce((sum, count) => sum + count, 0);
-    const singleExpiry = rows.length === 1;
     const renderableProfile = profileSegmentCount > 0 || validCounts.some(count => count >= 2);
     const renderable = bins.length >= 2 && (faces.length > 0 || renderableProfile);
-    const renderMode = faces.length > 0 ? 'surface' : singleExpiry && renderableProfile ? 'single-expiry-profile' : renderableProfile ? 'expiry-profiles' : 'empty';
+    const renderMode = faces.length > 0 ? (timeDecayProjection ? 'time-decay-surface' : 'surface') : singleExpiry && renderableProfile ? 'single-expiry-profile' : renderableProfile ? 'expiry-profiles' : 'empty';
     return { bins, rows, vertices, faces, scale, minDte, maxDte, axisMaxDte, dteTicks, spot, spotIndex, spotX,
-      singleExpiry, validCounts, validPointCount, profileSegmentCount, renderableProfile, renderable, renderMode,
+      singleExpiry, timeDecayProjection, validCounts, validPointCount, profileSegmentCount, renderableProfile, renderable, renderMode,
       minX: bins[0] ?? 0, maxX: bins.at(-1) ?? 0 };
   }
 
@@ -183,7 +192,7 @@
     const yLabel = options.yLabel || 'Expiry · DTE';
     const formatter = typeof options.formatValue === 'function' ? options.formatValue : v => fmt(v, 3);
     if (!mesh.renderable) {
-      const message = mesh.rows.length === 1
+      const message = mesh.singleExpiry
         ? 'Expiry này chưa có đủ ít nhất 2 vùng moneyness liên tiếp với giá trị hợp lệ để vẽ profile 3D.'
         : 'Chưa có đủ dữ liệu hợp lệ để dựng bề mặt 3D. Hãy chọn Weekly hoặc All Expiries, hoặc kiểm tra độ phủ Option Chain.';
       host.innerHTML = `<div class="so-3d-empty">${message}<small>${mesh.rows.length} expiry · ${mesh.validPointCount} valid buckets · ${mesh.faces.length} mesh faces</small></div>`;
@@ -191,7 +200,7 @@
       return host._stockOptions3dDispose;
     }
     const legendClass = mesh.scale.signed ? 'is-signed' : dataset?.metric === 'iv' ? 'is-iv' : dataset?.metric === 'volume' ? 'is-volume' : dataset?.metric === 'oi' ? 'is-oi' : 'is-positive';
-    host.innerHTML = `<div class="so-3d-toolbar"><div class="so-3d-legend"><i class="${legendClass}"></i><span>${metricLabel}</span><small>${mesh.singleExpiry ? `SINGLE EXPIRY · ${formatDteTick(mesh.rows[0].dte)} · PROFILE FALLBACK · 2D PROJECTION` : '2D projection fallback · WebGL unavailable'}</small></div><div class="so-3d-actions"><button type="button" data-3d-action="minus" aria-label="Zoom out">−</button><button type="button" data-3d-action="reset">Reset</button><button type="button" data-3d-action="plus" aria-label="Zoom in">+</button></div></div><div class="so-3d-stage"><canvas class="so-3d-canvas" tabindex="0" aria-label="Interactive 3D ${metricLabel} surface"></canvas><div class="so-3d-tooltip" hidden></div></div><div class="so-3d-axis-footer"><span>X · ${xLabel}</span><span>Y · ${yLabel}</span><span>Z · ${metricLabel}</span></div>`;
+    host.innerHTML = `<div class="so-3d-toolbar"><div class="so-3d-legend"><i class="${legendClass}"></i><span>${metricLabel}</span><small>${mesh.timeDecayProjection ? `0DTE · TIME-DECAY PROJECTION · ${mesh.rows.length} TIME SLICES · BSM MODEL` : mesh.singleExpiry ? `SINGLE EXPIRY · ${formatDteTick(mesh.maxDte)} · PROFILE FALLBACK · 2D PROJECTION` : '2D projection fallback · WebGL unavailable'}</small></div><div class="so-3d-actions"><button type="button" data-3d-action="minus" aria-label="Zoom out">−</button><button type="button" data-3d-action="reset">Reset</button><button type="button" data-3d-action="plus" aria-label="Zoom in">+</button></div></div><div class="so-3d-stage"><canvas class="so-3d-canvas" tabindex="0" aria-label="Interactive 3D ${metricLabel} surface"></canvas><div class="so-3d-tooltip" hidden></div></div><div class="so-3d-axis-footer"><span>X · ${xLabel}</span><span>Y · ${yLabel}</span><span>Z · ${metricLabel}</span></div>`;
     const canvas = host.querySelector('canvas'), stage = host.querySelector('.so-3d-stage'), tooltip = host.querySelector('.so-3d-tooltip');
     const ctx = canvas.getContext('2d');
     if (!ctx) { host.innerHTML = '<div class="so-3d-empty">Trình duyệt không hỗ trợ Canvas 2D.</div>'; return () => {}; }
@@ -309,7 +318,7 @@
     canvas.addEventListener('pointermove', event => {
       if (dragging && last) { const dx = event.clientX - last.x, dy = event.clientY - last.y; camera.yaw += dx * .008; camera.pitch = clamp(camera.pitch + dy * .006, .12, 1.36); last = { x: event.clientX, y: event.clientY }; hovered = null; scheduleDraw(); return; }
       hovered = nearestPoint(event); scheduleDraw();
-      if (hovered) { const v = hovered.vertex; tooltip.hidden = false; tooltip.innerHTML = `<b>${esc(v.expiry || '')} · ${fmt(v.labelY,1)} DTE</b><span>${v.strikePrice !== null ? `Strike ${fmt(v.strikePrice,2)} · ` : ''}${fmt(v.labelX,1)}% moneyness</span><strong>${esc(formatter(v.value))}</strong><small>${v.usableCount}/${v.contractCount} usable · ${v.providerCount} provider / ${v.modelCount} model · ${v.complete ? 'FULL' : 'PARTIAL'}</small>`; tooltip.style.left = `${clamp(hovered.point.x + 14, 4, width - 180)}px`; tooltip.style.top = `${clamp(hovered.point.y - 16, 4, height - 94)}px`; } else tooltip.hidden = true;
+      if (hovered) { const v = hovered.vertex; tooltip.hidden = false; tooltip.innerHTML = `<b>${esc(v.expiry || '')} · ${formatDteTick(v.labelY)}</b><span>${v.strikePrice !== null ? `Strike ${fmt(v.strikePrice,2)} · ` : ''}${fmt(v.labelX,1)}% moneyness</span><strong>${esc(formatter(v.value))}</strong><small>${v.usableCount}/${v.contractCount} usable · ${v.providerCount} provider / ${v.modelCount} model · ${v.complete ? 'FULL' : 'PARTIAL'}</small>`; tooltip.style.left = `${clamp(hovered.point.x + 14, 4, width - 180)}px`; tooltip.style.top = `${clamp(hovered.point.y - 16, 4, height - 94)}px`; } else tooltip.hidden = true;
     });
     const stopDrag = () => { dragging = false; last = null; canvas.classList.remove('is-dragging'); };
     canvas.addEventListener('pointerup', stopDrag); canvas.addEventListener('pointercancel', stopDrag); canvas.addEventListener('pointerleave', () => { if (!dragging) { tooltip.hidden = true; hovered = null; scheduleDraw(); } });
@@ -344,7 +353,7 @@
     let pinchDistance = 0, hovered = null, width = 0, height = 0;
 
     const legendClass = () => mesh.scale.signed ? 'is-signed' : dataset?.metric === 'iv' ? 'is-iv' : dataset?.metric === 'volume' ? 'is-volume' : dataset?.metric === 'oi' ? 'is-oi' : 'is-positive';
-    host.innerHTML = `<div class="so-3d-toolbar"><div class="so-3d-legend"><i class="${legendClass()}"></i><span class="so-3d-metric-label">${esc(metricLabel)}</span><small class="so-3d-mode-note">${mesh.singleExpiry ? `SINGLE EXPIRY · ${formatDteTick(mesh.rows[0]?.dte)} · 3D PROFILE · NO SYNTHETIC EXPIRY` : 'WEBGL · TRUE 3D MESH · drag to rotate · wheel to zoom'}</small></div><div class="so-3d-actions"><button type="button" data-3d-action="minus" aria-label="Zoom out">−</button><button type="button" data-3d-action="reset">Reset view</button><button type="button" data-3d-action="plus" aria-label="Zoom in">+</button></div></div><div class="so-3d-stage"><canvas class="so-3d-canvas" tabindex="0" aria-label="Interactive WebGL 3D ${esc(metricLabel)} surface"></canvas><div class="so-3d-empty" hidden></div><div class="so-3d-tooltip" hidden></div></div><div class="so-3d-axis-footer"><span class="axis-x">X · ${esc(xLabel)}</span><span class="axis-y">Y · ${esc(yLabel)}</span><span class="axis-z">Z · ${esc(metricLabel)}</span></div>`;
+    host.innerHTML = `<div class="so-3d-toolbar"><div class="so-3d-legend"><i class="${legendClass()}"></i><span class="so-3d-metric-label">${esc(metricLabel)}</span><small class="so-3d-mode-note">${mesh.timeDecayProjection ? `0DTE · MODEL TIME-DECAY SURFACE · ${mesh.rows.length} SLICES · SPOT/IV/OI HELD CONSTANT` : mesh.singleExpiry ? `SINGLE EXPIRY · ${formatDteTick(mesh.rows[0]?.dte)} · 3D PROFILE · NO SYNTHETIC EXPIRY` : 'WEBGL · TRUE 3D MESH · drag to rotate · wheel to zoom'}</small></div><div class="so-3d-actions"><button type="button" data-3d-action="minus" aria-label="Zoom out">−</button><button type="button" data-3d-action="reset">Reset view</button><button type="button" data-3d-action="plus" aria-label="Zoom in">+</button></div></div><div class="so-3d-stage"><canvas class="so-3d-canvas" tabindex="0" aria-label="Interactive WebGL 3D ${esc(metricLabel)} surface"></canvas><div class="so-3d-empty" hidden></div><div class="so-3d-tooltip" hidden></div></div><div class="so-3d-axis-footer"><span class="axis-x">X · ${esc(xLabel)}</span><span class="axis-y">Y · ${esc(yLabel)}</span><span class="axis-z">Z · ${esc(metricLabel)}</span></div>`;
     const stage = host.querySelector('.so-3d-stage');
     const canvas = host.querySelector('canvas');
     const tooltip = host.querySelector('.so-3d-tooltip');
@@ -539,7 +548,7 @@
 
       // Larger axis titles, positioned outside the tick labels.
       addTextSprite('X  STRIKE / SPOT', [0, y0 - 0.57, z0 - 0.10], '#65d7e8', 'axis');
-      addTextSprite('Y  EXPIRY / DTE', [x0 - 0.63, 0, z0 - 0.10], '#9aabff', 'axis');
+      addTextSprite(mesh.timeDecayProjection ? 'Y  TIME REMAINING' : 'Y  EXPIRY / DTE', [x0 - 0.63, 0, z0 - 0.10], '#9aabff', 'axis');
       addTextSprite(`Z  ${metricLabel.toUpperCase()}`, [x0 - 0.60, y0 - 0.60, 0.16], '#f0ce85', 'axis');
     }
 
@@ -634,7 +643,7 @@
         }
       }
       const wireObj = makeLineSegments(wire, 0xd0e7f2, 0.30, 4); if (wireObj) plotGroup.add(wireObj);
-      if (mesh.singleExpiry) {
+      if (mesh.singleExpiry && !mesh.timeDecayProjection) {
         // Render the only observed expiry as a 3D strike profile at its real Y/DTE.
         // This is intentionally a line, not a fabricated second expiry row/mesh face.
         const profile = [];
@@ -689,7 +698,7 @@
     function showTooltip(hit) {
       if (!hit) { tooltip.hidden = true; return; }
       const v = hit.vertex;
-      tooltip.innerHTML = `<b>${esc(v.expiry || '')} · ${fmt(v.labelY, 1)} DTE</b><span>${v.strikePrice !== null ? `Strike ${fmt(v.strikePrice, 2)} · ` : ''}${fmt(v.labelX, 1)}% moneyness</span><strong>${esc(formatter(v.value))}</strong><small>${v.usableCount}/${v.contractCount} usable · ${v.providerCount} provider / ${v.modelCount} model · ${v.complete ? 'FULL' : 'PARTIAL'}</small>`;
+      tooltip.innerHTML = `<b>${esc(v.expiry || '')} · ${formatDteTick(v.labelY)}</b><span>${v.strikePrice !== null ? `Strike ${fmt(v.strikePrice, 2)} · ` : ''}${fmt(v.labelX, 1)}% moneyness</span><strong>${esc(formatter(v.value))}</strong><small>${v.projection?.projected ? 'MODELLED TIME SLICE · ' : 'OBSERVED SNAPSHOT · '}${v.usableCount}/${v.contractCount} usable · ${v.providerCount} provider / ${v.modelCount} model · ${v.complete ? 'FULL' : 'PARTIAL'}</small>`;
       tooltip.style.left = `${clamp(hit.point.x + 13, 6, Math.max(6, width - 230))}px`;
       tooltip.style.top = `${clamp(hit.point.y - 18, 6, Math.max(6, height - 104))}px`;
       tooltip.hidden = false;
@@ -752,9 +761,11 @@
       xLabel = options.xLabel || 'Strike / Spot moneyness'; yLabel = options.yLabel || 'Expiry · DTE';
       formatter = typeof options.formatValue === 'function' ? options.formatValue : v => fmt(v, 3);
       metricNode.textContent = metricLabel; legend.className = legendClass();
-      if (modeNode) modeNode.textContent = mesh.singleExpiry
-        ? `SINGLE EXPIRY · ${formatDteTick(mesh.rows[0]?.dte)} · 3D PROFILE · NO SYNTHETIC EXPIRY`
-        : 'WEBGL · TRUE 3D MESH · drag to rotate · wheel to zoom';
+      if (modeNode) modeNode.textContent = mesh.timeDecayProjection
+        ? `0DTE · MODEL TIME-DECAY SURFACE · ${mesh.rows.length} SLICES · SPOT/IV/OI HELD CONSTANT`
+        : mesh.singleExpiry
+          ? `SINGLE EXPIRY · ${formatDteTick(mesh.maxDte)} · 3D PROFILE · NO SYNTHETIC EXPIRY`
+          : 'WEBGL · TRUE 3D MESH · drag to rotate · wheel to zoom';
       axisX.textContent = `X · ${xLabel}`; axisY.textContent = `Y · ${yLabel}`; axisZ.textContent = `Z · ${metricLabel}`;
       buildPlot(); scheduleDraw();
     }
