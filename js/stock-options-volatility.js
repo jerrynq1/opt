@@ -132,6 +132,53 @@
       : { iv: derived, source: 'mid-derived' };
   }
 
+  // Display-only quality screen for the Clean Volatility Skew. It never alters
+  // the raw IV used by ATM/RR/BF/Expected Move calculations.
+  function skewQuoteQuality(q) {
+    const bid = n(q?.bid), ask = n(q?.ask);
+    const volume = Math.max(0, n(q?.volume) ?? 0);
+    const openInterest = Math.max(0, n(q?.openInterest) ?? 0);
+    const directMid = n(q?.mid);
+    const hasBid = bid !== null;
+    const hasAsk = ask !== null;
+    let spreadPct = null;
+
+    if (hasBid && hasAsk) {
+      if (bid <= 0 && ask <= 0) return { clean: false, reason: 'empty-book', spreadPct: null };
+      if (bid <= 0 && ask > 0) return { clean: false, reason: 'zero-bid', spreadPct: null };
+      if (ask < bid) return { clean: false, reason: 'crossed-market', spreadPct: null };
+      if (bid > 0 && ask > 0) {
+        const mid = (bid + ask) / 2;
+        spreadPct = mid > 0 ? (ask - bid) / mid : null;
+        if (spreadPct !== null && spreadPct > 1.0) {
+          return { clean: false, reason: 'spread-over-100pct', spreadPct };
+        }
+        if (spreadPct !== null && spreadPct > 0.60 && volume < 5 && openInterest < 25) {
+          return { clean: false, reason: 'wide-spread-low-liquidity', spreadPct };
+        }
+        if (spreadPct !== null && spreadPct > 0.40 && volume < 1 && openInterest < 10) {
+          return { clean: false, reason: 'wide-spread-no-activity', spreadPct };
+        }
+      }
+    } else {
+      // A one-sided/absent book is not automatically discarded when a provider
+      // IV and independent liquidity evidence are present. A synthetic/mid IV
+      // without a two-sided market or activity is too weak for the Clean curve.
+      const hasMid = directMid !== null && directMid > 0;
+      const hasActivity = volume > 0 || openInterest > 0;
+      if (!hasMid && !hasActivity) return { clean: false, reason: 'no-market-or-liquidity', spreadPct };
+      if (q?.ivSource === 'mid-derived' && !hasActivity) {
+        return { clean: false, reason: 'mid-derived-no-liquidity', spreadPct };
+      }
+    }
+
+    return { clean: true, reason: 'accepted', spreadPct };
+  }
+
+  function average(values) {
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  }
+
   function normalizedProviderDelta(q) {
     let delta = n(q?.delta);
     if (delta === null) return null;
@@ -212,21 +259,47 @@
     // Keep the actual strike-by-strike IV observations for the simple smile/skew chart.
     // If duplicate rows exist at the same strike/side, average only those observed values.
     const curveByStrike = new Map();
+    const skewQualityCounts = {
+      accepted: 0, rejected: 0, 'zero-bid': 0, 'empty-book': 0, 'crossed-market': 0,
+      'spread-over-100pct': 0, 'wide-spread-low-liquidity': 0,
+      'wide-spread-no-activity': 0, 'no-market-or-liquidity': 0,
+      'mid-derived-no-liquidity': 0
+    };
     for (const row of valid) {
       const key = row.strike;
       if (!curveByStrike.has(key)) curveByStrike.set(key, { strike: key, calls: [], puts: [] });
+      const quality = skewQuoteQuality(row);
+      row.skewClean = quality.clean;
+      row.skewCleanReason = quality.reason;
+      row.skewSpreadPct = quality.spreadPct;
+      if (quality.clean) skewQualityCounts.accepted++;
+      else {
+        skewQualityCounts.rejected++;
+        skewQualityCounts[quality.reason] = (skewQualityCounts[quality.reason] || 0) + 1;
+      }
       curveByStrike.get(key)[row.side === 'C' ? 'calls' : 'puts'].push(row);
     }
     const skewCurve = [...curveByStrike.values()].sort((a, b) => a.strike - b.strike).map(item => {
-      const avg = rows => rows.length ? rows.reduce((sum, row) => sum + row.iv, 0) / rows.length : null;
+      const avg = rows => average(rows.map(row => row.iv));
+      const cleanAvg = rows => average(rows.filter(row => row.skewClean).map(row => row.iv));
+      const callCleanCount = item.calls.filter(row => row.skewClean).length;
+      const putCleanCount = item.puts.filter(row => row.skewClean).length;
       return {
         strike: item.strike,
         callIV: avg(item.calls),
         putIV: avg(item.puts),
+        callCleanIV: cleanAvg(item.calls),
+        putCleanIV: cleanAvg(item.puts),
         callCount: item.calls.length,
-        putCount: item.puts.length
+        putCount: item.puts.length,
+        callCleanCount,
+        putCleanCount,
+        callRejectedCount: item.calls.length - callCleanCount,
+        putRejectedCount: item.puts.length - putCleanCount
       };
     });
+    const cleanIVCount = skewCurve.reduce((sum, item) => sum + item.callCleanCount + item.putCleanCount, 0);
+    const rawSkewIVCount = skewCurve.reduce((sum, item) => sum + item.callCount + item.putCount, 0);
     const dte = time * 365.25;
     const expectedMove = atmIV !== null ? spot * atmIV * Math.sqrt(time) : null;
     const expectedMovePct = atmIV !== null ? atmIV * Math.sqrt(time) : null;
@@ -243,7 +316,7 @@
       putSkew: put25 && atmIV !== null ? put25.iv - atmIV : null,
       callSkew: call25 && atmIV !== null ? call25.iv - atmIV : null,
       put25Strike: put25?.strike ?? null, call25Strike: call25?.strike ?? null,
-      expectedMove, expectedMovePct, skewCurve,
+      expectedMove, expectedMovePct, skewCurve, cleanIVCount, rawSkewIVCount, skewRejectedCount: skewQualityCounts.rejected, skewQualityCounts,
       sourceLabel: midDerivedIVCount ? (providerIVCount ? 'Provider IV + Mid-derived fallback' : 'Mid-derived BSM IV') : 'Provider IV',
       surface: { put10: put10?.iv ?? null, put25: put25?.iv ?? null, atm: atmIV, call25: call25?.iv ?? null, call10: call10?.iv ?? null }
     };

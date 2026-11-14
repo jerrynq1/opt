@@ -98,4 +98,28 @@ test('Volatility Skew does not invent a curve when IV observations are insuffici
   assert.doesNotMatch(html, /<svg/);
 });
 
+
+test('Clean/Raw toggle is present and Clean mode uses filtered IV fields by default', () => {
+  const row = {
+    expiry: '2026-12-18', cleanIVCount: 4, rawSkewIVCount: 6,
+    skewCurve: [
+      { strike: 90, callIV: 0.62, putIV: 0.58, callCleanIV: null, putCleanIV: null },
+      { strike: 95, callIV: 0.31, putIV: 0.33, callCleanIV: 0.30, putCleanIV: 0.32 },
+      { strike: 100, callIV: 0.20, putIV: 0.21, callCleanIV: 0.20, putCleanIV: 0.21 },
+      { strike: 105, callIV: 0.27, putIV: 0.29, callCleanIV: 0.26, putCleanIV: 0.28 },
+      { strike: 110, callIV: 0.65, putIV: 0.61, callCleanIV: null, putCleanIV: null }
+    ]
+  };
+  const clean = render(row, 100, 1, 'clean');
+  const raw = render(row, 100, 1, 'raw');
+  assert.match(clean, /data-skew-mode="clean"/);
+  assert.match(clean, /data-skew-mode="raw"/);
+  assert.match(clean, /data-mode="clean"/);
+  assert.match(clean, /4\/6 IV points/);
+  assert.match(clean, /LOESS/);
+  assert.match(raw, /data-mode="raw"/);
+  assert.match(raw, /no filtering/);
+  assert.doesNotMatch(raw, /LOESS/);
+});
+
 console.log('Stock Options Volatility Skew renderer tests: passed');

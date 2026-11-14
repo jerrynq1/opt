@@ -1274,14 +1274,21 @@
     const marks=valid.map(row=>`<circle cx="${x(row.dte)}" cy="${y(row.atmIV)}" r="4" class="so-vol-point"><title>${esc(row.expiry)} · ${row.dte.toFixed(1)} DTE · ATM IV ${volFmt(row.atmIV)}</title></circle><text x="${x(row.dte)}" y="${h-12}" text-anchor="middle" class="so-vol-axis">${Math.round(row.dte)}d</text>`).join('');
     return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="ATM implied volatility term structure">${grid}<polyline points="${points}" class="so-vol-line"/>${marks}</svg><div class="so-vol-chart-legend">ATM IV · ${valid.length} loaded expiries · x-axis: DTE</div>`;
   }
-  function renderVolSkewChart(row,spot,zoomFactor=1){
+  function renderVolSkewChart(row,spot,zoomFactor=1,mode='clean'){
     const curve=(Array.isArray(row?.skewCurve)?row.skewCurve:[])
       .filter(item=>Number.isFinite(item?.strike))
       .slice().sort((a,b)=>a.strike-b.strike);
+    const hasCleanFields=curve.some(item=>Object.prototype.hasOwnProperty.call(item,'callCleanIV')||Object.prototype.hasOwnProperty.call(item,'putCleanIV'));
+    const cleanMode=mode!=='raw'&&hasCleanFields;
+    const callKey=cleanMode?'callCleanIV':'callIV';
+    const putKey=cleanMode?'putCleanIV':'putIV';
     const callRows=curve.filter(item=>Number.isFinite(item.callIV));
     const putRows=curve.filter(item=>Number.isFinite(item.putIV));
+    const selectedCallRows=curve.filter(item=>Number.isFinite(item[callKey]));
+    const selectedPutRows=curve.filter(item=>Number.isFinite(item[putKey]));
     const all=[...callRows.map(item=>({strike:item.strike,iv:item.callIV})),...putRows.map(item=>({strike:item.strike,iv:item.putIV}))];
-    if(all.length<4||(!callRows.length&&!putRows.length)){
+    const selectedAll=[...selectedCallRows.map(item=>({strike:item.strike,iv:item[callKey]})),...selectedPutRows.map(item=>({strike:item.strike,iv:item[putKey]}))];
+    if(all.length<4){
       return '<div class="so-vol-empty">Chưa đủ IV hợp lệ theo strike để dựng Volatility Skew. Cần thêm quote Call/Put có IV hoặc Mid hợp lệ.</div>';
     }
 
@@ -1300,11 +1307,11 @@
       maxX=minX+visibleSpan;
     }
     const visibleCurve=curve.filter(item=>item.strike>=minX-1e-8&&item.strike<=maxX+1e-8);
-    const visibleCallRows=visibleCurve.filter(item=>Number.isFinite(item.callIV));
-    const visiblePutRows=visibleCurve.filter(item=>Number.isFinite(item.putIV));
-    // Keep the volatility axis fixed while zooming the strike axis so the user
-    // sees only an X-axis zoom, not an accidental rescale of Y.
-    const minValue=Math.min(...all.map(item=>item.iv)),maxValue=Math.max(...all.map(item=>item.iv));
+    const visibleCallRows=visibleCurve.filter(item=>Number.isFinite(item[callKey]));
+    const visiblePutRows=visibleCurve.filter(item=>Number.isFinite(item[putKey]));
+    // Keep the Y axis fixed across Clean/Raw modes and zoom levels for honest comparison.
+    const ySource=cleanMode&&selectedAll.length?selectedAll:all;
+    const minValue=Math.min(...ySource.map(item=>item.iv)),maxValue=Math.max(...ySource.map(item=>item.iv));
     const yPad=Math.max((maxValue-minValue)*.12,.025);
     const minY=Math.max(0,minValue-yPad),maxY=Math.max(minY+.03,maxValue+yPad);
     const x=value=>pad.l+(value-minX)/(maxX-minX||1)*(w-pad.l-pad.r);
@@ -1321,22 +1328,45 @@
       return `<line x1="${xx.toFixed(1)}" y1="${pad.t}" x2="${xx.toFixed(1)}" y2="${h-pad.b}" class="so-vol-gridline so-vol-gridline-x"/><text x="${xx.toFixed(1)}" y="${h-16}" text-anchor="middle" class="so-vol-axis">${strikeFmt(value)}</text>`;
     }).join('');
 
-    // Build separate line segments. A missing IV at a strike breaks the line
-    // rather than bridging over a region with no observed quote.
-    const lineSegments=(key,klass)=>{
+    // Split at missing observations; LOESS is applied only within each continuous
+    // clean segment so it never fabricates a bridge across an absent/filtered quote.
+    const smoothSegment=(items,key)=>{
+      if(items.length<4)return items.map(item=>({strike:item.strike,value:item[key]}));
+      const neighborCount=Math.min(7,items.length);
+      return items.map((item,index)=>{
+        const nearest=items.map((candidate,i)=>({candidate,i,distance:Math.abs(i-index)}))
+          .sort((a,b)=>a.distance-b.distance).slice(0,neighborCount);
+        const maxDistance=Math.max(...nearest.map(entry=>Math.abs(entry.candidate.strike-item.strike)),1e-9);
+        let sw=0,sx=0,sy=0,sxx=0,sxy=0;
+        for(const entry of nearest){
+          const dx=entry.candidate.strike-item.strike;
+          const u=Math.abs(dx)/maxDistance;
+          const weight=u>=1?0.0001:Math.pow(1-Math.pow(u,3),3);
+          const value=entry.candidate[key];
+          sw+=weight;sx+=weight*dx;sy+=weight*value;sxx+=weight*dx*dx;sxy+=weight*dx*value;
+        }
+        const denominator=sw*sxx-sx*sx;
+        const intercept=denominator>1e-12?(sy*sxx-sx*sxy)/denominator:(sw?sy/sw:item[key]);
+        const bounded=Math.max(Math.min(...nearest.map(entry=>entry.candidate[key])),Math.min(Math.max(...nearest.map(entry=>entry.candidate[key])),intercept));
+        return {strike:item.strike,value:bounded};
+      });
+    };
+    const lineSegments=(key,klass,smooth=false)=>{
       const segments=[];let current=[];
-      const flush=()=>{if(current.length>1){
-        const d=current.map((item,index)=>`${index?'L':'M'} ${x(item.strike).toFixed(1)} ${y(item[key]).toFixed(1)}`).join(' ');
-        segments.push(`<path d="${d}" class="${klass}"/>`);
-      }current=[];};
-      for(const item of visibleCurve){
-        if(Number.isFinite(item[key]))current.push(item);else flush();
-      }
+      const flush=()=>{
+        if(current.length>1){
+          const series=smooth?smoothSegment(current,key):current.map(item=>({strike:item.strike,value:item[key]}));
+          const d=series.map((item,index)=>`${index?'L':'M'} ${x(item.strike).toFixed(1)} ${y(item.value).toFixed(1)}`).join(' ');
+          segments.push(`<path d="${d}" class="${klass}"/>`);
+        }
+        current=[];
+      };
+      for(const item of visibleCurve){if(Number.isFinite(item[key]))current.push(item);else flush();}
       flush();
       return segments.join('');
     };
-    const callLine=lineSegments('callIV','so-vol-skew-call');
-    const putLine=lineSegments('putIV','so-vol-skew-put');
+    const callLine=lineSegments(callKey,'so-vol-skew-call',cleanMode);
+    const putLine=lineSegments(putKey,'so-vol-skew-put',cleanMode);
 
     let spotMark='';
     if(Number.isFinite(spot)&&spot>=minX&&spot<=maxX){
@@ -1355,10 +1385,18 @@
     }).join('');
 
     const zoomLabel=`${factor.toFixed(1)}×`;
+    const selectedMode=cleanMode?'clean':'raw';
+    const cleanCount=Number(row?.cleanIVCount)||selectedAll.length;
+    const rawCount=Number(row?.rawSkewIVCount)||all.length;
+    const modeControls=`<div class="so-vol-skew-modes" role="group" aria-label="Chế độ làm sạch volatility skew"><span>DATA</span><button type="button" data-skew-mode="clean" class="${selectedMode==='clean'?'is-active':''}" aria-pressed="${selectedMode==='clean'}">Clean</button><button type="button" data-skew-mode="raw" class="${selectedMode==='raw'?'is-active':''}" aria-pressed="${selectedMode==='raw'}">Raw</button><small>${selectedMode==='clean'?`${cleanCount}/${rawCount} IV points · quote filter + LOESS`:`${rawCount} raw IV points · no filtering`}</small></div>`;
     const controls=`<div class="so-vol-skew-tools" role="group" aria-label="Zoom trục strike"><span>TRỤC X</span><button type="button" data-skew-zoom="out" aria-label="Thu nhỏ trục strike" ${factor<=1.001?'disabled':''}>−</button><button type="button" data-skew-zoom="in" aria-label="Phóng to trục strike" ${factor>=9.999?'disabled':''}>+</button><button type="button" data-skew-zoom="reset" aria-label="Đặt lại zoom trục strike" ${factor<=1.001?'disabled':''}>Reset</button><small>${zoomLabel} · ${strikeFmt(minX)}–${strikeFmt(maxX)}</small></div>`;
-    const svg=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Volatility skew: Call and Put IV line chart by strike" data-x-min="${minX.toFixed(4)}" data-x-max="${maxX.toFixed(4)}">${grid}${xTicks}${spotMark}${callLine}${putLine}${markerSvg}</svg>`;
+    if(cleanMode&&selectedAll.length<2){
+      return `${modeControls}${controls}<div class="so-vol-clean-empty">Clean không còn đủ hai điểm IV sau khi lọc quote. Không vẽ đường ước lượng; chuyển sang Raw để kiểm tra toàn bộ dữ liệu.</div>`;
+    }
+    const svg=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Volatility skew: ${selectedMode} Call and Put IV line chart by strike" data-mode="${selectedMode}" data-x-min="${minX.toFixed(4)}" data-x-max="${maxX.toFixed(4)}">${grid}${xTicks}${spotMark}${callLine}${putLine}${markerSvg}</svg>`;
     const legend=`<div class="so-vol-skew-legend"><span><i class="so-vol-legend-call"></i> Call IV</span><span><i class="so-vol-legend-put"></i> Put IV</span><span><i class="so-vol-legend-spot"></i> Spot</span><small>${visibleCallRows.length}/${callRows.length} Call · ${visiblePutRows.length}/${putRows.length} Put in view · ${esc(row.expiry)}</small></div>`;
-    return `${controls}${svg}${legend}`;
+    const cleanNotice=cleanMode?'<div class="so-vol-clean-note">Clean loại quote zero-bid, crossed book và spread quá rộng khi thanh khoản thấp; đường hiển thị dùng LOESS cục bộ. KPI ATM/RR/BF vẫn tính từ IV gốc.</div>':'';
+    return `${modeControls}${controls}${svg}${legend}${cleanNotice}`;
   }
 
   function renderVolatilityAnalysis(s){
@@ -1372,9 +1410,17 @@
       if(current){
         if(s.volSkewZoomExpiry!==current.expiry){s.volSkewZoomExpiry=current.expiry;s.volSkewZoomFactor=1;}
         const zoomFactor=Math.max(1,Math.min(10,Number(s.volSkewZoomFactor)||1));
-        skewChart.innerHTML=renderVolSkewChart(current,s.price,zoomFactor);
-        // Delegated click handler survives chart redraws and keeps zoom state per session/expiry.
+        s.volSkewMode=s.volSkewMode==='raw'?'raw':'clean';
+        skewChart.innerHTML=renderVolSkewChart(current,s.price,zoomFactor,s.volSkewMode);
+        // Delegated handler preserves mode/zoom state during chart redraws.
         skewChart.onclick=event=>{
+          const modeControl=event.target?.closest?.('[data-skew-mode]');
+          if(modeControl){
+            const nextMode=modeControl.getAttribute('data-skew-mode');
+            if(nextMode==='clean'||nextMode==='raw')s.volSkewMode=nextMode;
+            renderVolatilityAnalysis(s);
+            return;
+          }
           const control=event.target?.closest?.('[data-skew-zoom]');
           if(!control||control.disabled)return;
           const action=control.getAttribute('data-skew-zoom');

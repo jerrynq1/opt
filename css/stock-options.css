@@ -115,6 +115,13 @@
 .so-vol-skew-wrap{min-width:0;margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}
 .so-vol-skew-chart{min-width:0;overflow:hidden;border:1px solid rgba(128,128,128,.12);border-radius:9px;background:rgba(5,10,17,.22);padding:8px 8px 5px}
 
+.so-vol-skew-modes{display:flex;align-items:center;gap:6px;min-height:30px;margin:0 2px 3px;color:var(--mut);font:700 9px Sora,"Space Grotesk",sans-serif;letter-spacing:.05em}
+.so-vol-skew-modes>span{margin-right:3px}
+.so-vol-skew-modes button{height:25px;padding:0 10px;border:1px solid var(--line);border-radius:6px;background:rgba(128,128,128,.06);color:var(--mut);font:700 10px system-ui,sans-serif;cursor:pointer}
+.so-vol-skew-modes button.is-active{border-color:rgba(75,224,168,.55);background:rgba(75,224,168,.12);color:var(--win)}
+.so-vol-skew-modes button:focus-visible{outline:2px solid var(--win);outline-offset:2px}
+.so-vol-skew-modes small{margin-left:auto;color:var(--mut);font:10px ui-monospace,monospace;letter-spacing:0;text-align:right}
+.so-vol-clean-note{padding:4px 4px 1px;color:var(--mut);font-size:9px;line-height:1.45}
 .so-vol-skew-tools{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-height:30px;margin:0 2px 5px;color:var(--mut);font:700 9px Sora,"Space Grotesk",sans-serif;letter-spacing:.05em}
 .so-vol-skew-tools>span{margin-right:3px}
 .so-vol-skew-tools button{min-width:27px;height:25px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:rgba(128,128,128,.06);color:var(--ink);font:700 12px system-ui,sans-serif;cursor:pointer}
@@ -141,4 +148,6 @@
 .so-vol-legend-put{background:#d879a2}
 .so-vol-legend-spot{height:12px!important;width:1px!important;border-left:1px dashed #d2b44c}
 .so-vol-skew-legend small{margin-left:auto;color:var(--mut);font-size:9px}
-@media(max-width:520px){.so-vol-skew-chart{padding:5px 3px}.so-vol-skew-legend{gap:6px 12px}.so-vol-skew-legend small{width:100%;margin-left:0}.so-vol-skew-tools{justify-content:flex-start}.so-vol-skew-tools small{margin-left:auto;min-width:0}}
+@media(max-width:520px){.so-vol-skew-modes{flex-wrap:wrap}.so-vol-skew-modes small{width:100%;margin-left:0;text-align:left}.so-vol-skew-chart{padding:5px 3px}.so-vol-skew-legend{gap:6px 12px}.so-vol-skew-legend small{width:100%;margin-left:0}.so-vol-skew-tools{justify-content:flex-start}.so-vol-skew-tools small{margin-left:auto;min-width:0}}
+
+.so-vol-clean-empty{margin:6px 2px;padding:12px;border:1px dashed var(--line);border-radius:7px;color:var(--mut);font-size:11px;line-height:1.5}

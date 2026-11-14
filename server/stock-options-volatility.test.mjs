@@ -69,4 +69,35 @@ const expired = vol.calculate({ spot: 100, now: Date.parse('2026-11-15T18:00:00Z
 ] });
 assert.equal(expired.loadedExpiries, 0);
 
+
+
+// Clean skew is display-only: raw metrics continue to use every valid IV, while
+// the chart receives quote-quality-filtered IVs for its Clean mode.
+const cleanInput = [
+  { side: 'C', strike: 95, iv: 31, delta: 0.35, bid: 1.90, ask: 2.00, volume: 20, openInterest: 80 },
+  { side: 'C', strike: 100, iv: 22, delta: 0.51, bid: 2.90, ask: 3.00, volume: 12, openInterest: 50 },
+  { side: 'C', strike: 105, iv: 63, delta: 0.24, bid: 0, ask: 0.10, volume: 0, openInterest: 0 },
+  { side: 'C', strike: 110, iv: 58, delta: 0.12, bid: 1.00, ask: 3.00, volume: 0, openInterest: 2 },
+  { side: 'P', strike: 90, iv: 36, delta: -0.10, bid: 0.95, ask: 1.05, volume: 15, openInterest: 40 },
+  { side: 'P', strike: 95, iv: 34, delta: -0.25, bid: 1.90, ask: 2.00, volume: 18, openInterest: 70 },
+  { side: 'P', strike: 100, iv: 23, delta: -0.49, bid: 2.90, ask: 3.00, volume: 10, openInterest: 60 }
+];
+const cleanResult = vol.calculate({ spot: 100, now, expiries: [{ expiry, quotes: cleanInput }] });
+const cleanRow = cleanResult.expiries[0];
+assert.equal(cleanRow.ivCount, cleanInput.length, 'raw IV calculation retains all valid provider IVs');
+assert.equal(cleanRow.skewRejectedCount, 2, 'clean display filters zero-bid and very wide low-liquidity quotes');
+assert.equal(cleanRow.cleanIVCount, 5);
+assert.equal(cleanRow.skewCurve.find(item => item.strike === 105).callIV, 0.63, 'Raw IV remains available');
+assert.equal(cleanRow.skewCurve.find(item => item.strike === 105).callCleanIV, null, 'Zero-bid quote is excluded from Clean curve');
+assert.equal(cleanRow.skewCurve.find(item => item.strike === 110).callCleanIV, null, 'Wide low-liquidity quote is excluded from Clean curve');
+assert.ok(Number.isFinite(cleanRow.skewCurve.find(item => item.strike === 95).callCleanIV));
+assert.equal(cleanRow.skewQualityCounts['zero-bid'], 1);
+assert.equal(cleanRow.cleanIVCount, 5);
+assert.equal(cleanRow.skewQualityCounts['wide-spread-low-liquidity'], 1);
+const emptyBook = vol.calculate({ spot: 100, now, expiries: [{ expiry, quotes: [
+  { side: 'C', strike: 100, iv: 22, delta: 0.5, bid: 0, ask: 0, volume: 0, openInterest: 0 }
+] }] });
+assert.equal(emptyBook.expiries[0].skewCurve[0].callCleanIV, null, 'an empty bid/ask book is not shown in Clean');
+assert.equal(emptyBook.expiries[0].skewQualityCounts['empty-book'], 1);
+
 console.log('Stock Options Volatility Analytics tests: passed');
