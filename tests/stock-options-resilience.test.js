@@ -241,20 +241,20 @@ test('underlying price parser accepts Binance Stocks price snapshot and closed-m
   assert.equal(quote.marketPhase, 'C');
 });
 
-test('subscribe() isolates raw Binance Price Stream from the option-chain subscription', () => {
+test('subscribe() isolates the Worker Spot relay from the option-chain subscription', () => {
   const { t, sockets } = makeHarness(() => json({}));
   const s = t.sessions.gld;
   s.active = true;
   s.expiry = '2026-11-20';
   s.expirations = [{ date: '2026-11-20', root: 'GLD' }];
   t.subscribe(s);
-  assert.equal(sockets.length, 2, 'price and option chain must use independent sockets');
-  const priceWs = sockets.find(x => x.url === 'wss://nbstream.binance.com/equity/ws/price');
+  assert.equal(sockets.length, 2, 'Spot and option chain must use independent sockets');
+  const priceWs = sockets.find(x => x.url === 'wss://proxy.test/api/stock-price-feed');
   const optionWs = sockets.find(x => x.url === 'wss://nbstream.binance.com/equity/stream');
-  assert.ok(priceWs, 'documented raw price endpoint should be used');
+  assert.ok(priceWs, 'PWA should use the same-origin Worker Spot relay first');
   assert.ok(optionWs, 'option stream socket should remain independent');
   priceWs.readyState = 1; priceWs.onopen();
-  assert.equal(priceWs.sent.length, 0, 'raw /ws/price connects directly and needs no SUBSCRIBE RPC');
+  assert.equal(priceWs.sent.length, 0, 'Worker relay forwards the public Price Stream without client SUBSCRIBE');
   optionWs.readyState = 1; optionWs.onopen();
   assert.deepEqual(optionWs.sent[0].params, ['GLD_20261120_GLD@optionChainQuoteDelayed']);
   assert.equal(typeof optionWs.sent[0].id, 'string', 'Stocks Trading WebSocket request IDs should be strings');
@@ -262,21 +262,34 @@ test('subscribe() isolates raw Binance Price Stream from the option-chain subscr
   t.deactivate(s);
 });
 
-test('raw price socket updates Spot independently even when option-chain subscription is rejected', () => {
+test('Worker Spot relay falls back to Binance raw Price Stream when the relay closes before a snapshot', () => {
   const { t, sockets } = makeHarness(() => json({}));
   const s = t.sessions.gld;
   s.active = true; s.expiry = '2026-11-20'; s.expirations = [{ date: '2026-11-20', root: 'GLD' }];
   t.subscribe(s);
-  const priceWs = sockets.find(x => x.url.endsWith('/ws/price'));
+  const relayWs = sockets.find(x => x.url.endsWith('/api/stock-price-feed'));
+  assert.ok(relayWs);
+  relayWs.readyState = 1; relayWs.onopen();
+  relayWs.readyState = 3; relayWs.onclose();
+  assert.equal(s.priceFeedState, 'fallback');
+  assert.match(s.priceFeedDetail, /Binance raw Price Stream/);
+  // Browser WebSocket fallback is scheduled with a short delay by subscribePrice().
+  t.deactivate(s);
+});
+
+test('Worker relay price snapshot updates Spot independently even when option-chain subscription is rejected', () => {
+  const { t, sockets } = makeHarness(() => json({}));
+  const s = t.sessions.gld;
+  s.active = true; s.expiry = '2026-11-20'; s.expirations = [{ date: '2026-11-20', root: 'GLD' }];
+  t.subscribe(s);
+  const priceWs = sockets.find(x => x.url.endsWith('/api/stock-price-feed'));
   const optionWs = sockets.find(x => x.url.endsWith('/equity/stream'));
   priceWs.readyState = 1; priceWs.onopen();
   optionWs.readyState = 1; optionWs.onopen();
   const id = optionWs.sent[0].id;
   optionWs.onmessage({ data: JSON.stringify({ id, code: -1000, msg: 'option stream rejected' }) });
   assert.equal(s.optionFeedState, 'error');
-  priceWs.onmessage({ data: JSON.stringify({
-    e: 'price', rates: [{ s: 'GLD', ac: 'EQ_GLD', p: '391.25', pc: '390.10', t: null, mp: 'C' }]
-  }) });
+  priceWs.onmessage({ data: JSON.stringify({ e: 'price', rates: [{ s: 'GLD', ac: 'EQ_GLD', p: '391.25', pc: '390.10', t: null, mp: 'C' }] }) });
   assert.equal(s.price, 391.25, 'Spot must update despite the option stream RPC error');
   assert.equal(s.previousClose, 390.10);
   assert.equal(s.marketPhase, 'C');
@@ -284,11 +297,12 @@ test('raw price socket updates Spot independently even when option-chain subscri
   t.deactivate(s);
 });
 
+
 test('raw price socket exposes when Binance snapshot does not contain the requested underlying', () => {
   const { t, sockets } = makeHarness(() => json({}));
   const s = t.sessions.gld; s.active = true;
   t.subscribe(s);
-  const priceWs = sockets.find(x => x.url.endsWith('/ws/price'));
+  const priceWs = sockets.find(x => x.url.endsWith('/api/stock-price-feed'));
   priceWs.readyState = 1; priceWs.onopen();
   priceWs.onmessage({ data: JSON.stringify({ e: 'price', rates: [{ s: 'QQQ', ac: 'EQ_QQQ', p: '610.2' }] }) });
   assert.equal(s.price, null);

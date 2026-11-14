@@ -20,7 +20,8 @@
   const WS_URL = 'wss://nbstream.binance.com/equity/stream';
   // Use Binance's documented raw price endpoint on its own socket. This
   // prevents an invalid/delayed option-chain subscription from rejecting Spot.
-  const PRICE_WS_URL = 'wss://nbstream.binance.com/equity/ws/price';
+  const PRICE_WS_DIRECT_URL = 'wss://nbstream.binance.com/equity/ws/price';
+  const SPOT_SERVER_BASE = String(window.BINANCE_STOCK_SPOT_API || '').replace(/\/+$/, '');
   const CONFIG = {
     qqq: {key:'qqq', symbol:'QQQ', assetCode:'EQ_QQQ', name:'Invesco QQQ Trust', root:'QQQ'},
     gld: {key:'gld', symbol:'GLD', assetCode:'EQ_GLD', name:'SPDR Gold Trust', root:'GLD'}
@@ -1390,32 +1391,42 @@
       marketPhase:typeof hit.mp==='string'?hit.mp.toUpperCase():null
     };
   }
-  function handlePrice(s, data){
+  function handlePrice(s, data, source='binance-price-stream'){
     const quote=underlyingPriceRow(data,s.cfg);
-    if(!quote)return;
+    if(!quote)return false;
     s.price=quote.price;
     if(quote.previousClose!==null)s.previousClose=quote.previousClose;
     if(quote.priceTime!==null)s.priceTime=quote.priceTime;
     s.marketPhase=quote.marketPhase||s.marketPhase;
     s.priceReceivedAt=Date.now();
+    s.priceSource=source;
     s.priceFeedState='ok';s.priceFeedDetail='';
+    s.priceReconnectDelay=1000;
     // Spot changes invalidate BSM GEX, Gamma Flip, Gamma Share and every per-expiry status.
-    // Re-render the whole Options view immediately instead of waiting for the scope refresh timer.
     renderAll(s);
+    return true;
   }
 
   function nextWsRequestId(s){
     s.requestId=(Number(s.requestId)||0)+1;
-    // Stocks Trading stream docs specify a string request id.
     return `eq-${Date.now().toString(36)}-${s.requestId.toString(36)}`.slice(0,36);
   }
   function subscribe(s){
     if(!s.active)return;
     closeSocket(s);
-    subscribePrice(s);
+    subscribePrice(s,0);
     subscribeOptionChain(s);
   }
-  function armPriceSnapshotWatchdog(s,ws){
+  function priceFeedEndpoints(){
+    const endpoints=[];
+    if(API_BASE){
+      const wsBase=API_BASE.replace(/^https:/i,'wss:').replace(/^http:/i,'ws:');
+      endpoints.push({url:`${wsBase}/api/stock-price-feed`,source:'worker-relay',label:'Cloudflare Worker Spot relay'});
+    }
+    endpoints.push({url:PRICE_WS_DIRECT_URL,source:'direct-binance',label:'Binance raw Price Stream'});
+    return endpoints;
+  }
+  function armPriceSnapshotWatchdog(s,ws,endpoint){
     if(s.priceSnapshotTimer){clearTimeout(s.priceSnapshotTimer);s.priceSnapshotTimer=null;}
     s.priceSnapshotTimer=setTimeout(()=>{
       s.priceSnapshotTimer=null;
@@ -1423,46 +1434,107 @@
       const age=s.priceLastMessageAt?Date.now()-s.priceLastMessageAt:Infinity;
       if(age<12000)return;
       s.priceFeedState='timeout';
-      s.priceFeedDetail='Price WebSocket mở nhưng không nhận snapshot trong 12 giây';
+      s.priceFeedDetail=`${endpoint.label} mở nhưng không nhận price snapshot trong 12 giây`;
       updateChainMeta(s);
       try{ws.close(4000,'no price snapshot')}catch{}
     },12000);
   }
-  function subscribePrice(s){
+  function startServerSpotFallback(s){
+    if(!SPOT_SERVER_BASE||!s.active||s.priceHttpTimer)return;
+    const poll=async()=>{
+      if(!s.active||s.priceHttpBusy)return;
+      s.priceHttpBusy=true;
+      const controller=typeof AbortController!=='undefined'?new AbortController():null;
+      const timeout=setTimeout(()=>controller?.abort(),8000);
+      try{
+        const url=`${SPOT_SERVER_BASE}/api/spot?symbol=${encodeURIComponent(s.cfg.symbol)}`;
+        const response=await fetch(url,{method:'GET',cache:'no-store',headers:{Accept:'application/json'},signal:controller?.signal});
+        const payload=await response.json().catch(()=>null);
+        if(!response.ok||!payload?.ok||!(Number(payload.price)>0)){
+          throw new Error(payload?.error||`Spot server HTTP ${response.status}`);
+        }
+        const row={s:s.cfg.symbol,ac:s.cfg.assetCode,p:payload.price,pc:payload.previousClose,t:payload.priceTime,mp:payload.marketPhase};
+        handlePrice(s,{e:'price',rates:[row]},'node-server');
+        s.priceFeedDetail=`Node Server fallback · ${payload.feedState||'price received'}${Number.isFinite(payload.ageMs)?` · age ${Math.round(payload.ageMs/1000)}s`:''}`;
+        updateChainMeta(s);
+      }catch(e){
+        s.priceFeedDetail=`Node Server Spot fallback: ${e?.name==='AbortError'?'request timeout':e.message||e}`;
+        updateChainMeta(s);
+      }finally{
+        clearTimeout(timeout);s.priceHttpBusy=false;
+      }
+    };
+    poll();
+    s.priceHttpTimer=setInterval(poll,5000);
+  }
+  function subscribePrice(s,index=0){
     if(!s.active)return;
+    const endpoints=priceFeedEndpoints();
+    const endpoint=endpoints[Math.min(index,endpoints.length-1)];
+    if(!endpoint){
+      s.priceFeedState='error';s.priceFeedDetail='Không có endpoint Spot khả dụng.';
+      startServerSpotFallback(s);updateChainMeta(s);schedulePriceReconnect(s);return;
+    }
     let ws;
-    try{ws=new WebSocket(PRICE_WS_URL);}catch(e){s.priceFeedState='error';s.priceFeedDetail=`Không mở được Price WebSocket: ${e.message||e}`;renderAll(s);schedulePriceReconnect(s);return;}
-    s.priceSocket=ws;s.priceFeedState='connecting';s.priceFeedDetail='Đang mở Binance raw Price Stream';
+    try{ws=new WebSocket(endpoint.url);}catch(e){
+      s.priceFeedState='error';s.priceFeedDetail=`Không mở được ${endpoint.label}: ${e.message||e}`;
+      updateChainMeta(s);
+      if(index+1<endpoints.length)setTimeout(()=>{if(s.active)subscribePrice(s,index+1);},250);
+      else{startServerSpotFallback(s);schedulePriceReconnect(s);}
+      return;
+    }
+    s.priceSocket=ws;s.priceEndpointIndex=index;s.priceFeedState='connecting';s.priceFeedDetail=`Đang kết nối ${endpoint.label}`;
     ws.onopen=()=>{
       if(!s.active||s.priceSocket!==ws)return;
-      s.priceReconnectDelay=1000;s.priceFeedState='connected-waiting';s.priceFeedDetail='Raw Price Stream connected · waiting for snapshot';
-      armPriceSnapshotWatchdog(s,ws);
+      s.priceFeedState='connected-waiting';s.priceFeedDetail=`${endpoint.label} connected · waiting for snapshot`;
+      armPriceSnapshotWatchdog(s,ws,endpoint);
       updateChainMeta(s);
     };
     ws.onmessage=ev=>{
       if(!s.active||s.priceSocket!==ws)return;
-      let msg;try{msg=JSON.parse(ev.data)}catch{return;}
-      const data=msg.data??msg;
-      if(data?.e==='price'||Array.isArray(data?.rates)){
+      let msg;try{msg=JSON.parse(typeof ev.data==='string'?ev.data:String(ev.data))}catch{return;}
+      if(msg?.__quantlab==='spot-feed'){
+        if(msg.state==='upstream-connected'){
+          s.priceFeedState='connected-waiting';s.priceFeedDetail=msg.detail||'Worker connected to Binance Price Stream';
+          updateChainMeta(s);
+        }else if(msg.state==='upstream-error'||msg.state==='upstream-closed'){
+          s.priceFeedState='error';s.priceFeedDetail=msg.detail||'Worker upstream Spot stream error';updateChainMeta(s);
+          try{ws.close(1011,'upstream price feed unavailable')}catch{}
+        }
+        return;
+      }
+      const data=msg?.data??msg;
+      if(data?.e==='price'||Array.isArray(data?.rates)||Array.isArray(data)){
         s.priceLastMessageAt=Date.now();
-        armPriceSnapshotWatchdog(s,ws);
+        armPriceSnapshotWatchdog(s,ws,endpoint);
         const quote=underlyingPriceRow(data,s.cfg);
-        if(quote){handlePrice(s,data);}
+        if(quote){handlePrice(s,data,endpoint.source);}
         else{
           s.priceFeedState='symbol-missing';
-          s.priceFeedDetail=`Đã nhận snapshot ${Array.isArray(data.rates)?data.rates.length:0} mã nhưng không có ${s.cfg.symbol} (${s.cfg.assetCode})`;
+          s.priceFeedDetail=`Nhận price snapshot nhưng không có ${s.cfg.symbol} (${s.cfg.assetCode}) trong rates[]`;
           updateChainMeta(s);
         }
       }
     };
     ws.onerror=()=>{
       if(!s.active||s.priceSocket!==ws)return;
-      s.priceFeedState='error';s.priceFeedDetail='Price WebSocket gặp lỗi mạng · đang thử kết nối lại';updateChainMeta(s);
+      s.priceFeedState='error';s.priceFeedDetail=`${endpoint.label} gặp lỗi mạng`;
+      updateChainMeta(s);
     };
     ws.onclose=()=>{
       if(s.priceSnapshotTimer){clearTimeout(s.priceSnapshotTimer);s.priceSnapshotTimer=null;}
       if(s.priceSocket===ws)s.priceSocket=null;
-      if(s.active){s.priceFeedState='reconnecting';s.priceFeedDetail='Price WebSocket đóng · đang kết nối lại';updateChainMeta(s);schedulePriceReconnect(s);}
+      if(!s.active)return;
+      if(s.price===null&&index+1<endpoints.length){
+        s.priceFeedState='fallback';s.priceFeedDetail=`${endpoint.label} chưa cung cấp Spot · thử ${endpoints[index+1].label}`;
+        updateChainMeta(s);
+        setTimeout(()=>{if(s.active&&!s.priceSocket)subscribePrice(s,index+1);},250);
+        return;
+      }
+      if(s.price===null)startServerSpotFallback(s);
+      s.priceFeedState=s.price!==null?'reconnecting':'error';
+      if(!s.priceFeedDetail)s.priceFeedDetail=`${endpoint.label} đóng · sẽ kết nối lại`;
+      updateChainMeta(s);schedulePriceReconnect(s);
     };
   }
   function subscribeOptionChain(s){
@@ -1509,6 +1581,7 @@
       const ws=s[key];if(ws){try{ws.onclose=null;ws.close(1000,'stock-options inactive')}catch{}s[key]=null;}
     }
     for(const key of ['reconnectTimer','priceReconnectTimer','priceSnapshotTimer']){if(s[key]){clearTimeout(s[key]);s[key]=null;}}
+    if(s.priceHttpTimer){clearInterval(s.priceHttpTimer);s.priceHttpTimer=null;}
   }
   function scheduleReconnect(s){
     if(!s.active||s.reconnectTimer)return;
@@ -1518,7 +1591,7 @@
   function schedulePriceReconnect(s){
     if(!s.active||s.priceReconnectTimer)return;
     const wait=s.priceReconnectDelay||1000;s.priceReconnectDelay=Math.min(30000,wait*2);
-    s.priceReconnectTimer=setTimeout(()=>{s.priceReconnectTimer=null;if(s.active)subscribePrice(s);},wait);
+    s.priceReconnectTimer=setTimeout(()=>{s.priceReconnectTimer=null;if(s.active)subscribePrice(s,0);},wait);
   }
   function syncOptionStream(s){
     if(!s.active||!s.socket||s.socket.readyState!==WebSocket.OPEN)return;
@@ -1653,5 +1726,5 @@
   window.stockOptionsCrossAssetSnapshot=crossAssetSnapshot;
   window.stockOptionsCrossAssetSetExpiry=crossAssetSetExpiry;
   window.stockOptionsSetScope=(key,scope)=>{const s=sessions[key];if(!s)throw new Error('Nguồn ETF không hợp lệ: '+key);setScope(s,scope);};
-  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,price:s.price,previousClose:s.previousClose,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,marketPhase:s.marketPhase,priceFeedState:s.priceFeedState,priceFeedDetail:s.priceFeedDetail,priceSocketState:s.priceSocket?.readyState??null,optionFeedState:s.optionFeedState,optionFeedError:s.optionFeedError,optionSocketState:s.socket?.readyState??null,quotes:s.quotes.size,contracts:c.totalContracts,quotesExpiry:s.quotesExpiry,complete:c.complete,hydrating:s.hydrating,missingQuoteSymbols:c.missingQuoteSymbols.slice(0,20),lastHydrationIncompleteSymbols:s.lastHydrationIncompleteSymbols||[],incompleteContractDetails:(s.lastHydrationIncompleteSymbols||[]).slice(0,12).map(symbol=>{const q=s.quotes.get(symbol)||{},m=s.contractMeta?.get(symbol)||{};return {symbol,side:q.side??m.side,strike:q.strike??m.strike,oi:q.openInterest??m.openInterest,iv:q.iv??m.iv,gamma:q.gamma??m.gamma,multiplier:q.multiplier??m.multiplier,effectiveMultiplier:effectiveMultiplier(q.optionSymbol?q:m)}}),quoteSamples:[...s.quotes.values()].slice(0,3).map(q=>({symbol:q.optionSymbol,side:q.side,strike:q.strike,oi:q.openInterest,iv:q.iv,gamma:q.gamma,multiplier:q.multiplier,effectiveMultiplier:effectiveMultiplier(q)})),chainListInvalidCount:s.chainListInvalidCount,chainListDuplicateCount:s.chainListDuplicateCount,displayStrikes:s.displayStrikes,oiKnown:c.oiKnown,oiMissing:c.oiMissing,oiAssumedZero:c.oiAssumedZero,volumeKnown:c.volumeKnown,volumeAssumedZero:c.volumeAssumedZero,oiObservedCoverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiMissingSamples:c.oiMissingSamples,multiplierKnown:c.multiplierKnown,multiplierAssumed:c.multiplierAssumed,multiplierMissing:c.multiplierMissing,missingMultiplierSamples:c.missingMultiplierSamples,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,missingGreekSamples:c.missingGreekSamples,gexCoverage:c.gexCoverage,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexComplete:c.gexComplete,oiComplete:c.oiComplete,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,maxPainTiedStrikes:c.maxPain?.tiedStrikes||[],maxPainComplete:c.maxPainComplete,gexRatio:c.gexRatio,price:s.price}] }));
+  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,price:s.price,previousClose:s.previousClose,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,marketPhase:s.marketPhase,priceFeedState:s.priceFeedState,priceFeedDetail:s.priceFeedDetail,priceSource:s.priceSource,priceEndpointIndex:s.priceEndpointIndex,priceSocketState:s.priceSocket?.readyState??null,optionFeedState:s.optionFeedState,optionFeedError:s.optionFeedError,optionSocketState:s.socket?.readyState??null,quotes:s.quotes.size,contracts:c.totalContracts,quotesExpiry:s.quotesExpiry,complete:c.complete,hydrating:s.hydrating,missingQuoteSymbols:c.missingQuoteSymbols.slice(0,20),lastHydrationIncompleteSymbols:s.lastHydrationIncompleteSymbols||[],incompleteContractDetails:(s.lastHydrationIncompleteSymbols||[]).slice(0,12).map(symbol=>{const q=s.quotes.get(symbol)||{},m=s.contractMeta?.get(symbol)||{};return {symbol,side:q.side??m.side,strike:q.strike??m.strike,oi:q.openInterest??m.openInterest,iv:q.iv??m.iv,gamma:q.gamma??m.gamma,multiplier:q.multiplier??m.multiplier,effectiveMultiplier:effectiveMultiplier(q.optionSymbol?q:m)}}),quoteSamples:[...s.quotes.values()].slice(0,3).map(q=>({symbol:q.optionSymbol,side:q.side,strike:q.strike,oi:q.openInterest,iv:q.iv,gamma:q.gamma,multiplier:q.multiplier,effectiveMultiplier:effectiveMultiplier(q)})),chainListInvalidCount:s.chainListInvalidCount,chainListDuplicateCount:s.chainListDuplicateCount,displayStrikes:s.displayStrikes,oiKnown:c.oiKnown,oiMissing:c.oiMissing,oiAssumedZero:c.oiAssumedZero,volumeKnown:c.volumeKnown,volumeAssumedZero:c.volumeAssumedZero,oiObservedCoverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiMissingSamples:c.oiMissingSamples,multiplierKnown:c.multiplierKnown,multiplierAssumed:c.multiplierAssumed,multiplierMissing:c.multiplierMissing,missingMultiplierSamples:c.missingMultiplierSamples,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,missingGreekSamples:c.missingGreekSamples,gexCoverage:c.gexCoverage,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexComplete:c.gexComplete,oiComplete:c.oiComplete,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,maxPainTiedStrikes:c.maxPain?.tiedStrikes||[],maxPainComplete:c.maxPainComplete,gexRatio:c.gexRatio,price:s.price}] }));
 })();

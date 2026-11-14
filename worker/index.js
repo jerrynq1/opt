@@ -5,6 +5,7 @@
  */
 const PREFIX = '/api/binance-stock-proxy';
 const UPSTREAM = 'https://www.binance.com';
+const UPSTREAM_PRICE_WS = 'wss://nbstream.binance.com/equity/ws/price';
 const ROUTES = [
   /^\/bapi\/equity\/v1\/public\/equity\/option\/(?:chain-symbols|get-config|get-exchange-info)$/,
   /^\/bapi\/equity\/v1\/friendly\/equity\/option\/get-option-quote$/,
@@ -34,6 +35,111 @@ function withCors(response, cors) {
   headers.set('Cache-Control', 'no-store');
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
+
+/**
+ * Proxy Binance's public Stocks Trading push-all Price Stream through the same
+ * Worker origin used by the PWA REST requests. This avoids depending on the
+ * user's browser/network being able to open Binance's WSS host directly.
+ *
+ * Cloudflare Workers supports outbound WebSockets via fetch(..., Upgrade).
+ */
+async function handleStockPriceFeed(request, cors) {
+  if (request.method !== 'GET') {
+    return withCors(json({ ok: false, error: 'Only GET is allowed for the price feed.' }, 405), cors);
+  }
+  if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
+    return withCors(json({ ok: false, error: 'Expected Upgrade: websocket.' }, 426), cors);
+  }
+  if (cors['Access-Control-Allow-Origin'] === 'null') {
+    return json({ ok: false, error: 'Origin is not allowed.' }, 403);
+  }
+
+  let upstreamResponse;
+  try {
+    upstreamResponse = await fetch(UPSTREAM_PRICE_WS, {
+      headers: { Upgrade: 'websocket' }
+    });
+  } catch (error) {
+    return withCors(json({
+      ok: false,
+      error: 'Could not open Binance Stocks Trading Price Stream.',
+      detail: String(error?.message || error)
+    }, 502), cors);
+  }
+
+  const upstream = upstreamResponse?.webSocket;
+  if (!upstream) {
+    let detail = `Upstream did not accept WebSocket (HTTP ${upstreamResponse?.status ?? 'unknown'}).`;
+    try {
+      const body = await upstreamResponse?.text?.();
+      if (body) detail += ` ${String(body).slice(0, 240)}`;
+    } catch {}
+    return withCors(json({ ok: false, error: 'Binance Price Stream handshake failed.', detail }, 502), cors);
+  }
+
+  let pair;
+  try {
+    pair = new WebSocketPair();
+  } catch (error) {
+    try { upstream.close(1011, 'Worker WebSocketPair unavailable'); } catch {}
+    return withCors(json({
+      ok: false,
+      error: 'Worker runtime does not expose WebSocketPair.',
+      detail: String(error?.message || error)
+    }, 500), cors);
+  }
+  const [client, server] = Object.values(pair);
+  server.accept();
+  // Half-open is useful for a transparent proxy: mirror close events to the
+  // opposite peer rather than letting the runtime close only one side.
+  try { upstream.accept({ allowHalfOpen: true }); } catch { try { upstream.accept(); } catch {} }
+
+  let closed = false;
+  const closeBoth = (code = 1000, reason = 'peer closed') => {
+    if (closed) return;
+    closed = true;
+    try { upstream.close(code, reason.slice(0, 120)); } catch {}
+    try { server.close(code, reason.slice(0, 120)); } catch {}
+  };
+  const sendStatus = (state, detail = '') => {
+    if (server.readyState !== WebSocket.OPEN) return;
+    try { server.send(JSON.stringify({ __quantlab: 'spot-feed', state, detail })); } catch {}
+  };
+
+  server.addEventListener('close', event => {
+    if (!closed) {
+      closed = true;
+      try { upstream.close(event?.code || 1000, event?.reason || 'PWA client closed'); } catch {}
+    }
+  });
+  server.addEventListener('error', () => closeBoth(1011, 'PWA relay socket error'));
+  // Price Stream is read-only. Ignore client application messages; protocol
+  // control frames are handled by the WebSocket runtime.
+  server.addEventListener('message', () => {});
+
+  upstream.addEventListener('open', () => sendStatus('upstream-connected', 'Binance Price Stream connected.'));
+  upstream.addEventListener('message', event => {
+    if (closed || server.readyState !== WebSocket.OPEN) return;
+    try { server.send(event.data); }
+    catch { closeBoth(1011, 'Could not relay Binance price message'); }
+  });
+  upstream.addEventListener('error', () => {
+    sendStatus('upstream-error', 'Binance Price Stream reported a WebSocket error.');
+    closeBoth(1011, 'Binance upstream WebSocket error');
+  });
+  upstream.addEventListener('close', event => {
+    if (closed) return;
+    sendStatus('upstream-closed', event?.reason || 'Binance Price Stream closed.');
+    closeBoth(1011, 'Binance upstream closed');
+  });
+
+  return new Response(null, {
+    status: 101,
+    webSocket: client,
+    headers: cors
+  });
+}
+
 function getUnderlying(path, url, body) {
   if (path.endsWith('/chain-symbols')) {
     const symbol = (url.searchParams.get('symbol') || '').toUpperCase();
@@ -41,6 +147,11 @@ function getUnderlying(path, url, body) {
     if (!['QQQ', 'GLD'].includes(symbol) || !['QQQ', 'GLD'].includes(root) || symbol !== root) {
       throw new Error('Only matching QQQ or GLD chains are supported');
     }
+    return symbol;
+  }
+  if (path.endsWith('/get-exchange-info') || path.endsWith('/get-config')) {
+    const symbol = (url.searchParams.get('symbol') || url.searchParams.get('underlying') || '').toUpperCase().replace(/^EQ_/, '');
+    if (!['QQQ', 'GLD'].includes(symbol)) throw new Error('Only QQQ or GLD option metadata is supported');
     return symbol;
   }
   if (path.endsWith('/get-option-quote')) {
@@ -64,6 +175,10 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const cors = corsHeaders(request, env);
+
+    if (url.pathname === '/api/stock-price-feed') {
+      return handleStockPriceFeed(request, cors);
+    }
 
     if (request.method === 'OPTIONS') {
       if (cors['Access-Control-Allow-Origin'] === 'null') return new Response('Origin not allowed', { status: 403 });

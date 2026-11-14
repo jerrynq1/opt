@@ -58,17 +58,3 @@
 .so-share{display:inline-block;vertical-align:middle;width:64px;height:6px;border-radius:3px;background:var(--inp);overflow:hidden;margin-right:6px}
 .so-share i{display:block;height:100%;background:var(--win)}
 @media(min-width:760px){.so-scope-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
-
-/* ---- hardening: keep Scope / breakdown / key-level layout stable on iOS and under later theme sheets ---- */
-.stock-options-view .so-scope-title{font:800 17px Sora,"Space Grotesk",sans-serif;letter-spacing:.02em;color:var(--ink);margin:0 0 12px}
-.stock-options-view .so-scope-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-.stock-options-view .so-scope-opt{-webkit-appearance:none;appearance:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;width:100%;min-height:64px;padding:12px 10px;margin:0;border:1px solid var(--line);border-radius:14px;background:transparent;color:var(--ink);font:inherit;text-align:center;cursor:pointer}
-.stock-options-view .so-scope-opt b{display:block;font-size:15px;font-weight:700;color:var(--ink)}
-.stock-options-view .so-scope-opt small{display:block;font-size:11px;color:var(--mut)}
-.stock-options-view .so-scope-opt.is-active{border-color:var(--win);box-shadow:0 0 0 1px var(--win) inset;background:rgba(75,224,168,.06)}
-.stock-options-view .so-scope-status{margin-top:10px;font-size:11px;line-height:1.45;color:var(--mut)}
-.stock-options-view .so-breakdown-summary{font-size:11px}
-.stock-options-view .so-breakdown-table td,.stock-options-view .so-breakdown-table th{white-space:nowrap}
-.stock-options-view .kl-card-top{flex-wrap:wrap}
-.stock-options-view .kl-card-top .kl-label{flex:1 1 100%}
-@media(min-width:760px){.stock-options-view .so-scope-grid{grid-template-columns:repeat(4,minmax(0,1fr))}.stock-options-view .kl-card-top .kl-label{flex:1 1 auto}}
