@@ -140,6 +140,10 @@
             <p class="so-vol-footnote">Xấp xỉ ATM IV × √(thời gian năm hóa). Đây là dải biến động mô hình 1σ, không phải dự báo giá hay xác suất chắc chắn.</p>
           </div>
         </div>
+        <div class="so-vol-skew-wrap">
+          <div class="so-vol-panel-title"><div><h4>Volatility Skew</h4><small>Implied Volatility theo Strike · Expiry đang chọn</small></div><span id="${p}-vol-skew-chart-meta">Call / Put IV</span></div>
+          <div class="so-vol-skew-chart" id="${p}-vol-skew-chart"><div class="so-vol-empty">Đang chờ IV quotes…</div></div>
+        </div>
         <div class="so-vol-surface-wrap">
           <div class="so-vol-panel-title"><div><h4>IV Surface · Delta Buckets</h4><small>IV theo kỳ hạn và delta; ô trống nghĩa là chưa có quote phù hợp</small></div><span id="${p}-vol-surface-coverage">—</span></div>
           <div class="opt-table-wrap"><table class="so-vol-table"><thead><tr><th>EXPIRY</th><th>DTE</th><th>10Δ PUT</th><th>25Δ PUT</th><th>ATM</th><th>25Δ CALL</th><th>10Δ CALL</th><th>25Δ RR</th></tr></thead><tbody id="${p}-vol-surface"><tr><td colspan="8" class="opt-empty">Đang chờ IV quotes…</td></tr></tbody></table></div>
@@ -1270,13 +1274,64 @@
     const marks=valid.map(row=>`<circle cx="${x(row.dte)}" cy="${y(row.atmIV)}" r="4" class="so-vol-point"><title>${esc(row.expiry)} · ${row.dte.toFixed(1)} DTE · ATM IV ${volFmt(row.atmIV)}</title></circle><text x="${x(row.dte)}" y="${h-12}" text-anchor="middle" class="so-vol-axis">${Math.round(row.dte)}d</text>`).join('');
     return `<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="ATM implied volatility term structure">${grid}<polyline points="${points}" class="so-vol-line"/>${marks}</svg><div class="so-vol-chart-legend">ATM IV · ${valid.length} loaded expiries · x-axis: DTE</div>`;
   }
+  function renderVolSkewChart(row,spot){
+    const curve=Array.isArray(row?.skewCurve)?row.skewCurve:[];
+    const callRows=curve.filter(x=>Number.isFinite(x.strike)&&Number.isFinite(x.callIV));
+    const putRows=curve.filter(x=>Number.isFinite(x.strike)&&Number.isFinite(x.putIV));
+    const all=[...callRows.map(x=>({strike:x.strike,iv:x.callIV})),...putRows.map(x=>({strike:x.strike,iv:x.putIV}))];
+    if(all.length<4||(!callRows.length&&!putRows.length)){
+      return '<div class="so-vol-empty">Chưa đủ IV hợp lệ theo strike để dựng Volatility Skew. Cần thêm quote Call/Put có IV hoặc Mid hợp lệ.</div>';
+    }
+    let minX=Math.min(...all.map(x=>x.strike)),maxX=Math.max(...all.map(x=>x.strike));
+    const xPad=Math.max((maxX-minX)*.035,(Number.isFinite(spot)&&spot>0?spot*.008:1));
+    minX=Math.max(0,minX-xPad);maxX+=xPad;
+    const minValue=Math.min(...all.map(x=>x.iv)),maxValue=Math.max(...all.map(x=>x.iv));
+    const yPad=Math.max((maxValue-minValue)*.12,.025);
+    const minY=Math.max(0,minValue-yPad),maxY=Math.max(minY+.03,maxValue+yPad);
+    const w=960,h=340,pad={l:58,r:20,t:18,b:42};
+    const x=v=>pad.l+(v-minX)/(maxX-minX||1)*(w-pad.l-pad.r);
+    const y=v=>pad.t+(maxY-v)/(maxY-minY)*(h-pad.t-pad.b);
+    const pct=v=>`${(v*100).toFixed(0)}%`;
+    const strikeFmt=v=>new Intl.NumberFormat('en-US',{maximumFractionDigits:2}).format(v);
+    const grid=[0,1,2,3,4].map(i=>{
+      const value=minY+(maxY-minY)*i/4,yy=y(value);
+      return `<line x1="${pad.l}" y1="${yy.toFixed(1)}" x2="${w-pad.r}" y2="${yy.toFixed(1)}" class="so-vol-gridline"/><text x="${pad.l-10}" y="${(yy+4).toFixed(1)}" text-anchor="end" class="so-vol-axis">${pct(value)}</text>`;
+    }).join('');
+    const xTicks=[0,1,2,3,4].map(i=>{
+      const value=minX+(maxX-minX)*i/4,xx=x(value);
+      return `<line x1="${xx.toFixed(1)}" y1="${pad.t}" x2="${xx.toFixed(1)}" y2="${h-pad.b}" class="so-vol-gridline so-vol-gridline-x"/><text x="${xx.toFixed(1)}" y="${h-16}" text-anchor="middle" class="so-vol-axis">${strikeFmt(value)}</text>`;
+    }).join('');
+    const toPoints=rows=>rows.map(item=>`${x(item.strike).toFixed(1)},${y(item.iv).toFixed(1)}`).join(' ');
+    const callLine=callRows.length>1?`<polyline points="${toPoints(callRows)}" class="so-vol-skew-call"/>`:'';
+    const putLine=putRows.length>1?`<polyline points="${toPoints(putRows)}" class="so-vol-skew-put"/>`:'';
+    const callDots=callRows.map(item=>`<circle cx="${x(item.strike).toFixed(1)}" cy="${y(item.callIV).toFixed(1)}" r="2.2" class="so-vol-skew-call-dot"><title>Call · K ${strikeFmt(item.strike)} · IV ${volFmt(item.callIV)}</title></circle>`).join('');
+    const putDots=putRows.map(item=>`<circle cx="${x(item.strike).toFixed(1)}" cy="${y(item.putIV).toFixed(1)}" r="2.2" class="so-vol-skew-put-dot"><title>Put · K ${strikeFmt(item.strike)} · IV ${volFmt(item.putIV)}</title></circle>`).join('');
+    let spotMark='';
+    if(Number.isFinite(spot)&&spot>minX&&spot<maxX){
+      const sx=x(spot);
+      spotMark=`<line x1="${sx.toFixed(1)}" y1="${pad.t}" x2="${sx.toFixed(1)}" y2="${h-pad.b}" class="so-vol-skew-spot"/><text x="${sx.toFixed(1)}" y="${pad.t+11}" text-anchor="middle" class="so-vol-skew-spot-label">SPOT ${strikeFmt(spot)}</text>`;
+    }
+    const markers=[];
+    if(Number.isFinite(row?.put25Strike)&&Number.isFinite(row?.put25IV))markers.push({label:'25Δ P',strike:row.put25Strike,iv:row.put25IV,cls:'put'});
+    if(Number.isFinite(spot)&&Number.isFinite(row?.atmIV))markers.push({label:'ATM',strike:spot,iv:row.atmIV,cls:'atm'});
+    if(Number.isFinite(row?.call25Strike)&&Number.isFinite(row?.call25IV))markers.push({label:'25Δ C',strike:row.call25Strike,iv:row.call25IV,cls:'call'});
+    const markerSvg=markers.filter(m=>m.strike>=minX&&m.strike<=maxX&&m.iv>=minY&&m.iv<=maxY).map(m=>{
+      const xx=x(m.strike),yy=y(m.iv),anchor=xx>w*.78?'end':'start',dx=anchor==='end'?-7:7;
+      return `<circle cx="${xx.toFixed(1)}" cy="${yy.toFixed(1)}" r="4.1" class="so-vol-skew-marker so-vol-skew-marker-${m.cls}"><title>${m.label} · K ${strikeFmt(m.strike)} · IV ${volFmt(m.iv)}</title></circle><text x="${(xx+dx).toFixed(1)}" y="${(yy-7).toFixed(1)}" text-anchor="${anchor}" class="so-vol-skew-marker-label">${m.label} ${volFmt(m.iv)}</text>`;
+    }).join('');
+    const svg=`<svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Volatility skew: implied volatility by strike for Calls and Puts">${grid}${xTicks}${spotMark}${callLine}${putLine}${callDots}${putDots}${markerSvg}</svg>`;
+    return `${svg}<div class="so-vol-skew-legend"><span><i class="so-vol-legend-call"></i> Call IV</span><span><i class="so-vol-legend-put"></i> Put IV</span><span><i class="so-vol-legend-spot"></i> Spot</span><small>${callRows.length} Call points · ${putRows.length} Put points · ${esc(row.expiry)}</small></div>`;
+  }
+
   function renderVolatilityAnalysis(s){
     const p=`so-${s.cfg.key}`,status=$(`${p}-vol-status`);if(!status)return;
     const {inputs,expected}=collectVolatilityInputs(s),api=window.StockOptionsVolatility;
     if(!api?.calculate){status.textContent='Volatility module unavailable';return;}
     const result=api.calculate({spot:s.price,expiries:inputs});
     const current=result.expiries.find(row=>row.expiry===s.expiry)||null;
-    const kpis=$(`${p}-vol-kpis`),wings=$(`${p}-vol-wings`),skew=$(`${p}-vol-skew-lines`),move=$(`${p}-vol-move`),range=$(`${p}-vol-range`);
+    const kpis=$(`${p}-vol-kpis`),wings=$(`${p}-vol-wings`),skew=$(`${p}-vol-skew-lines`),move=$(`${p}-vol-move`),range=$(`${p}-vol-range`),skewChart=$(`${p}-vol-skew-chart`),skewChartMeta=$(`${p}-vol-skew-chart-meta`);
+    if(skewChart)skewChart.innerHTML=current?renderVolSkewChart(current,s.price):'<div class="so-vol-empty">Đang chờ dữ liệu IV của expiry đang chọn.</div>';
+    if(skewChartMeta)skewChartMeta.textContent=current?`${current.expiry} · ${current.ivCount} IV points`:'Chưa có expiry';
     const coverage=`${inputs.length}/${expected} expiries loaded · ${result.ivCount}/${result.quoteCount} quotes with usable IV`;
     status.textContent=coverage;
     if(kpis){

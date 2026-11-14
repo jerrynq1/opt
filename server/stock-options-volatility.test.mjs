@@ -28,6 +28,12 @@ assert.ok(Math.abs(row.callSkew - 0.015) < 1e-9);
 assert.ok(row.expectedMove > 5 && row.expectedMove < 7, '1-sigma expected move uses ATM IV and sqrt(T)');
 assert.equal(row.surface.put25, 0.27);
 assert.equal(row.surface.call25, 0.22);
+assert.equal(row.skewCurve.length, 5, 'skew chart receives one point per observed strike');
+assert.deepEqual(row.skewCurve.map(point => point.strike), [90, 95, 100, 105, 110]);
+assert.equal(row.skewCurve.find(point => point.strike === 95).callIV, 0.23);
+assert.equal(row.skewCurve.find(point => point.strike === 95).putIV, 0.27);
+assert.equal(row.put25Strike, 95);
+assert.equal(row.call25Strike, 105);
 
 const noTenDelta = vol.calculate({ spot: 100, now, expiries: [{ expiry, quotes: [
   { side: 'C', strike: 105, iv: 22, delta: 0.25 },

@@ -109,3 +109,30 @@
 .so-vol-disclaimer{padding-top:10px;border-top:1px solid var(--line)}
 @media(max-width:900px){.so-vol-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.so-vol-grid{grid-template-columns:1fr}}
 @media(max-width:520px){.so-vol-card{padding:13px}.so-vol-head{flex-direction:column}.so-vol-status{max-width:100%;text-align:left}.so-vol-kpis strong{font-size:17px}.so-vol-wing-grid{gap:5px}.so-vol-wing-grid>div{padding:8px 6px}.so-vol-wing-grid b{font-size:14px}.so-vol-skew-lines{grid-template-columns:1fr}}
+
+
+/* ================= VOLATILITY SKEW CHART ================= */
+.so-vol-skew-wrap{min-width:0;margin-top:13px;padding-top:12px;border-top:1px solid var(--line)}
+.so-vol-skew-chart{min-width:0;overflow:hidden;border:1px solid rgba(128,128,128,.12);border-radius:9px;background:rgba(5,10,17,.22);padding:8px 8px 5px}
+.so-vol-skew-chart svg{display:block;width:100%;height:auto;max-height:390px;overflow:visible}
+.so-vol-skew-chart .so-vol-gridline-x{stroke-dasharray:2 5;opacity:.48}
+.so-vol-skew-call,.so-vol-skew-put{fill:none;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.so-vol-skew-call{stroke:#39c6dc;stroke-dasharray:5 3}
+.so-vol-skew-put{stroke:#d879a2;stroke-dasharray:5 3}
+.so-vol-skew-call-dot{fill:#39c6dc;stroke:rgba(8,13,20,.9);stroke-width:1}
+.so-vol-skew-put-dot{fill:#d879a2;stroke:rgba(8,13,20,.9);stroke-width:1}
+.so-vol-skew-spot{stroke:#d2b44c;stroke-width:1.1;stroke-dasharray:3 4;opacity:.85;vector-effect:non-scaling-stroke}
+.so-vol-skew-spot-label{fill:#d2b44c;font:700 9px system-ui,sans-serif;letter-spacing:.04em}
+.so-vol-skew-marker{stroke:var(--bg);stroke-width:1.5;vector-effect:non-scaling-stroke}
+.so-vol-skew-marker-put{fill:#d879a2}
+.so-vol-skew-marker-atm{fill:#e8bd42}
+.so-vol-skew-marker-call{fill:#39c6dc}
+.so-vol-skew-marker-label{fill:var(--ink);font:700 9px system-ui,sans-serif;paint-order:stroke;stroke:var(--bg);stroke-width:3px;stroke-linejoin:round}
+.so-vol-skew-legend{display:flex;align-items:center;flex-wrap:wrap;gap:7px 18px;padding:8px 4px 1px;color:var(--mut);font-size:10px}
+.so-vol-skew-legend span{display:inline-flex;align-items:center;gap:6px}
+.so-vol-skew-legend i{display:inline-block;width:17px;height:2px;border-radius:2px}
+.so-vol-legend-call{background:#39c6dc}
+.so-vol-legend-put{background:#d879a2}
+.so-vol-legend-spot{height:12px!important;width:1px!important;border-left:1px dashed #d2b44c}
+.so-vol-skew-legend small{margin-left:auto;color:var(--mut);font-size:9px}
+@media(max-width:520px){.so-vol-skew-chart{padding:5px 3px}.so-vol-skew-legend{gap:6px 12px}.so-vol-skew-legend small{width:100%;margin-left:0}}

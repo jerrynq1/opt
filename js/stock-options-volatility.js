@@ -209,6 +209,24 @@
     const call10 = closestDelta(valid, 'C', 0.10);
     const rr25 = put25 && call25 ? call25.iv - put25.iv : null;
     const bf25 = put25 && call25 && atmIV !== null ? (call25.iv + put25.iv) / 2 - atmIV : null;
+    // Keep the actual strike-by-strike IV observations for the simple smile/skew chart.
+    // If duplicate rows exist at the same strike/side, average only those observed values.
+    const curveByStrike = new Map();
+    for (const row of valid) {
+      const key = row.strike;
+      if (!curveByStrike.has(key)) curveByStrike.set(key, { strike: key, calls: [], puts: [] });
+      curveByStrike.get(key)[row.side === 'C' ? 'calls' : 'puts'].push(row);
+    }
+    const skewCurve = [...curveByStrike.values()].sort((a, b) => a.strike - b.strike).map(item => {
+      const avg = rows => rows.length ? rows.reduce((sum, row) => sum + row.iv, 0) / rows.length : null;
+      return {
+        strike: item.strike,
+        callIV: avg(item.calls),
+        putIV: avg(item.puts),
+        callCount: item.calls.length,
+        putCount: item.puts.length
+      };
+    });
     const dte = time * 365.25;
     const expectedMove = atmIV !== null ? spot * atmIV * Math.sqrt(time) : null;
     const expectedMovePct = atmIV !== null ? atmIV * Math.sqrt(time) : null;
@@ -224,7 +242,8 @@
       rr25, bf25,
       putSkew: put25 && atmIV !== null ? put25.iv - atmIV : null,
       callSkew: call25 && atmIV !== null ? call25.iv - atmIV : null,
-      expectedMove, expectedMovePct,
+      put25Strike: put25?.strike ?? null, call25Strike: call25?.strike ?? null,
+      expectedMove, expectedMovePct, skewCurve,
       sourceLabel: midDerivedIVCount ? (providerIVCount ? 'Provider IV + Mid-derived fallback' : 'Mid-derived BSM IV') : 'Provider IV',
       surface: { put10: put10?.iv ?? null, put25: put25?.iv ?? null, atm: atmIV, call25: call25?.iv ?? null, call10: call10?.iv ?? null }
     };
