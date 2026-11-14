@@ -178,7 +178,7 @@
       sessions[cfg.key] = sessions[cfg.key] || {
         cfg, active:false, socket:null, priceSocket:null, reconnectTimer:null, priceReconnectTimer:null, priceSnapshotTimer:null, pollTimer:null, statusTimer:null,
         expiry:null,expirations:[],contracts:[],contractSymbols:new Set(),quotes:new Map(),price:null,previousClose:null,
-        priceTime:null,priceReceivedAt:0,marketPhase:null,oiLastUpdate:0,quoteLoading:false,activationToken:0,activationController:null,chainLoadState:'pending',chainLoadError:'',
+        priceTime:null,priceReceivedAt:0,marketPhase:null,priceActivationAt:0,priceConnectStartedAt:0,priceSocketOpenedAt:0,priceUpstreamConnectedAt:0,priceFirstMessageAt:0,priceFirstSnapshotAt:0,priceStartupMs:null,oiLastUpdate:0,quoteLoading:false,activationToken:0,activationController:null,chainLoadState:'pending',chainLoadError:'',
         quoteFeed:'delay', streamExpiry:null, streamNames:[], reconnectDelay:1000, priceReconnectDelay:1000, requestId:1, priceFeedState:'idle', priceFeedDetail:'', priceLastMessageAt:0, optionFeedState:'idle', optionFeedError:'', chainLoadToken:0, crossAssetError:'',
         displayStrikes:readDisplayStrikes(cfg.key), chainComplete:false, hydrating:false, hydrateProgress:0, loadedExpiry:null, quotesExpiry:null, lastHydrationMissingSymbols:[], lastHydrationIncompleteSymbols:[], chainListInvalidCount:0,chainListDuplicateCount:0,contractMeta:new Map(),
         scope:readScope(cfg.key), scopeData:new Map(), scopeToken:0, scopeLoading:false, scopeProgress:{done:0,total:0}, scopeError:'', scopeRev:0, scopeTimer:null, _scopeFlipCache:null, _scopeMemo:null
@@ -1368,7 +1368,7 @@
         ['MULTIPLIER COVERAGE',`${c.multiplierKnown} hợp lệ · ${c.multiplierAssumed} assumed ×100 · thiếu ${c.multiplierMissing}${missingMultSample}`],
         ['ZERO-FILL ASSUMPTIONS',`${c.oiAssumedZero} OI · ${c.volumeAssumedZero} Volume`],
         ['MISSING DATA',`${c.ivMissing} IV · ${c.multiplierMissing} multiplier · ${c.missingGreekSamples.length} Gamma/IV`],
-        ['SPOT PRICE FEED',s.price!==null?`${s.marketPhase==='C'?'Market closed · last available price':s.marketPhase==='O'?'Market open':s.marketPhase==='PRE'?'Pre-market':s.marketPhase==='POST'?'Post-market':'Price received'}${s.priceReceivedAt?` · received ${new Date(s.priceReceivedAt).toLocaleTimeString('vi-VN')}`:''}`:s.priceFeedDetail||(s.priceFeedState==='connected-waiting'?'Connected · waiting for price snapshot':s.priceFeedState==='symbol-missing'?'Snapshot received · target symbol absent':s.priceFeedState==='error'?'Price WebSocket error':s.priceSocket&&s.priceSocket.readyState===WebSocket.OPEN?'Connected · waiting for Binance price snapshot':'Connecting / closed')],
+        ['SPOT PRICE FEED',`${s.price!==null?`${s.marketPhase==='C'?'Market closed · last available price':s.marketPhase==='O'?'Market open':s.marketPhase==='PRE'?'Pre-market':s.marketPhase==='POST'?'Post-market':'Price received'}${s.priceReceivedAt?` · received ${new Date(s.priceReceivedAt).toLocaleTimeString('vi-VN')}`:''}`:s.priceFeedDetail||(s.priceFeedState==='connected-waiting'?'Connected · waiting for price snapshot':s.priceFeedState==='symbol-missing'?'Snapshot received · target symbol absent':s.priceFeedState==='error'?'Price WebSocket error':s.priceSocket&&s.priceSocket.readyState===WebSocket.OPEN?'Connected · waiting for Binance price snapshot':'Connecting / closed')}${Number.isFinite(s.priceStartupMs)?` · first Spot ${(s.priceStartupMs/1000).toFixed(1)}s after activation`:''}`],
         ['OPTION QUOTE STREAM',s.optionFeedError||({subscribed:'Subscription accepted',pending:'Subscription pending',connecting:'Connecting',error:'Subscription rejected',idle:'Not connected'})[s.optionFeedState]||s.optionFeedState]
       ];
       meta.innerHTML=items.map(([label,value])=>`<span class="opt-meta-item"><small>${esc(label)}</small><b>${esc(value)}</b></span>`).join('');
@@ -1395,6 +1395,10 @@
     const quote=underlyingPriceRow(data,s.cfg);
     if(!quote)return false;
     s.price=quote.price;
+    if(!s.priceFirstSnapshotAt){
+      s.priceFirstSnapshotAt=Date.now();
+      s.priceStartupMs=s.priceActivationAt?s.priceFirstSnapshotAt-s.priceActivationAt:null;
+    }
     if(quote.previousClose!==null)s.previousClose=quote.previousClose;
     if(quote.priceTime!==null)s.priceTime=quote.priceTime;
     s.marketPhase=quote.marketPhase||s.marketPhase;
@@ -1426,18 +1430,19 @@
     endpoints.push({url:PRICE_WS_DIRECT_URL,source:'direct-binance',label:'Binance raw Price Stream'});
     return endpoints;
   }
+  const PRICE_SNAPSHOT_TIMEOUT_MS=9000; // Binance Stock Price Stream publishes a push-all snapshot every 3 seconds.
   function armPriceSnapshotWatchdog(s,ws,endpoint){
     if(s.priceSnapshotTimer){clearTimeout(s.priceSnapshotTimer);s.priceSnapshotTimer=null;}
     s.priceSnapshotTimer=setTimeout(()=>{
       s.priceSnapshotTimer=null;
       if(!s.active||s.priceSocket!==ws||ws.readyState!==WebSocket.OPEN)return;
       const age=s.priceLastMessageAt?Date.now()-s.priceLastMessageAt:Infinity;
-      if(age<12000)return;
+      if(age<PRICE_SNAPSHOT_TIMEOUT_MS)return;
       s.priceFeedState='timeout';
-      s.priceFeedDetail=`${endpoint.label} mở nhưng không nhận price snapshot trong 12 giây`;
+      s.priceFeedDetail=`${endpoint.label} mở nhưng không nhận price snapshot trong ${Math.round(PRICE_SNAPSHOT_TIMEOUT_MS/1000)} giây`;
       updateChainMeta(s);
       try{ws.close(4000,'no price snapshot')}catch{}
-    },12000);
+    },PRICE_SNAPSHOT_TIMEOUT_MS);
   }
   function startServerSpotFallback(s){
     if(!SPOT_SERVER_BASE||!s.active||s.priceHttpTimer)return;
@@ -1483,9 +1488,10 @@
       else{startServerSpotFallback(s);schedulePriceReconnect(s);}
       return;
     }
-    s.priceSocket=ws;s.priceEndpointIndex=index;s.priceFeedState='connecting';s.priceFeedDetail=`Đang kết nối ${endpoint.label}`;
+    s.priceSocket=ws;s.priceEndpointIndex=index;s.priceConnectStartedAt=Date.now();s.priceSocketOpenedAt=0;s.priceLastMessageAt=0;s.priceFeedState='connecting';s.priceFeedDetail=`Đang kết nối ${endpoint.label}`;
     ws.onopen=()=>{
       if(!s.active||s.priceSocket!==ws)return;
+      s.priceSocketOpenedAt=Date.now();
       s.priceFeedState='connected-waiting';s.priceFeedDetail=`${endpoint.label} connected · waiting for snapshot`;
       armPriceSnapshotWatchdog(s,ws,endpoint);
       updateChainMeta(s);
@@ -1495,7 +1501,11 @@
       let msg;try{msg=JSON.parse(typeof ev.data==='string'?ev.data:String(ev.data))}catch{return;}
       if(msg?.__quantlab==='spot-feed'){
         if(msg.state==='upstream-connected'){
+          s.priceUpstreamConnectedAt=Date.now();
+          // Start the snapshot window after the Worker confirms its Binance upstream is open.
+          s.priceLastMessageAt=s.priceUpstreamConnectedAt;
           s.priceFeedState='connected-waiting';s.priceFeedDetail=msg.detail||'Worker connected to Binance Price Stream';
+          armPriceSnapshotWatchdog(s,ws,endpoint);
           updateChainMeta(s);
         }else if(msg.state==='upstream-error'||msg.state==='upstream-closed'){
           s.priceFeedState='error';s.priceFeedDetail=msg.detail||'Worker upstream Spot stream error';updateChainMeta(s);
@@ -1505,6 +1515,7 @@
       }
       const data=msg?.data??msg;
       if(data?.e==='price'||Array.isArray(data?.rates)||Array.isArray(data)){
+        s.priceFirstMessageAt=s.priceFirstMessageAt||Date.now();
         s.priceLastMessageAt=Date.now();
         armPriceSnapshotWatchdog(s,ws,endpoint);
         const quote=underlyingPriceRow(data,s.cfg);
@@ -1625,6 +1636,12 @@
     const isCurrent=()=>s.active&&s.activationToken===activationToken;
     clearError(s);
     setStatus(s,'Đang kết nối Binance…','loading');
+    // Spot is independent of expiry discovery and option-chain hydration.
+    // Start it immediately so slow metadata/expiry scans cannot delay the underlying price.
+    s.priceActivationAt=Date.now();
+    s.priceFirstMessageAt=0;s.priceFirstSnapshotAt=0;s.priceStartupMs=null;
+    s.priceSocketOpenedAt=0;s.priceUpstreamConnectedAt=0;
+    subscribePrice(s,0);
     try{
       const exps=await loadExpirations(s,requestOptions);
       if(!isCurrent())return;
@@ -1633,7 +1650,8 @@
       if(select){select.innerHTML=exps.map(x=>`<option value="${esc(x.date)}">${esc(dateLabel(x.date))} · ${esc(x.root)}</option>`).join('');
         const today=isoTodayNY(),preferred=exps.find(x=>x.date>=today)||exps[0];s.expiry=preferred.date;select.value=s.expiry;}
       if(!isCurrent())return;
-      subscribe(s);
+      // The Spot socket is already running; only the expiry-dependent option socket starts here.
+      subscribeOptionChain(s);
       await loadChain(s,false,requestOptions);
       if(!isCurrent())return;
       startPolling(s,activationToken);startScopeTimer(s,activationToken);
@@ -1726,5 +1744,5 @@
   window.stockOptionsCrossAssetSnapshot=crossAssetSnapshot;
   window.stockOptionsCrossAssetSetExpiry=crossAssetSetExpiry;
   window.stockOptionsSetScope=(key,scope)=>{const s=sessions[key];if(!s)throw new Error('Nguồn ETF không hợp lệ: '+key);setScope(s,scope);};
-  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,price:s.price,previousClose:s.previousClose,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,marketPhase:s.marketPhase,priceFeedState:s.priceFeedState,priceFeedDetail:s.priceFeedDetail,priceSource:s.priceSource,priceEndpointIndex:s.priceEndpointIndex,priceSocketState:s.priceSocket?.readyState??null,optionFeedState:s.optionFeedState,optionFeedError:s.optionFeedError,optionSocketState:s.socket?.readyState??null,quotes:s.quotes.size,contracts:c.totalContracts,quotesExpiry:s.quotesExpiry,complete:c.complete,hydrating:s.hydrating,missingQuoteSymbols:c.missingQuoteSymbols.slice(0,20),lastHydrationIncompleteSymbols:s.lastHydrationIncompleteSymbols||[],incompleteContractDetails:(s.lastHydrationIncompleteSymbols||[]).slice(0,12).map(symbol=>{const q=s.quotes.get(symbol)||{},m=s.contractMeta?.get(symbol)||{};return {symbol,side:q.side??m.side,strike:q.strike??m.strike,oi:q.openInterest??m.openInterest,iv:q.iv??m.iv,gamma:q.gamma??m.gamma,multiplier:q.multiplier??m.multiplier,effectiveMultiplier:effectiveMultiplier(q.optionSymbol?q:m)}}),quoteSamples:[...s.quotes.values()].slice(0,3).map(q=>({symbol:q.optionSymbol,side:q.side,strike:q.strike,oi:q.openInterest,iv:q.iv,gamma:q.gamma,multiplier:q.multiplier,effectiveMultiplier:effectiveMultiplier(q)})),chainListInvalidCount:s.chainListInvalidCount,chainListDuplicateCount:s.chainListDuplicateCount,displayStrikes:s.displayStrikes,oiKnown:c.oiKnown,oiMissing:c.oiMissing,oiAssumedZero:c.oiAssumedZero,volumeKnown:c.volumeKnown,volumeAssumedZero:c.volumeAssumedZero,oiObservedCoverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiMissingSamples:c.oiMissingSamples,multiplierKnown:c.multiplierKnown,multiplierAssumed:c.multiplierAssumed,multiplierMissing:c.multiplierMissing,missingMultiplierSamples:c.missingMultiplierSamples,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,missingGreekSamples:c.missingGreekSamples,gexCoverage:c.gexCoverage,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexComplete:c.gexComplete,oiComplete:c.oiComplete,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,maxPainTiedStrikes:c.maxPain?.tiedStrikes||[],maxPainComplete:c.maxPainComplete,gexRatio:c.gexRatio,price:s.price}] }));
+  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,price:s.price,previousClose:s.previousClose,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,marketPhase:s.marketPhase,priceFeedState:s.priceFeedState,priceFeedDetail:s.priceFeedDetail,priceSource:s.priceSource,priceEndpointIndex:s.priceEndpointIndex,priceActivationAt:s.priceActivationAt,priceConnectStartedAt:s.priceConnectStartedAt,priceSocketOpenedAt:s.priceSocketOpenedAt,priceUpstreamConnectedAt:s.priceUpstreamConnectedAt,priceFirstMessageAt:s.priceFirstMessageAt,priceFirstSnapshotAt:s.priceFirstSnapshotAt,priceStartupMs:s.priceStartupMs,priceSocketState:s.priceSocket?.readyState??null,optionFeedState:s.optionFeedState,optionFeedError:s.optionFeedError,optionSocketState:s.socket?.readyState??null,quotes:s.quotes.size,contracts:c.totalContracts,quotesExpiry:s.quotesExpiry,complete:c.complete,hydrating:s.hydrating,missingQuoteSymbols:c.missingQuoteSymbols.slice(0,20),lastHydrationIncompleteSymbols:s.lastHydrationIncompleteSymbols||[],incompleteContractDetails:(s.lastHydrationIncompleteSymbols||[]).slice(0,12).map(symbol=>{const q=s.quotes.get(symbol)||{},m=s.contractMeta?.get(symbol)||{};return {symbol,side:q.side??m.side,strike:q.strike??m.strike,oi:q.openInterest??m.openInterest,iv:q.iv??m.iv,gamma:q.gamma??m.gamma,multiplier:q.multiplier??m.multiplier,effectiveMultiplier:effectiveMultiplier(q.optionSymbol?q:m)}}),quoteSamples:[...s.quotes.values()].slice(0,3).map(q=>({symbol:q.optionSymbol,side:q.side,strike:q.strike,oi:q.openInterest,iv:q.iv,gamma:q.gamma,multiplier:q.multiplier,effectiveMultiplier:effectiveMultiplier(q)})),chainListInvalidCount:s.chainListInvalidCount,chainListDuplicateCount:s.chainListDuplicateCount,displayStrikes:s.displayStrikes,oiKnown:c.oiKnown,oiMissing:c.oiMissing,oiAssumedZero:c.oiAssumedZero,volumeKnown:c.volumeKnown,volumeAssumedZero:c.volumeAssumedZero,oiObservedCoverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiMissingSamples:c.oiMissingSamples,multiplierKnown:c.multiplierKnown,multiplierAssumed:c.multiplierAssumed,multiplierMissing:c.multiplierMissing,missingMultiplierSamples:c.missingMultiplierSamples,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,missingGreekSamples:c.missingGreekSamples,gexCoverage:c.gexCoverage,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexComplete:c.gexComplete,oiComplete:c.oiComplete,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,maxPainTiedStrikes:c.maxPain?.tiedStrikes||[],maxPainComplete:c.maxPainComplete,gexRatio:c.gexRatio,price:s.price}] }));
 })();
