@@ -1,0 +1,8 @@
+/* ATAS indicator module: MACD Bollinger Bands - Standard (MacdBbStandart) | source: Technical/MacdBbStandart.cs */
+(function(){
+  'use strict';
+  window.ATASIndicatorFiles = window.ATASIndicatorFiles || {};
+  const { C, I, period, srcParam, line, hist, fill, n, safe, atRoll, atSum, atMax, atMin, atMeanDev, atTR, atATR, atROC, atMom, atHLC3, atMedian, atEMA, atDEMA, atTEMA, atHMA, atZLEMA, atKAMA, atATAS_AMA, atCCI, atStoch, atDMI, atOBV, atADL, atSAR, atMedianWin, atLinRegEnd, atPFE, atVHF, atStochRsi } = window.ATASIndicatorRuntime;
+    I('atas_macd_bb_standard', 'MACD Bollinger Bands – Standard (proxy)', 'osc', 'Standard MACD Bollinger envelope; default implementation based on MACD signal and rolling standard deviation.', [['fast', 'Fast EMA', 12, 'i', { min: 1 }], ['slow', 'Slow EMA', 26, 'i', { min: 2 }], ['signal', 'Signal EMA', 9, 'i', { min: 1 }], ['period', 'Band period', 20, 'i', { min: 2 }]], [C.a, C.b], ['MACD', 'Signal / Bands'], (A, p) => { const f = ema(A.c, p.fast), s = ema(A.c, p.slow), m = f.map((v, i) => v == null || s[i] == null ? null : v - s[i]), sig = ema(m, p.signal), sd = sdv(m, p.period), up = m.map((v, i) => v == null || sd[i] == null ? null : v + 2 * sd[i]), lo = m.map((v, i) => v == null || sd[i] == null ? null : v - 2 * sd[i]); return [line(m, 0), line(sig, 1), line(up, 1), line(lo, 1)]; });
+  window.ATASIndicatorFiles["macdbbstandart"] = { ...{"id": "macdbbstandart", "name": "MACD Bollinger Bands - Standard", "sourceClass": "MacdBbStandart", "sourceFile": "Technical/MacdBbStandart.cs", "group": "technical", "requirement": "ohlcv", "status": "ported", "conversion": "approx_proxy", "addKey": "atas_macd_bb_standard"}, moduleFile: "indicators/individual/macdbbstandart.js", moduleType: "primary" };
+})();

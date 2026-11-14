@@ -1,0 +1,8 @@
+/* ATAS indicator module: Repulse (Repulse) | source: Technical/Repulse.cs */
+(function(){
+  'use strict';
+  window.ATASIndicatorFiles = window.ATASIndicatorFiles || {};
+  const { C, I, period, srcParam, line, hist, fill, n, safe, atRoll, atSum, atMax, atMin, atMeanDev, atTR, atATR, atROC, atMom, atHLC3, atMedian, atEMA, atDEMA, atTEMA, atHMA, atZLEMA, atKAMA, atATAS_AMA, atCCI, atStoch, atDMI, atOBV, atADL, atSAR, atMedianWin, atLinRegEnd, atPFE, atVHF, atStochRsi } = window.ATASIndicatorRuntime;
+    I('atas_repulse', 'Repulse', 'osc', 'ATAS source calculation: bull/bear power relative to rolling High/Low and first Open in the period, each smoothed by EMA(Period×5).', [['period', 'Period', 10, 'i', { min: 1 }]], [C.a], ['Repulse'], (A, p) => { const per = P_(p.period), bull = [], bear = []; for (let i = 0; i < A.c.length; i++) { const start = Math.max(0, i - per + 1), max = Math.max(...A.h.slice(start, i + 1)), min = Math.min(...A.l.slice(start, i + 1)), firstOpen = A.o[start], close = A.c[i]; bull.push(close ? 100 * (3 * close - 2 * min - firstOpen) / close : null); bear.push(close ? 100 * (firstOpen + 2 * max - 3 * close) / close : null); } const b = ema(bull, per * 5), s = ema(bear, per * 5); return [line(b.map((v, i) => v == null || s[i] == null ? null : v - s[i]))]; }, { hl: [{ y: 0, al: .35 }] });
+  window.ATASIndicatorFiles["repulse"] = { ...{"id": "repulse", "name": "Repulse", "sourceClass": "Repulse", "sourceFile": "Technical/Repulse.cs", "group": "technical", "requirement": "ohlcv", "status": "ported", "conversion": "direct", "addKey": "atas_repulse"}, moduleFile: "indicators/individual/repulse.js", moduleType: "primary" };
+})();

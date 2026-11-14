@@ -1,0 +1,8 @@
+/* ATAS indicator module: MACD - Volume Weighted (MacdVW) | source: Technical/MacdVW.cs */
+(function(){
+  'use strict';
+  window.ATASIndicatorFiles = window.ATASIndicatorFiles || {};
+  const { C, I, period, srcParam, line, hist, fill, n, safe, atRoll, atSum, atMax, atMin, atMeanDev, atTR, atATR, atROC, atMom, atHLC3, atMedian, atEMA, atDEMA, atTEMA, atHMA, atZLEMA, atKAMA, atATAS_AMA, atCCI, atStoch, atDMI, atOBV, atADL, atSAR, atMedianWin, atLinRegEnd, atPFE, atVHF, atStochRsi } = window.ATASIndicatorRuntime;
+    I('atas_macd_vw', 'MACD – Volume Weighted', 'osc', 'MACD trên chuỗi giá có volume weight; volume của CFD có thể là tick volume.', [['fast', 'Fast EMA', 12, 'i', { min: 1 }], ['slow', 'Slow EMA', 26, 'i', { min: 2 }], ['signal', 'Signal EMA', 9, 'i', { min: 1 }]], [C.a, C.b, C.d], ['MACD VW', 'Signal', 'Histogram'], (A, p) => { const vw = A.c.map((v, i) => v * Math.max(0, n(A.v[i]))), vol = A.v.map(v => Math.max(0, n(v))), vf = ema(vw, p.fast), vs = ema(vol, p.fast), sf = ema(vw, p.slow), ss = ema(vol, p.slow); const f = vf.map((v, i) => vs[i] ? v / vs[i] : null), s = sf.map((v, i) => ss[i] ? v / ss[i] : null), m = f.map((v, i) => v == null || s[i] == null ? null : v - s[i]), sig = ema(m, p.signal); return [line(m, 0), line(sig, 1), hist(m.map((v, i) => v == null || sig[i] == null ? null : v - sig[i]), 2)]; }, { hl: [{ y: 0, al: .35 }] });
+  window.ATASIndicatorFiles["macdvw"] = { ...{"id": "macdvw", "name": "MACD - Volume Weighted", "sourceClass": "MacdVW", "sourceFile": "Technical/MacdVW.cs", "group": "technical", "requirement": "ohlcv", "status": "ported", "conversion": "approx_proxy", "addKey": "atas_macd_vw"}, moduleFile: "indicators/individual/macdvw.js", moduleType: "primary" };
+})();
