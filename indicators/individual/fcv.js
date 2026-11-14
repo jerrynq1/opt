@@ -1,0 +1,8 @@
+/* ATAS indicator module: Full Contract Value (FCV) | source: Technical/FCV.cs */
+(function(){
+  'use strict';
+  window.ATASIndicatorFiles = window.ATASIndicatorFiles || {};
+  const { C, I, period, srcParam, line, hist, fill, n, safe, atRoll, atSum, atMax, atMin, atMeanDev, atTR, atATR, atROC, atMom, atHLC3, atMedian, atEMA, atDEMA, atTEMA, atHMA, atZLEMA, atKAMA, atATAS_AMA, atCCI, atStoch, atDMI, atOBV, atADL, atSAR, atMedianWin, atLinRegEnd, atPFE, atVHF, atStochRsi } = window.ATASIndicatorRuntime;
+  I('atas_fcv', 'Full Contract Value (price proxy)', 'osc', 'Port Technical/FCV.cs. Default custom scale is off, so the output equals the selected source price; tick scale can be applied when configured.', [['src','Nguồn giá','close','s',{o:[['close','Close'],['open','Open'],['hl2','HL2'],['hlc3','HLC3']]}],['tickStep','Tick size (0 = tự lấy từ symbol)',0,'n',{min:0,step:.00001}],['customScale','Custom multiplier (0 = off)',0,'n',{min:0,step:.1}]], [C.b], ['Contract value'], (A,p) => { const v=p.src==='open'?A.o:p.src==='hl2'?A.h.map((x,i)=>(x+A.l[i])/2):p.src==='hlc3'?A.h.map((x,i)=>(x+A.l[i]+A.c[i])/3):A.c; const step=p.tickStep>0?p.tickStep:(typeof CT!=='undefined'&&CT.sym&&CT.sym.digits!=null?Math.pow(10,-Math.max(0,Math.min(8,+CT.sym.digits||0))):0); const scale=p.customScale>0&&step>0?Math.max(step,p.customScale)/step:1; return [line(v.map(x=>Number.isFinite(x)?x*scale:null))]; });
+  window.ATASIndicatorFiles["fcv"] = { ...{"id": "fcv", "name": "Full Contract Value", "sourceClass": "FCV", "sourceFile": "Technical/FCV.cs", "group": "orderflow", "requirement": "ohlcv", "status": "ported", "conversion": "approx_proxy", "addKey": "atas_fcv"}, moduleFile: "indicators/individual/fcv.js", moduleType: "primary" };
+})();

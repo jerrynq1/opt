@@ -1,0 +1,8 @@
+/* ATAS indicator module: Qualitative Quantitative Estimation (QQE) | source: Technical/QQE.cs */
+(function(){
+  'use strict';
+  window.ATASIndicatorFiles = window.ATASIndicatorFiles || {};
+  const { C, I, period, srcParam, line, hist, fill, n, safe, atRoll, atSum, atMax, atMin, atMeanDev, atTR, atATR, atROC, atMom, atHLC3, atMedian, atEMA, atDEMA, atTEMA, atHMA, atZLEMA, atKAMA, atATAS_AMA, atCCI, atStoch, atDMI, atOBV, atADL, atSAR, atMedianWin, atLinRegEnd, atPFE, atVHF, atStochRsi } = window.ATASIndicatorRuntime;
+    I('atas_qqe', 'QQE (proxy)', 'osc', 'QQE-style smoothed RSI with trailing volatility bands; threshold and smoothing can differ from ATAS defaults.', [['rsi', 'RSI period', 14, 'i', { min: 1 }], ['smooth', 'RSI smooth', 5, 'i', { min: 1 }], ['factor', 'QQE factor', 4.236, 'n', { min: .1, step: .001 }]], [C.a, C.b], ['QQE RSI', 'Trailing center'], (A, p) => { const r = ema(rsiOf(A.c, p.rsi), p.smooth), diff = r.map((v, i) => i ? Math.abs(v - r[i - 1]) : 0), band = ema(ema(diff, p.rsi), p.rsi).map(v => v * p.factor), center = Array(r.length).fill(null); let tr = null; for (let i = 0; i < r.length; i++) { if (r[i] == null || band[i] == null) continue; const candidate = r[i] - band[i]; tr = tr == null ? candidate : r[i] > tr ? Math.max(tr, candidate) : candidate; center[i] = tr; } return [line(r, 0), line(center, 1)]; }, { hl: [{ y: 50, al: .25 }] });
+  window.ATASIndicatorFiles["qqe"] = { ...{"id": "qqe", "name": "Qualitative Quantitative Estimation", "sourceClass": "QQE", "sourceFile": "Technical/QQE.cs", "group": "technical", "requirement": "ohlcv", "status": "ported", "conversion": "approx_proxy", "addKey": "atas_qqe"}, moduleFile: "indicators/individual/qqe.js", moduleType: "primary" };
+})();
