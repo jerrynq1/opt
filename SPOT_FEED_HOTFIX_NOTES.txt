@@ -1,0 +1,32 @@
+SPOT FEED HOTFIX — INSTALL / VERIFY
+
+What changed
+1. The GLD/QQQ Spot price feed now uses Binance's documented raw stream:
+   wss://nbstream.binance.com/equity/ws/price
+   This is a separate WebSocket from the option-chain quote stream.
+2. The option-chain stream uses its own connection and string RPC request IDs.
+3. A rejected option-chain subscription no longer prevents the Spot socket from receiving prices.
+4. The page now reports separate SPOT PRICE FEED and OPTION QUOTE STREAM diagnostics.
+5. If no price snapshot arrives for 12 seconds, the raw price socket is closed and reconnected with backoff.
+6. The Exposure renderer's undeclared `spot` reference has been corrected to `s.price`.
+7. PWA cache version was bumped to v22.
+
+How to verify after deployment
+- Deploy the complete `opt-main` directory, including `sw.js` and `js/stock-options.js`.
+- Fully close the installed iOS PWA and reopen it after the deployment is live. The service worker should update to cache v22; if it continues to show old assets, open the site in Safari once and reload, then reopen the PWA.
+- In Options > Data Status, inspect `SPOT PRICE FEED`:
+  * `Market closed · last available price` or `Market open` means a GLD/QQQ snapshot was received.
+  * `Raw Price Stream connected · waiting for snapshot` means the socket opened but no snapshot was received yet.
+  * `Đã nhận snapshot ... nhưng không có GLD/QQQ` means Binance sent a price snapshot, but the requested symbol was not present in its rates array.
+  * `Price WebSocket mở nhưng không nhận snapshot trong 12 giây` means the socket opened but delivered no price payload; it will reconnect.
+- Also inspect `OPTION QUOTE STREAM` independently. A Binance subscription rejection is now shown there rather than being hidden behind a generic Connected label.
+
+Data policy retained
+- OI null -> 0 and Volume null -> 0 for a received/accepted quote, with assumed-zero counters retained.
+- A contract quote that has not been received is still unknown/incomplete; it is not zero-filled.
+- No GEX, Max Pain, Gamma Flip or Greeks formulas were intentionally changed in this hotfix.
+
+Validation
+- `bash tests/run-all.sh`: 21/21 test files passed.
+- JavaScript / MJS syntax: 58/58 files passed.
+- The deployment's live Binance WebSocket connection could not be tested from the build environment. The Data Status diagnostics above are intended to distinguish transport failure from a snapshot that does not contain the requested symbol.

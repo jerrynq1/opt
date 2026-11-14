@@ -59,9 +59,17 @@ FOLLOW-UP VALIDATION
 - Added regression coverage proving full IV/multiplier coverage still cannot produce BSM GEX without Spot, and that missing per-expiry GEX is not displayed as `+0`.
 - Updated service-worker cache version v20 -> v21 so deployed clients fetch the patched stock-options.js.
 
-FOLLOW-UP 2 — SPOT DIAGNOSTICS + LAYOUT
-9. Root cause of "thiếu GEX 1688": Spot (LAST PRICE) = null, nên mọi contract OI>0 không tính được GEX/BSM (1688 = đúng số contract OI>0). OI null→0 vẫn hoạt động đúng, KHÔNG phải nguyên nhân.
-   Stream đúng theo docs Binance Stocks là "price" (rates[]), không phải EQ_x@symbol_price (đã sửa ở hotfix 7).
-- Thêm watchdog 12s: socket mở nhưng không có Spot -> status cảnh báo; ô LAST PRICE ghi rõ lý do.
-10. CSS: tăng specificity nút Analysis Scope (iOS hiện nút xanh mặc định), sửa nhãn Gamma Flip bị xếp dọc từng chữ trên màn hình hẹp.
-11. Service-worker cache v21 -> v22.
+
+FOLLOW-UP HOTFIX 2 — ISOLATED RAW SPOT SOCKET / FEED DIAGNOSTICS
+- Split the Binance raw Price Stream (wss://nbstream.binance.com/equity/ws/price) into its own WebSocket. An option-chain subscription rejection can no longer prevent Spot subscription.
+- Keep the delayed option-chain quote stream on a separate combined-stream socket. Handle and display subscription RPC acknowledgements/errors instead of considering socket-open equivalent to subscribed.
+- Use string request IDs for the Stocks Trading subscription RPC as shown in Binance's Stocks Trading stream documentation.
+- Add explicit diagnostics for no snapshot, target symbol absent from snapshot, reconnecting price feed and option-stream subscription rejection.
+- Add a 12-second raw Price Stream snapshot watchdog and an independent reconnect/backoff path.
+- Fix renderExposure() referencing an undeclared `spot` identifier; it now checks `s.price`, allowing the page to render the explicit waiting-for-Spot message rather than aborting the render pass.
+- Increment PWA shell cache from v21 to v22 so clients fetch the new JS/CSS shell.
+- Preserve the OI/Volume null-to-zero assumptions and all GEX/Max Pain formulas.
+
+FOLLOW-UP VALIDATION 2
+- Added tests for separate raw Spot and option-chain sockets, string subscription request IDs, independent Spot updates despite option-stream rejection, missing-underlying diagnostics, and renderExposure's no-Spot state.
+- Test suite and syntax checks are run as part of this handoff; live Binance WebSocket access is not available from this execution environment, so production feed receipt must still be confirmed in the deployed browser.
