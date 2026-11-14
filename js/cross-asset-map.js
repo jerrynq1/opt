@@ -74,7 +74,7 @@
   // Each source level owns its own CFD mapping. Live ETF/CFD ticks do not move it;
   // a mapping is recalculated only when that particular source level changes.
   function buildMappedMap(snapshot,sourcePrice,targetPrice,previousMap=null,mappedAt=Date.now()){
-    if(!snapshot||snapshot.complete!==true||!Array.isArray(snapshot.dist)||!snapshot.dist.length)return null;
+    if(!snapshot||snapshot.complete!==true||snapshot.expiryMismatch===true||!Array.isArray(snapshot.dist)||!snapshot.dist.length)return null; // never map data whose expiry differs from the displayed one
     const sessionMatches=previousMap&&previousMap.source===(snapshot.key||snapshot.symbol||'')&&
       previousMap.target===(TARGET[snapshot.key]||pair())&&previousMap.expiry===(snapshot.expiry||'');
     const prev=sessionMatches?previousMap:null;

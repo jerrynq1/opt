@@ -89,9 +89,24 @@
         </div>
         <div class="so-chain-meta" id="${p}-chain-meta">Đang lấy Option Chain…</div>
       </div>
+      <div class="card so-scope-card">
+        <div class="so-scope-title">ANALYSIS SCOPE</div>
+        <div class="so-scope-grid" id="${p}-scope" role="radiogroup" aria-label="Analysis scope">
+          <button type="button" class="so-scope-opt" role="radio" data-scope="selected"><em class="so-scope-badge">Current</em><b>Selected Expiry</b><small>Expiry đang chọn</small></button>
+          <button type="button" class="so-scope-opt" role="radio" data-scope="0dte"><b>0DTE</b><small>Trong ngày</small></button>
+          <button type="button" class="so-scope-opt" role="radio" data-scope="weekly"><b>Weekly</b><small>Các kỳ hạn tuần</small></button>
+          <button type="button" class="so-scope-opt" role="radio" data-scope="all"><b>All Expiries</b><small>Toàn bộ kỳ hạn khả dụng</small></button>
+        </div>
+        <div class="so-scope-status" id="${p}-scope-status"></div>
+      </div>
       <div class="card so-level-card">
-        <div class="opt-card-title"><div><h3>Key Levels</h3><small>Ước lượng từ OI và Greeks của expiry được chọn</small></div><button class="btn ghost sm" type="button" id="${p}-copy">Copy Levels</button></div>
+        <div class="opt-card-title"><div><h3>Key Levels</h3><small id="${p}-levels-sub">Ước lượng từ OI và Greeks của expiry được chọn</small></div><button class="btn ghost sm" type="button" id="${p}-copy">Copy Levels</button></div>
         <div class="opt-levels-grid so-levels" id="${p}-levels"><div class="opt-empty">Đang chờ dữ liệu OI…</div></div>
+      </div>
+      <div class="card so-breakdown-card" id="${p}-breakdown-card" hidden>
+        <div class="opt-card-title"><div><h3>GEX theo Expiry</h3><small>Gamma tập trung ngắn hạn hay nằm ở kỳ hạn xa · Max Pain giữ riêng từng expiry</small></div></div>
+        <div class="so-breakdown-summary" id="${p}-breakdown-summary"></div>
+        <div class="opt-table-wrap"><table class="so-breakdown-table"><thead><tr><th>EXPIRY</th><th>DTE</th><th>CALL OI</th><th>PUT OI</th><th>NET GEX</th><th>GAMMA SHARE</th><th>MAX PAIN</th><th>TRẠNG THÁI</th></tr></thead><tbody id="${p}-breakdown"></tbody></table></div>
       </div>
       <div class="opt-main-grid so-exposure-grid">
         <div class="card so-exposure-card">
@@ -108,7 +123,7 @@
           </div>
           <p class="opt-mode-note" id="${p}-exposure-note">Call và Put được tách theo option side; OI không cho biết holder đang Long hay Short.</p>
         </div>
-        <div class="card so-greeks-card"><div class="opt-card-title"><div><h3>Aggregate Greeks</h3><small>Expiry đang chọn</small></div></div><div class="opt-greeks" id="${p}-greeks"><div class="opt-empty">Đang tính…</div></div></div>
+        <div class="card so-greeks-card"><div class="opt-card-title"><div><h3>Aggregate Greeks</h3><small id="${p}-greeks-sub">Expiry đang chọn</small></div></div><div class="opt-greeks" id="${p}-greeks"><div class="opt-empty">Đang tính…</div></div></div>
       </div>
       <div class="card so-oi-card">
         <div class="opt-card-title"><h3>Open Interest by Strike</h3><small class="opt-chart-meta"><span class="opt-legend-item"><i class="opt-legend-call"></i>Call</span><span class="opt-legend-item"><i class="opt-legend-put"></i>Put</span><b id="${p}-oiwall">OI Wall: —</b></small></div>
@@ -148,58 +163,155 @@
     try{const v=JSON.parse(localStorage.getItem(DISPLAY_KEY)||'{}')[key];return v==='all'?'all':([5,10,15,20,30,50,100].includes(+v)?+v:15)}catch{return 15}
   }
   function saveDisplayStrikes(key,value){try{const v=JSON.parse(localStorage.getItem(DISPLAY_KEY)||'{}')||{};v[key]=value;localStorage.setItem(DISPLAY_KEY,JSON.stringify(v))}catch{}}
+  const SCOPE_KEY='tp_stock_options_scope_v1',SCOPES=['selected','0dte','weekly','all'];
+  const SCOPE_REFRESH_MS=300000; // non-selected expiries re-quote every 5 min; the selected expiry keeps its own 60s cycle
+  function readScope(key){try{const v=JSON.parse(localStorage.getItem(SCOPE_KEY)||'{}')[key];return SCOPES.includes(v)?v:'selected'}catch{return 'selected'}}
+  function saveScope(key,value){try{const v=JSON.parse(localStorage.getItem(SCOPE_KEY)||'{}')||{};v[key]=value;localStorage.setItem(SCOPE_KEY,JSON.stringify(v))}catch{}}
   function buildViews(){
     for(const cfg of Object.values(CONFIG)){
       const view = $('v-'+cfg.key+'Options');
       if(view && !view.dataset.stockOptionsBuilt){ view.innerHTML=pageMarkup(cfg); view.dataset.stockOptionsBuilt='1'; }
       sessions[cfg.key] = sessions[cfg.key] || {
         cfg, active:false, socket:null, reconnectTimer:null, pollTimer:null, statusTimer:null,
-        expiry:null, expirations:[], contracts:[], contractSymbols:new Set(), quotes:new Map(), price:null, previousClose:null,
-        priceTime:0, oiLastUpdate:0, quoteLoading:false,
+        expiry:null,expirations:[],contracts:[],contractSymbols:new Set(),quotes:new Map(),price:null,previousClose:null,
+        priceTime:0,oiLastUpdate:0,quoteLoading:false,activationToken:0,activationController:null,chainLoadState:'pending',chainLoadError:'',
         quoteFeed:'delay', streamExpiry:null, streamNames:[], reconnectDelay:1000, requestId:1, chainLoadToken:0, crossAssetError:'',
-        displayStrikes:readDisplayStrikes(cfg.key), chainComplete:false, hydrating:false, hydrateProgress:0, loadedExpiry:null, quotesExpiry:null, lastHydrationMissingSymbols:[], lastHydrationIncompleteSymbols:[], chainListInvalidCount:0,chainListDuplicateCount:0,contractMeta:new Map()
+        displayStrikes:readDisplayStrikes(cfg.key), chainComplete:false, hydrating:false, hydrateProgress:0, loadedExpiry:null, quotesExpiry:null, lastHydrationMissingSymbols:[], lastHydrationIncompleteSymbols:[], chainListInvalidCount:0,chainListDuplicateCount:0,contractMeta:new Map(),
+        scope:readScope(cfg.key), scopeData:new Map(), scopeToken:0, scopeLoading:false, scopeProgress:{done:0,total:0}, scopeError:'', scopeRev:0, scopeTimer:null, _scopeFlipCache:null, _scopeMemo:null
       };
       bindView(sessions[cfg.key]);
     }
   }
 
-  async function request(path, method='GET', body){
-    const isDirectPublic = method === 'GET' && DIRECT_PUBLIC_PATHS.some(prefix => path.startsWith(prefix));
-    const options={method,headers:{'Accept':'application/json'}};
+  // ---- Network resilience: each fetch is bounded, and the complete logical request has one deadline. ----
+  const REQUEST_TIMEOUT_MS=12000, REQUEST_TOTAL_TIMEOUT_MS=30000, REQUEST_RETRY_BASE_MS=800;
+  function transientError(message,extra){const e=new Error(message);e.retryable=true;if(extra)Object.assign(e,extra);return e;}
+  function cancelledError(){const e=new Error('Request cancelled because its session is no longer active');e.name='AbortError';e.cancelled=true;return e;}
+  function deadlineError(){return transientError('Logical request exceeded its total time budget',{timeout:true,totalTimeout:true});}
+  // Reads the whole body inside the timeout window so a stalled body cannot hang the caller forever.
+  async function fetchWithTimeout(url,options,ms=REQUEST_TIMEOUT_MS,deadlineAt=null){
+    const externalSignal=options?.signal;
+    if(externalSignal?.aborted)throw cancelledError();
+    const remaining=deadlineAt===null?ms:Math.max(0,deadlineAt-Date.now());
+    if(remaining<=0)throw deadlineError();
+    const timeoutMs=Math.max(1,Math.min(ms,remaining));
+    if(typeof AbortController==='undefined'){
+      // Older browsers cannot abort the network operation, but the logical caller
+      // still must settle on timeout or external cancellation instead of hanging.
+      let timer,abortHandler;
+      const timeoutPromise=new Promise((_,reject)=>{timer=setTimeout(()=>reject(deadlineAt!==null&&Date.now()>=deadlineAt?deadlineError():transientError(`Request timeout sau ${Math.ceil(timeoutMs/1000)}s`,{timeout:true})),timeoutMs);});
+      const abortPromise=externalSignal?new Promise((_,reject)=>{abortHandler=()=>reject(cancelledError());externalSignal.addEventListener?.('abort',abortHandler,{once:true});}):new Promise(()=>{});
+      try{
+        const response=await Promise.race([(async()=>{const r=await fetch(url,options),t=await r.text();return {ok:r.ok,status:r.status,text:async()=>t};})(),timeoutPromise,abortPromise]);
+        return response;
+      }finally{clearTimeout(timer);externalSignal?.removeEventListener?.('abort',abortHandler);}
+    }
+    const ctl=new AbortController(),timer=setTimeout(()=>ctl.abort(),timeoutMs);
+    const onExternalAbort=()=>ctl.abort();
+    externalSignal?.addEventListener?.('abort',onExternalAbort,{once:true});
+    const fetchOptions={...options,signal:ctl.signal};
+    try{
+      const r=await fetch(url,fetchOptions);
+      const t=await r.text();
+      return {ok:r.ok,status:r.status,text:async()=>t};
+    }catch(e){
+      if(externalSignal?.aborted)throw cancelledError();
+      if(ctl.signal.aborted){
+        if(deadlineAt!==null&&Date.now()>=deadlineAt)throw deadlineError();
+        throw transientError(`Request timeout sau ${Math.ceil(timeoutMs/1000)}s`,{timeout:true});
+      }
+      throw e;
+    }finally{
+      clearTimeout(timer);
+      externalSignal?.removeEventListener?.('abort',onExternalAbort);
+    }
+  }
+  async function request(path,method='GET',body,requestOptions={}){
+    const retries=method==='GET'?2:1;
+    const timeoutMs=Math.max(1,Number(requestOptions.timeoutMs)||REQUEST_TOTAL_TIMEOUT_MS);
+    const deadlineAt=Date.now()+timeoutMs;
+    const signal=requestOptions.signal;
+    let lastError;
+    for(let attempt=0;attempt<=retries;attempt++){
+      if(signal?.aborted)throw cancelledError();
+      if(Date.now()>=deadlineAt)throw deadlineError();
+      try{return await requestOnce(path,method,body,{...requestOptions,deadlineAt});}
+      catch(e){
+        if(signal?.aborted||e?.cancelled)throw cancelledError();
+        if(Date.now()>=deadlineAt)throw deadlineError();
+        lastError=e;
+        if(!e?.retryable||attempt===retries)throw e;
+        const wait=Math.min(REQUEST_RETRY_BASE_MS*Math.pow(2,attempt)+Math.floor(Math.random()*250),Math.max(0,deadlineAt-Date.now()));
+        if(wait<=0)throw deadlineError();
+        await new Promise((resolve,reject)=>{
+          const timer=setTimeout(done,wait);
+          function done(){signal?.removeEventListener?.('abort',onAbort);resolve();}
+          function onAbort(){clearTimeout(timer);signal?.removeEventListener?.('abort',onAbort);reject(cancelledError());}
+          signal?.addEventListener?.('abort',onAbort,{once:true});
+        });
+      }
+    }
+    throw lastError||deadlineError();
+  }
+  async function requestOnce(path,method='GET',body,requestOptions={}){
+    const isDirectPublic=method==='GET'&&DIRECT_PUBLIC_PATHS.some(prefix=>path.startsWith(prefix));
+    const options={method,headers:{'Accept':'application/json'},signal:requestOptions.signal};
     if(body!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(body);}
-    const proxyUrl = API_BASE ? (API_PREFIX + path) : '';
-    let response=null, directProblem='';
+    const proxyUrl=API_BASE?(API_PREFIX+path):'';
+    const deadlineAt=requestOptions.deadlineAt??(Date.now()+REQUEST_TOTAL_TIMEOUT_MS);
+    let response=null,directProblem='';
 
     if(isDirectPublic){
-      // Public chain metadata is attempted directly first. If the browser blocks
-      // Binance through CORS/network policy, retry through the configured narrow Worker.
+      // Public metadata is attempted directly first, then through the narrow Worker fallback.
       try{
-        const direct=await fetch(BINANCE_PUBLIC_BASE + path,options);
+        const direct=await fetchWithTimeout(BINANCE_PUBLIC_BASE+path,options,REQUEST_TIMEOUT_MS,deadlineAt);
         if(direct.ok)response=direct;
         else directProblem=`HTTP ${direct.status}: ${(await direct.text()).slice(0,160)}`;
-      }catch(e){directProblem=e.message||String(e);}
+      }catch(e){
+        if(e?.cancelled||e?.totalTimeout||requestOptions.signal?.aborted)throw e;
+        directProblem=e.message||String(e);
+      }
       if(!response){
         if(!proxyUrl)throw new Error(`Không gọi được Binance trực tiếp (${directProblem||'network/CORS'}). Chưa cấu hình Cloudflare Worker fallback trong js/stock-options-config.js.`);
-        try{response=await fetch(proxyUrl,options)}
-        catch(e){throw new Error(`Binance direct không khả dụng (${directProblem||'network/CORS'}); Worker fallback cũng lỗi (${e.message||e}). Kiểm tra mạng và URL Worker trong js/stock-options-config.js.`)}
+        try{response=await fetchWithTimeout(proxyUrl,options,REQUEST_TIMEOUT_MS,deadlineAt);}
+        catch(e){
+          if(e?.cancelled||e?.totalTimeout||requestOptions.signal?.aborted)throw e;
+          throw transientError(`Binance direct không khả dụng (${directProblem||'network/CORS'}); Worker fallback cũng lỗi (${e.message||e}). Kiểm tra mạng và URL Worker trong js/stock-options-config.js.`,{timeout:!!e?.timeout});
+        }
       }
     }else{
       ensureProxyConfigured();
-      try{response=await fetch(proxyUrl,options)}
-      catch(e){throw new Error('Không gọi được Binance proxy. Kiểm tra URL Cloudflare Worker trong js/stock-options-config.js. Chi tiết: '+(e.message||e))}
+      try{response=await fetchWithTimeout(proxyUrl,options,REQUEST_TIMEOUT_MS,deadlineAt);}
+      catch(e){
+        if(e?.cancelled||e?.totalTimeout||requestOptions.signal?.aborted)throw e;
+        throw transientError('Không gọi được Binance proxy. Kiểm tra URL Cloudflare Worker trong js/stock-options-config.js. Chi tiết: '+(e.message||e),{timeout:!!e?.timeout});
+      }
     }
 
     const text=await response.text();
     if(!response.ok){
       const message=`HTTP ${response.status}: ${text.slice(0,180)}`;
-      if(isDirectPublic)throw new Error(`Binance direct không khả dụng (${directProblem||'network/CORS'}); Worker fallback trả ${message}. Kiểm tra Worker và Binance upstream.`);
-      throw new Error(`Binance Worker ${message}`);
+      const retryable=response.status>=500||response.status===429||response.status===408;
+      if(isDirectPublic)throw Object.assign(new Error(`Binance direct không khả dụng (${directProblem||'network/CORS'}); Worker fallback trả ${message}. Kiểm tra Worker và Binance upstream.`),{retryable,status:response.status});
+      throw Object.assign(new Error(`Binance Worker ${message}`),{retryable,status:response.status});
     }
     let json;
     try{json=JSON.parse(text)}catch{throw new Error('Binance trả response không phải JSON: '+text.slice(0,120));}
-    if(json && json.code && json.code!=='000000' && json.code!=='0') throw new Error(json.message||json.msg||`Binance error ${json.code}`);
-    if(json && json.success===false) throw new Error(json.message||'Binance API request failed');
+    if(json&&json.code&&json.code!=='000000'&&json.code!=='0')throw new Error(json.message||json.msg||`Binance error ${json.code}`);
+    if(json&&json.success===false)throw new Error(json.message||'Binance API request failed');
     return json;
+  }
+  // The Options product page contains the exchange's currently listed expiries,
+  // including long-dated contracts. Use the already allow-listed Worker route
+  // when the metadata API does not expose an expiry inventory.
+  async function requestText(path,requestOptions={}){
+    ensureProxyConfigured();
+    const timeoutMs=Math.max(1,Number(requestOptions.timeoutMs)||REQUEST_TOTAL_TIMEOUT_MS);
+    const deadlineAt=Date.now()+timeoutMs;
+    const response=await fetchWithTimeout(API_PREFIX+path,{method:'GET',headers:{'Accept':'text/html'},signal:requestOptions.signal},REQUEST_TIMEOUT_MS,deadlineAt);
+    const body=await response.text();
+    if(!response.ok)throw Object.assign(new Error(`Binance page HTTP ${response.status}: ${body.slice(0,160)}`),{status:response.status,retryable:response.status>=500||response.status===429});
+    return body;
   }
 
   function setStatus(s,text,kind=''){
@@ -215,31 +327,126 @@
   function clearError(s){const el=$(`so-${s.cfg.key}-error`);if(el){el.hidden=true;el.innerHTML='';}}
 
 
-  function candidateDates(limit=18){
-    const out=[]; const base=new Date(isoTodayNY()+'T12:00:00Z');
-    for(let i=0;i<65 && out.length<limit;i++){
+  const EXPIRY_DISCOVERY_DAYS=90, EXPIRY_DISCOVERY_LIMIT=64, EXPIRY_DISCOVERY_CONCURRENCY=4;
+  function candidateDates(limit=EXPIRY_DISCOVERY_LIMIT){
+    const out=[],base=new Date(isoTodayNY()+'T12:00:00Z');
+    for(let i=0;i<EXPIRY_DISCOVERY_DAYS&&out.length<limit;i++){
       const d=new Date(base.getTime()+i*86400000),day=d.getUTCDay();
       if(day===0||day===6)continue;
       out.push(d.toISOString().slice(0,10));
     }
     return out;
   }
-
-  async function loadExpirations(s){
+  function validExpiryDate(year,month,day){
+    const d=`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const parsed=new Date(d+'T12:00:00Z');return Number.isFinite(parsed.getTime())&&parsed.toISOString().slice(0,10)===d?d:null;
+  }
+  function parseExpiryValue(value){
+    if(value===null||value===undefined||value==='')return null;
+    const valueText=String(value).trim();
+    if(/^\d{8}$/.test(valueText)){const m=valueText.match(/^(\d{4})(\d{2})(\d{2})$/);return validExpiryDate(m[1],m[2],m[3]);}
+    if(typeof value==='number'||/^\d{10,13}$/.test(valueText)){
+      const n=Number(value),ms=n<1e11?n*1000:n;
+      if(!Number.isFinite(ms)||ms<0)return null;
+      const d=new Date(ms);if(!Number.isFinite(d.getTime()))return null;
+      return d.toISOString().slice(0,10);
+    }
+    const raw=String(value).trim();
+    let m=raw.match(/^(\d{4})[-/](\d{2})[-/](\d{2})(?:T.*)?$/);
+    if(m)return validExpiryDate(m[1],m[2],m[3]);
+    m=raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+    if(m)return validExpiryDate(m[1],m[2],m[3]);
+    m=raw.match(/^(\d{2})(\d{2})(\d{2})$/);
+    if(m)return validExpiryDate(`20${m[1]}`,m[2],m[3]);
+    return null;
+  }
+  function extractExpiryDates(payload,cfg){
+    const dates=new Set(),root=String(cfg?.root||cfg?.symbol||'').toUpperCase(),symbolRe=root?new RegExp('^'+root+'[A-Z0-9]{0,3}(\\d{6})[CP]\\d{8}$','i'):null;
+    const dateKeys=new Set(['expirationdate','expirydate','expiration','expiry','expirationday','expirydays']);
+    const symbolKeys=new Set(['os','optionsymbol','symbol','contractsymbol']);
+    const arrayDateKeys=new Set(['expirationdates','expirydates','expirations','expirylist','expirationdatelist','expirydatelist']);
+    const add=v=>{const d=parseExpiryValue(v);if(d)dates.add(d);};
+    function visit(node,depth=0){
+      if(!node||typeof node!=='object'||depth>12)return;
+      if(Array.isArray(node)){for(const child of node)visit(child,depth+1);return;}
+      const entries=Object.entries(node),get=(keys)=>entries.find(([k])=>keys.has(k.toLowerCase()))?.[1];
+      const sym=get(symbolKeys),underlying=get(new Set(['underlying','underlyingasset','root','rootsymbol','baseasset']));
+      let belongs=true;
+      if(typeof sym==='string'&&symbolRe){
+        const m=sym.toUpperCase().match(symbolRe);
+        if(m){const v=m[1];add(`20${v.slice(0,2)}-${v.slice(2,4)}-${v.slice(4,6)}`);}
+        else if(!sym.toUpperCase().startsWith(root))belongs=false;
+      }
+      if(typeof underlying==='string'&&root&&!['QQQ','GLD',`EQ_${root}`].includes(underlying.toUpperCase()))belongs=false;
+      if(belongs){
+        for(const [key,value] of entries){
+          const lower=key.toLowerCase();
+          if(dateKeys.has(lower)||(/expir|maturit/i.test(lower)&&!Array.isArray(value)))add(value);
+          else if((arrayDateKeys.has(lower)||(/expir|maturit/i.test(lower)&&Array.isArray(value)))&&Array.isArray(value))for(const item of value){
+            if(typeof item==='string'||typeof item==='number')add(item);
+            else visit(item,depth+1);
+          }
+        }
+      }
+      for(const [,value] of entries)if(value&&typeof value==='object')visit(value,depth+1);
+    }
+    visit(payload);
+    return [...dates].sort();
+  }
+  function extractExpiryDatesFromHtml(html,cfg,today=isoTodayNY()){
+    const text=String(html||''),dates=new Set(),year=Number(today.slice(0,4));
+    const explicit=/(?:^|[^0-9])(20\d{2})[-/](\d{2})[-/](\d{2})(?![0-9])/g;
+    for(const m of text.matchAll(explicit)){const d=validExpiryDate(m[1],m[2],m[3]);if(d&&d>=today)dates.add(d);}
+    const short=/(?:^|[^0-9-])(\d{2})-(\d{2})(?![0-9])/g;
+    for(const m of text.matchAll(short)){
+      const month=Number(m[1]),day=Number(m[2]);if(month<1||month>12||day<1||day>31)continue;
+      let d=validExpiryDate(year,month,day);if(!d)continue;
+      if(d<today)d=validExpiryDate(year+1,month,day);
+      if(d)dates.add(d);
+    }
+    return [...dates].sort();
+  }
+  async function loadExpirations(s,requestOptions={}){
     const cfg=s.cfg;
-    setStatus(s,'Đang lấy expiry trực tiếp từ Binance…','loading');
-    const dates=candidateDates(24);
-    const found=[]; let firstError='';
-    let next=0;
-    async function worker(){while(next<dates.length){const d=dates[next++];try{
-      const data=await request(`/bapi/equity/v1/public/equity/option/chain-symbols?${new URLSearchParams({symbol:cfg.symbol,rootSymbol:cfg.root,expirationDate:d})}`);
-      const list=data.data?.l||[];if(list.length)found.push({date:d,root:cfg.root});
-    }catch(e){if(!firstError)firstError=e.message||String(e);} }}
-    await Promise.all(Array.from({length:4},worker));
-    found.sort((a,b)=>a.date.localeCompare(b.date));
-    s.expirations=found;
-    if(!found.length)throw new Error(`Không tìm thấy expiry ${cfg.symbol}. Đã thử Binance REST và Worker dự phòng. ${firstError||'Không có contract trong các ngày đã kiểm tra.'}`);
-    return found;
+    setStatus(s,'Đang lấy expiry từ Binance…','loading');
+    const found=new Map();let metadataError='',pageError='',scanError='',metadataSource='';
+    // Prefer the exchange inventory where available.
+    try{
+      const info=await request(`/bapi/equity/v1/public/equity/option/get-exchange-info?${new URLSearchParams({symbol:cfg.symbol,rootSymbol:cfg.root})}`,'GET',undefined,requestOptions);
+      for(const date of extractExpiryDates(info,cfg))if(date>=isoTodayNY())found.set(date,{date,root:cfg.root});
+      if(found.size)metadataSource='exchange-info';
+    }catch(e){if(requestOptions.signal?.aborted)throw e;metadataError=e.message||String(e);}
+
+    // The official product page lists near- and long-dated expiry dates. Its route
+    // is already allow-listed in the Worker and is a better fallback than probing
+    // hundreds of calendar days one by one.
+    if(!found.size){
+      try{
+        const html=await requestText(`/en/stocks/options/${cfg.assetCode}`,requestOptions);
+        for(const date of extractExpiryDatesFromHtml(html,cfg))if(date>=isoTodayNY())found.set(date,{date,root:cfg.root});
+        if(found.size)metadataSource='options-page';
+      }catch(e){if(requestOptions.signal?.aborted)throw e;pageError=e.message||String(e);}
+    }
+
+    // Last-resort bounded discovery for an unavailable/changed page or metadata response.
+    let checked=0;
+    const metadataStatus=Number((metadataError+' '+pageError).match(/HTTP (\d{3})/)?.[1]||0);
+    const metadataAllowsScan=!metadataError&&!pageError||metadataStatus===400||metadataStatus===404||metadataStatus===405;
+    if(!found.size&&metadataAllowsScan){
+      const dates=candidateDates();checked=dates.length;let next=0;
+      async function worker(){while(next<dates.length){if(requestOptions.signal?.aborted)return;const d=dates[next++];try{
+        const data=await request(`/bapi/equity/v1/public/equity/option/chain-symbols?${new URLSearchParams({symbol:cfg.symbol,rootSymbol:cfg.root,expirationDate:d})}`,'GET',undefined,requestOptions);
+        const list=data.data?.l||[];if(list.length)found.set(d,{date:d,root:cfg.root});
+      }catch(e){if(requestOptions.signal?.aborted)return;if(!scanError)scanError=e.message||String(e);}}}
+      await Promise.all(Array.from({length:Math.min(EXPIRY_DISCOVERY_CONCURRENCY,dates.length)},worker));
+    }
+    if(requestOptions.signal?.aborted)return [];
+    const result=[...found.values()].sort((a,b)=>a.date.localeCompare(b.date));
+    s.expirations=result;
+    s.expiryDiscovery={source:result.length&&!checked?metadataSource:checked?'90-day-scan':'unavailable',exact:!checked&&result.length>0,checked,calendarDays:EXPIRY_DISCOVERY_DAYS,
+      from:isoTodayNY(),through:new Date(new Date(isoTodayNY()+'T12:00:00Z').getTime()+(EXPIRY_DISCOVERY_DAYS-1)*86400000).toISOString().slice(0,10),metadataError,pageError,scanError};
+    if(!result.length)throw new Error(`Không tìm thấy expiry ${cfg.symbol}. Exchange info: ${metadataError||'không có ngày expiry'}; Options page: ${pageError||'không có ngày expiry'}; ${metadataAllowsScan?'date scan: '+(scanError||'không có contract trong phạm vi 90 ngày.'):'không scan tiếp vì Binance upstream đang lỗi.'}`);
+    return result;
   }
 
   // OCC symbol e.g. QQQ261110C00369000 -> strike 369.000
@@ -341,7 +548,7 @@
     const selected=new Set(strikes.slice().sort((a,b)=>Math.abs(a-anchor)-Math.abs(b-anchor)).slice(0,Math.max(1,+count||15)).map(strikeKey));
     return list.filter(x=>selected.has(strikeKey(occStrike(x.os)))).map(x=>x.os).filter(Boolean);
   }
-  async function fetchQuoteBatches(s, symbols, token, expiry, concurrency=2){
+  async function fetchQuoteBatches(s,symbols,token,expiry,concurrency=2,requestOptions={}){
     const requested=[...new Set((symbols||[]).filter(Boolean))];
     let pending=requested.slice(),receivedCount=0,lastError='';
     for(let attempt=0;attempt<3&&pending.length;attempt++){
@@ -352,7 +559,7 @@
         while(next<batches.length){
           const batch=batches[next++];
           try{
-            const reply=await request('/bapi/equity/v1/friendly/equity/option/get-option-quote','POST',{occSymbols:batch});
+            const reply=await request('/bapi/equity/v1/friendly/equity/option/get-option-quote','POST',{occSymbols:batch},requestOptions);
             if(token!==s.chainLoadToken||expiry!==s.expiry)return;
             const received=quoteRowsFromReply(reply).map(normaliseQuote).filter(q=>q.optionSymbol);
             for(const q of received){
@@ -366,7 +573,7 @@
             s.hydrateProgress=Math.min(requested.length,s.hydrateProgress+batch.length);
             s.oiLastUpdate=Date.now();
             if(s.hydrating)updateChainMeta(s);
-          }catch(error){lastError=error?.message||String(error);}
+          }catch(error){if(requestOptions.signal?.aborted)throw cancelledError();lastError=error?.message||String(error);}
         }
       }
       await Promise.all(Array.from({length:Math.min(Math.max(1,concurrency),batches.length||1)},worker));
@@ -380,38 +587,63 @@
     }
     return {requested:requested.length,received:requested.length-pending.length,missing:pending,error:lastError};
   }
-  async function hydrateRemainingQuotes(s, symbols, token, expiry){
+  async function hydrateRemainingQuotes(s,symbols,token,expiry,requestOptions={}){
     const expected=s.contractSymbols?.size||s.contracts.length||0;
     if(!symbols.length){
       const allQuotesPresent=s.contractSymbols?Array.from(s.contractSymbols).every(symbol=>s.quotes.has(symbol)):s.quotes.size>=expected;
       const incomplete=s.contractSymbols?Array.from(s.contractSymbols).filter(symbol=>quoteNeedsAnalyticsRetry(s,symbol)):[];
-      s.chainComplete=allQuotesPresent;s.hydrating=false;s.loadedExpiry=allQuotesPresent?expiry:null;
+      s.chainComplete=allQuotesPresent;s.hydrating=false;s.loadedExpiry=allQuotesPresent?expiry:null;s.chainLoadState=allQuotesPresent?(incomplete.length?'partial':'complete'):'partial';s.chainLoadError='';
       s.lastHydrationMissingSymbols=[];s.lastHydrationIncompleteSymbols=incomplete;renderAll(s);
       setStatus(s,allQuotesPresent?(incomplete.length?`Full quotes loaded · ${incomplete.length} contracts thiếu OI/analytics`:`Loaded full chain · ${s.quotes.size}/${expected} contracts`):`Chain còn thiếu quote · ${s.quotes.size}/${expected}`,allQuotesPresent&&!incomplete.length?'ok':'warn');
       return;
     }
     s.hydrating=true;
     try{
-      const result=await fetchQuoteBatches(s,symbols,token,expiry,2);
+      const result=await fetchQuoteBatches(s,symbols,token,expiry,2,requestOptions);
       if(token!==s.chainLoadToken||expiry!==s.expiry)return;
       const missing=s.contractSymbols?Array.from(s.contractSymbols).filter(symbol=>!s.quotes.has(symbol)):[];
       const incomplete=s.contractSymbols?Array.from(s.contractSymbols).filter(symbol=>quoteNeedsAnalyticsRetry(s,symbol)):[];
       const allQuotesPresent=missing.length===0&&s.quotes.size>=expected;
       s.lastHydrationMissingSymbols=missing.slice();s.lastHydrationIncompleteSymbols=incomplete.slice();
       s.chainComplete=allQuotesPresent;s.loadedExpiry=allQuotesPresent?expiry:null;
-      s.hydrating=false;s.crossAssetError='';
+      s.hydrating=false;s.crossAssetError='';s.chainLoadState=allQuotesPresent?(incomplete.length?'partial':'complete'):'partial';s.chainLoadError='';
       renderAll(s);
       const detail=[missing.length?`thiếu ${missing.length} OCC quote`:null,incomplete.length?`${incomplete.length} contract OI > 0 thiếu multiplier/IV`:null,result.error||null].filter(Boolean).join(' · ');
       setStatus(s,allQuotesPresent?(incomplete.length?`Full quotes · analytics thiếu ${incomplete.length}/${expected} · ${detail}`:`Loaded full chain · ${s.quotes.size}/${expected} contracts`):`Chain quote chưa đầy đủ · ${s.quotes.size}/${expected} · ${detail}`,allQuotesPresent&&!incomplete.length?'ok':'warn');
     }catch(e){
       if(token!==s.chainLoadToken)return;
-      s.hydrating=false;s.chainComplete=false;s.crossAssetError=e.message||String(e);
+      s.hydrating=false;s.chainComplete=false;s.chainLoadState='error';s.chainLoadError=e.message||String(e);s.crossAssetError=e.message||String(e);
       renderAll(s);setStatus(s,'Chain tải chưa đầy đủ · xem lỗi','bad');showError(s,e.message||String(e));
     }
   }
-  async function loadChain(s, refreshAll=false){
+  // Drops everything that belongs to a previously loaded expiry. Called the moment a different expiry is
+  // requested, so an old snapshot can never be shown, mapped or labelled with the new expiry if its load fails.
+  function resetExpirySnapshot(s){
+    s.quotes=new Map();s.contracts=[];s.contractSymbols=new Set();s.contractMeta=new Map();
+    s.chainComplete=false;s.loadedExpiry=null;s.quotesExpiry=null;s.hydrating=false;s.hydrateProgress=0;s.chainLoadState='pending';s.chainLoadError='';
+    s.lastHydrationMissingSymbols=[];s.lastHydrationIncompleteSymbols=[];
+    s.liveBlocked=true; // ignore live quote frames until the new expiry's contract list is installed
+    try{renderAll(s);}catch{}
+  }
+  // Wrapper guarantees `hydrating` is released on any failure, so later refreshes are never blocked.
+  async function loadChain(s,refreshAll=false,requestOptions={}){
+    const startToken=s.chainLoadToken;
+    try{return await loadChainInner(s,refreshAll,requestOptions);}
+    catch(e){
+      // Only the most recent load owns the session state; a superseded load must not touch it.
+      if(s.chainLoadToken===startToken+1){
+        s.hydrating=false;s.hydrateProgress=0;
+        const sym=s.contractSymbols;
+        s.chainComplete=!!(sym&&sym.size&&s.quotesExpiry===s.expiry&&Array.from(sym).every(x=>s.quotes.has(x)));
+        s.chainLoadState='error';s.chainLoadError=e.message||String(e);
+      }
+      throw e;
+    }
+  }
+  async function loadChainInner(s,refreshAll=false,requestOptions={}){
     if(!s.expiry)return;
-    const token=++s.chainLoadToken;
+    if(s.quotesExpiry!==s.expiry)resetExpirySnapshot(s);
+    const token=++s.chainLoadToken;s.chainLoadState='loading';s.chainLoadError='';
     const cfg=s.cfg,expiry=s.expiry,meta=s.expirations.find(x=>x.date===expiry),root=meta?.root||cfg.root;
     const sameExpiry=s.quotesExpiry===expiry&&s.quotes.size>0;
     const previousQuotes=sameExpiry?new Map(s.quotes):new Map();
@@ -419,7 +651,7 @@
     s.hydrating=keepCompleteSnapshot;s.chainComplete=keepCompleteSnapshot;s.hydrateProgress=0;
     setStatus(s,'Đang lấy Option Chain…','loading');
     if(!s.quotes.size)$(`so-${cfg.key}-chain`).innerHTML='<tr><td colspan="19" class="opt-empty">Đang lấy danh sách OCC contracts…</td></tr>';
-    const chain=await request(`/bapi/equity/v1/public/equity/option/chain-symbols?${new URLSearchParams({symbol:cfg.symbol,rootSymbol:root,expirationDate:expiry})}`);
+    const chain=await request(`/bapi/equity/v1/public/equity/option/chain-symbols?${new URLSearchParams({symbol:cfg.symbol,rootSymbol:root,expirationDate:expiry})}`,'GET',undefined,requestOptions);
     if(token!==s.chainLoadToken||expiry!==s.expiry)return;
     const list=chain.data?.l||[];
     if(!list.length)throw new Error(`Binance không trả contract cho ${cfg.symbol} expiry ${expiry}.`);
@@ -437,7 +669,7 @@
     s.contractMeta=new Map(canonical.map(item=>[item.os,normaliseQuote(item)]));
     s.contracts=canonical;
     s.contractSymbols=new Set(symbols);
-    s.quotesExpiry=expiry;
+    s.quotesExpiry=expiry;s.liveBlocked=false;
     // A same-expiry refresh may see a changed listed-strike set; discard quotes no longer in that chain.
     s.quotes=new Map([...previousQuotes].filter(([symbol])=>s.contractSymbols.has(symbol)));
     // A periodic refresh re-quotes the whole expiry in the background while preserving the last complete snapshot.
@@ -447,19 +679,19 @@
       s.oiLastUpdate=Date.now();s.crossAssetError='';
       renderAll(s);updateChainMeta(s);syncOptionStream(s);
       setStatus(s,`Đang làm mới toàn bộ ${symbols.length} contracts · vẫn giữ dữ liệu gần nhất trên chart`,'loading');
-      hydrateRemainingQuotes(s,symbols,token,expiry);
+      hydrateRemainingQuotes(s,symbols,token,expiry,requestOptions);
       return;
     }
     const visibleSymbols=strikeSymbols(list,s);
     const already=new Set(s.quotes.keys());
     const priority=visibleSymbols.filter(x=>!already.has(x)||quoteNeedsAnalyticsRetry(s,x));
     if(priority.length){
-      await fetchQuoteBatches(s,priority,token,expiry,2);
+      await fetchQuoteBatches(s,priority,token,expiry,2,requestOptions);
       if(token!==s.chainLoadToken||expiry!==s.expiry)return;
     }
     if(!s.quotes.size&&priority.length<symbols.length){
       // Fallback only when Binance returned no visible ATM quote at all.
-      await fetchQuoteBatches(s,symbols,token,expiry,2);
+      await fetchQuoteBatches(s,symbols,token,expiry,2,requestOptions);
       if(token!==s.chainLoadToken||expiry!==s.expiry)return;
     }
     if(!s.quotes.size)throw new Error('Binance trả danh sách contract nhưng không có quote.');
@@ -468,14 +700,14 @@
     const incomplete=symbols.filter(x=>quoteNeedsAnalyticsRetry(s,x));
     s.hydrateProgress=symbols.length-missing.length;
     s.hydrating=missing.length>0||incomplete.length>0;
-    s.chainComplete=missing.length===0;
+    s.chainComplete=missing.length===0;s.chainLoadState=s.hydrating?'loading':'complete';
     renderAll(s);updateChainMeta(s);syncOptionStream(s);
     if(missing.length||incomplete.length){
       setStatus(s,`Đã hiển thị ${s.displayStrikes==='all'?'tất cả':s.displayStrikes} strikes · đang hoàn thiện dữ liệu (${s.quotes.size}/${symbols.length} quotes, ${incomplete.length} contract OI > 0 thiếu multiplier/IV)`,'loading');
       // Full-chain analytics are hydrated in the background; first paint only requests visible ATM strikes.
-      hydrateRemainingQuotes(s,[...new Set([...missing,...incomplete])],token,expiry);
+      hydrateRemainingQuotes(s,[...new Set([...missing,...incomplete])],token,expiry,requestOptions);
     }else{
-      s.loadedExpiry=expiry;s.lastHydrationMissingSymbols=[];setStatus(s,`Loaded · ${s.quotes.size}/${symbols.length} option quotes`,'ok');
+      s.loadedExpiry=expiry;s.lastHydrationMissingSymbols=[];s.chainLoadState='complete';s.chainLoadError='';setStatus(s,`Loaded · ${s.quotes.size}/${symbols.length} option quotes`,'ok');
     }
   }
 
@@ -483,6 +715,7 @@
     const arr=Array.isArray(raw)?raw:[raw];
     const sourceKeys={name:['n','name'],side:['t','contractType','side','optionType'],expiration:['e','expiration','expiry'],strike:['sp','strikePrice','strike','k'],multiplier:['m','multiplier','contractMultiplier','contract_multiplier','contractSize','contract_size'],last:['p','l','lastPrice','last'],bid:['bp','bid'],ask:['ap','ask'],mid:['mp','mid'],volume:['v','volume'],openInterest:['oi','openInterest','open_interest','openInterestQty','open_interest_qty','openInterestQuantity'],iv:['iv','impliedVolatility','impliedVol','markIV','markIv','mark_iv','bidIV','askIV'],delta:['de','delta','greeks'],gamma:['ga','gamma','greeks'],theta:['th','theta','greeks'],vega:['ve','vega','greeks'],breakEven:['be','breakEven'],previousClose:['pcp','previousClose'],bidSize:['bs','bidSize'],askSize:['as','askSize']};
     let changed=false;
+    if(s.liveBlocked)return false;
     for(const item of arr){
       if(!item || !(item.os||item.optionSymbol))continue;
       const q=normaliseQuote(item);
@@ -599,22 +832,26 @@
     return rows.map(q=>[q.optionSymbol||'',q.strike??'',q.side||'',q.openInterest??'',q.multiplier??'',q.iv??''].join(':')).join('|');
   }
   function gammaFlipOf(rows,spot,expiry,now=Date.now()){
-    const time=yearsToExpiry(expiry,now);
+    // Multi-expiry rows carry their own `_expiry`: every contract is repriced with its own DTE.
+    const multi=rows.some(q=>q&&q._expiry);
+    const time=multi?1:yearsToExpiry(expiry,now);
     if(time===null)return {level:null,complete:false,reason:'Thiếu DTE hợp lệ',coverage:0};
+    const timeOf=q=>multi?yearsToExpiry(q._expiry,now):time;
     const valid=rows.filter(q=>Number.isFinite(q.strike)&&q.strike>0&&(q.side==='C'||q.side==='P'));
     const invalidCount=rows.length-valid.length;
     // Received contracts with null OI are treated as zero until Binance reports a value.
     // Zero-OI contracts do not contribute to repriced Net GEX and need no IV/multiplier.
     const invalidOI=valid.filter(q=>q.openInterest!==null&&q.openInterest!==undefined&&(!Number.isFinite(q.openInterest)||q.openInterest<0));
     const active=valid.filter(q=>Number.isFinite(q.openInterest)&&q.openInterest>0);
-    const eligible=active.filter(q=>effectiveMultiplier(q).value!==null&&ivSigma(q.iv)!==null);
+    const eligible=active.filter(q=>effectiveMultiplier(q).value!==null&&ivSigma(q.iv)!==null&&timeOf(q)!==null);
     const coverage=active.length?eligible.length/active.length:1;
     if(!valid.length||invalidCount>0||invalidOI.length>0||eligible.length!==active.length)return {level:null,crosses:[],complete:false,reason:'Contract OI > 0 cần multiplier hợp lệ (Binance hoặc standard 100-share OCC) và IV hợp lệ; OI null được giả định 0',coverage};
     if(!eligible.length)return {level:null,crosses:[],complete:true,reason:'Không có contract OI dương để tính Zero Gamma',coverage};
+    const tq=new Map(eligible.map(q=>[q,timeOf(q)]));
     const netAt=price=>{
       let total=0;
       for(const q of eligible){
-        const g=bsmGamma(price,q.strike,time,ivSigma(q.iv));
+        const g=bsmGamma(price,q.strike,tq.get(q),ivSigma(q.iv));
         if(g===null)return null;
         const multiplier=effectiveMultiplier(q).value;
         if(multiplier===null)return null;
@@ -649,9 +886,9 @@
     }
     const orderedCrosses=crosses.sort((a,b)=>a-b);
     const level=spot>0&&orderedCrosses.length?orderedCrosses.slice().sort((a,b)=>Math.abs(a-spot)-Math.abs(b-spot))[0]:null;
-    return {level,crosses:orderedCrosses,complete:true,reason:!orderedCrosses.length?'Không có zero-cross trong dải giá giả định':!(spot>0)?'Cần Spot hiện tại để chọn zero-cross gần nhất':'Gamma Flip / Zero Gamma · BSM repricing · OI/IV cố định · r=q=0 · 16:00 New York expiry · bisection-refined',coverage,range:[lo,hi],timeToExpiry:time};
+    return {level,crosses:orderedCrosses,complete:true,reason:!orderedCrosses.length?'Không có zero-cross trong dải giá giả định':!(spot>0)?'Cần Spot hiện tại để chọn zero-cross gần nhất':(multi?'Gamma Flip / Zero Gamma · BSM repricing · DTE riêng từng hợp đồng · OI/IV cố định · r=q=0 · 16:00 New York':'Gamma Flip / Zero Gamma · BSM repricing · OI/IV cố định · r=q=0 · 16:00 New York expiry · bisection-refined'),coverage,range:[lo,hi],timeToExpiry:multi?null:time};
   }
-  function calc(s,now=Date.now()){
+  function calcSingle(s,now=Date.now(),opts={}){
     const rows=getRows(s),spot=s.price;
     const time=yearsToExpiry(s.expiry,now);
     let callOI=0,putOI=0,oiKnown=0,oiMissing=0,oiAssumedZero=0,volumeKnown=0,volumeAssumedZero=0,ivKnown=0,ivMissing=0,multiplierMissing=0,multiplierAssumed=0,multiplierKnown=0,maxPainMultiplierMissing=0,callVol=0,putVol=0;
@@ -687,7 +924,7 @@
       if(ivSigma(q.iv)===null)ivMissing++;
       if(m===null)continue;
       if(spot!==null){
-        const resolved=resolveGamma(q,spot,time);
+        const resolved=resolveGamma(q,spot,q._expiry?yearsToExpiry(q._expiry,now):time);
         if(resolved.gamma!==null){
           const raw=resolved.gamma*oi*m*spot*spot*.01;
           const v=side==='P'?-raw:raw;
@@ -719,8 +956,8 @@
     const gexComplete=complete&&gexMissing===0&&spot!==null&&totalContracts>0;
     const gexProvisional=gexAvailable&&!gexComplete;
     const maxPainComplete=oiComplete&&maxPainMultiplierMissing===0;
-    const maxPain=maxPainComplete?maxPainOf(dist):null;
-    const maxPainReason=!complete?`Đang thiếu ${missingQuoteSymbols.length} quote OCC`:
+    const maxPain=opts.multi?(opts.maxPain||null):(maxPainComplete?maxPainOf(dist):null);
+    const maxPainReason=opts.multi?(opts.maxPainReason||'Max Pain tính riêng từng expiry'):!complete?`Đang thiếu ${missingQuoteSymbols.length} quote OCC`:
       !oiComplete?`Có contract OCC không hợp lệ`:
       maxPainMultiplierMissing>0?`Thiếu multiplier ở ${maxPainMultiplierMissing} contract OI > 0`:
       !maxPain?'Expiry không có OI dương để xác định Max Pain':'Max Pain tính từ toàn bộ expiry';
@@ -735,9 +972,10 @@
     const gexCallWall=positiveGex[0]||null;
     const gexPutWall=negativeGex[0]||null;
     // Reprice Zero Gamma from all positive-OI contracts using IV, independent of provider Gamma.
-    const flipCacheKey=[s.expiry||'',gammaFlipInputKey(rows),rows.length,Math.floor(now/60000)].join('|');
+    const flipCacheKey=[s.expiry||'',...(opts.multi?['multi']:[]),gammaFlipInputKey(rows),rows.length,Math.floor(now/60000)].join('|');
     let flipCalc=s._gammaFlipCache?.key===flipCacheKey?s._gammaFlipCache.value:null;
-    if(!flipCalc){flipCalc=complete?gammaFlipOf(rows,spot,s.expiry,now):{level:null,crosses:[],complete:false,reason:'Full Option Chain chưa tải xong',coverage:0};try{s._gammaFlipCache={key:flipCacheKey,value:flipCalc}}catch{}}
+    if(opts.skipFlip)flipCalc={level:null,crosses:[],complete:false,reason:'Bỏ qua trong bảng breakdown',coverage:0};
+    else if(!flipCalc){flipCalc=complete?gammaFlipOf(rows,spot,s.expiry,now):{level:null,crosses:[],complete:false,reason:'Full Option Chain chưa tải xong',coverage:0};try{s._gammaFlipCache={key:flipCacheKey,value:flipCalc}}catch{}}
     const gammaFlip=spot>0&&flipCalc.crosses?.length?flipCalc.crosses.slice().sort((a,b)=>Math.abs(a-spot)-Math.abs(b-spot))[0]:null;
     // GEX 1–10 is the next ten distinct strikes after excluding every plotted
     // price level: OI Walls, GEX CW/PW, Max Pain (including tied minima), and
@@ -759,13 +997,197 @@
       gammaFlip,gammaFlipComplete:flipCalc.complete&&spot>0,gammaFlipReason:spot>0?flipCalc.reason:'Chờ Spot underlying để chọn Gamma Flip gần nhất',gammaFlipCoverage:flipCalc.coverage,
       callGexTotal,putGexTotal,putGexAbsTotal,gexRatio,gexRatioState,gexRatioBias,
       gexRankedCandidates,gexLadderExcludedLevels,gexLevels,maxPain,maxPainReason,
-      complete,oiComplete,gexAvailable,gexComplete,gexProvisional,gexKnown,gexMissing,gammaProviderKnown,gammaDerivedKnown,gexCoverage,maxPainComplete,coverage,oiAnalyticsCoverage,
+      complete,oiComplete,gexAvailable,gexComplete,gexProvisional,gexKnown,gexMissing,gammaProviderKnown,gammaDerivedKnown,gexCoverage,maxPainComplete:opts.multi?!!opts.maxPain:maxPainComplete,coverage,oiAnalyticsCoverage,
       ivKnown,ivMissing,missingIVSamples,ivCoverage:ivKnown+ivMissing?ivKnown/(ivKnown+ivMissing):0,
       oiWall:dist.reduce((best,x)=>{const v=Math.max(x.callOI,x.putOI);return v>0&&(!best||v>best.oi)?{strike:x.strike,oi:v}:best;},null)};
   }
 
+
+  // ================= MULTI-EXPIRY ANALYSIS SCOPE =================
+  // Selected Expiry keeps the original single-expiry pipeline untouched. The other scopes aggregate OI/GEX
+  // by strike across expiries, reprice Gamma Flip with each contract's OWN DTE, and keep Max Pain per expiry.
+  const scopeLabels={selected:'Selected Expiry','0dte':'0DTE',weekly:'Weekly',all:'All Expiries'};
+  const isoDateToUtc=d=>new Date(d+'T12:00:00Z').getTime();
+  const daysBetween=(a,b)=>Math.round((isoDateToUtc(b)-isoDateToUtc(a))/86400000);
+  function isoWeekStart(d){const t=new Date(isoDateToUtc(d)),dow=(t.getUTCDay()+6)%7;return new Date(t.getTime()-dow*86400000).toISOString().slice(0,10);}
+  // Expiries that belong to the scope, oldest first. Already-expired (past 16:00 New York) dates are dropped.
+  function scopeExpiries(s,now=Date.now()){
+    const scope=s.scope||'selected';
+    if(scope==='selected')return s.expiry?[s.expiry]:[];
+    const live=(s.expirations||[]).map(x=>x.date).filter(d=>yearsToExpiry(d,now)!==null).sort();
+    if(scope==='0dte'){const today=isoTodayNY();return live.filter(d=>d===today);}
+    if(scope==='weekly'){
+      // One expiry per calendar week: the last listed one (normally Friday; Thursday around a Friday holiday).
+      const byWeek=new Map();for(const d of live)byWeek.set(isoWeekStart(d),d);
+      return [...byWeek.values()].sort();
+    }
+    return live;
+  }
+  function newScopeSub(s,expiry){
+    return {cfg:s.cfg,expiry,quotes:new Map(),contracts:[],contractSymbols:new Set(),contractMeta:new Map(),chainComplete:false,hydrating:false,hydrateProgress:0,
+      chainLoadToken:0,oiLastUpdate:0,chainListInvalidCount:0,chainListDuplicateCount:0,loadedAt:0,error:'',loadMessage:'',loadState:'pending',price:null,displayStrikes:'all',_gammaFlipCache:null};
+  }
+  // Loads one extra expiry's full chain into its own snapshot (never touches the selected-expiry state).
+  async function loadScopeExpiry(s,sub,requestOptions={}){
+    const token=++sub.chainLoadToken,expiry=sub.expiry,meta=s.expirations.find(x=>x.date===expiry),root=meta?.root||s.cfg.root;
+    sub.loadState='loading';sub.hydrating=true;sub.error='';sub.loadMessage='';
+    const chain=await request(`/bapi/equity/v1/public/equity/option/chain-symbols?${new URLSearchParams({symbol:s.cfg.symbol,rootSymbol:root,expirationDate:expiry})}`,'GET',undefined,requestOptions);
+    if(token!==sub.chainLoadToken)return;
+    const list=chain.data?.l||[];
+    if(!list.length)throw new Error(`Binance không trả contract cho ${s.cfg.symbol} expiry ${expiry}.`);
+    const byOcc=new Map();let invalid=0,dup=0;
+    for(const item of list){const symbol=String(item?.os??item?.optionSymbol??'').trim();if(!symbol){invalid++;continue;}if(byOcc.has(symbol)){dup++;continue;}byOcc.set(symbol,{...item,os:symbol});}
+    const canonical=[...byOcc.values()],symbols=canonical.map(x=>x.os);
+    if(!symbols.length)throw new Error(`Binance trả ${list.length} dòng nhưng không có OCC symbol hợp lệ cho ${s.cfg.symbol} ${expiry}.`);
+    sub.chainListInvalidCount=invalid;sub.chainListDuplicateCount=dup;
+    sub.contractMeta=new Map(canonical.map(item=>[item.os,normaliseQuote(item)]));
+    sub.contracts=canonical;sub.contractSymbols=new Set(symbols);
+    sub.quotes=new Map([...sub.quotes].filter(([sym])=>sub.contractSymbols.has(sym)));
+    sub.chainComplete=false;sub.hydrateProgress=0;
+    const result=await fetchQuoteBatches(sub,symbols,token,expiry,2,requestOptions);
+    if(token!==sub.chainLoadToken)return;
+    const missing=symbols.filter(sym=>!sub.quotes.has(sym));
+    sub.chainComplete=missing.length===0;sub.hydrating=false;
+    sub.loadedAt=Date.now();sub.oiLastUpdate=Date.now();
+    sub.loadState=sub.chainComplete?'loaded':(result.error?'error':'partial');
+    sub.error=!sub.chainComplete&&result.error?result.error:'';
+    sub.loadMessage=missing.length?`Thiếu ${missing.length} quote`:'';
+  }
+  // Loads (or refreshes) every expiry of the active scope other than the selected one, nearest first.
+  async function loadScope(s,force=false,requestOptions={}){
+    if((s.scope||'selected')==='selected'||!s.expirations.length){renderScopeViews(s);return;}
+    const myToken=++s.scopeToken;
+    const list=scopeExpiries(s).filter(d=>d!==s.expiry);
+    s.scopeProgress={done:0,total:list.length};s.scopeLoading=list.length>0;s.scopeError='';
+    renderScopeViews(s);
+    try{
+      for(const d of list){
+        if(myToken!==s.scopeToken||!s.active||requestOptions.signal?.aborted)break;
+        let sub=s.scopeData.get(d);if(!sub){sub=newScopeSub(s,d);s.scopeData.set(d,sub);}
+        const fresh=sub.chainComplete&&Date.now()-sub.loadedAt<SCOPE_REFRESH_MS;
+        if(force||!fresh){
+          try{await loadScopeExpiry(s,sub,requestOptions);}
+          catch(e){if(e?.cancelled||requestOptions.signal?.aborted)break;sub.hydrating=false;sub.loadState='error';sub.error=e.message||String(e);s.scopeError=`${d}: ${sub.error}`;}
+        }
+        if(myToken!==s.scopeToken)break;
+        s.scopeProgress.done++;s.scopeRev++;
+        renderScopeViews(s);
+      }
+    }finally{
+      if(myToken===s.scopeToken){s.scopeLoading=false;s.scopeRev++;renderScopeViews(s);}
+    }
+  }
+  function startScopeTimer(s,activationToken=s.activationToken){
+    if(s.scopeTimer)clearInterval(s.scopeTimer);
+    s.scopeTimer=setInterval(()=>{if(s.active&&s.activationToken===activationToken&&s.scope!=='selected'&&!s.scopeLoading)loadScope(s,false,{signal:s.activationController?.signal}).catch(()=>{});},SCOPE_REFRESH_MS);
+  }
+  function setScope(s,scope){
+    if(!SCOPES.includes(scope)||s.scope===scope)return;
+    s.scope=scope;saveScope(s.cfg.key,scope);s.scopeToken++;s.scopeLoading=false;s.scopeRev++;s._scopeMemo=null;
+    renderAll(s);
+    if(scope!=='selected')loadScope(s).catch(e=>{s.scopeError=e.message||String(e);renderScopeViews(s);});
+  }
+  const nearTermDte=7;
+  function expiryPartStatus(src,c,isSelected=false){
+    if(!src)return 'pending';
+    const error=isSelected?src.chainLoadError:src.error;
+    if(error)return 'error';
+    if(!src.contractSymbols?.size)return (isSelected?src.chainLoadState:src.loadState)==='error'?'error':'pending';
+    const state=isSelected?src.chainLoadState:src.loadState;
+    if(src.hydrating||state==='loading')return 'loading';
+    if(!c?.complete)return 'partial';
+    return c.gexComplete?'ok':'partial';
+  }
+  // Aggregates every expiry in scope. `parts` also feeds the per-expiry breakdown table.
+  function calcAggregate(s,now=Date.now()){
+    const key=[s.scope,s.expiry,s.scopeRev,s.oiLastUpdate,s.price,s.quotes.size,s.chainComplete,s.quotesExpiry,Math.floor(now/60000)].join('|');
+    if(s._scopeMemo&&s._scopeMemo.key===key&&now-s._scopeMemo.at<400)return s._scopeMemo.value;
+    const set=scopeExpiries(s,now),today=isoTodayNY(),parts=[],rows=[],contractSymbols=new Set(),contracts=[];
+    let allComplete=set.length>0,allGexComplete=set.length>0,invalid=0;
+    for(const d of set){
+      const isSel=d===s.expiry,src=isSel?s:s.scopeData.get(d);
+      const part={expiry:d,dte:daysBetween(today,d),selected:isSel,contracts:0,quotes:0,complete:false,gexComplete:false,callOI:0,putOI:0,callGex:0,putGexAbs:0,netGex:0,gross:0,maxPain:null,status:'pending',error:'',gexCoverage:0};
+      parts.push(part);
+      if(!src||(isSel&&s.quotesExpiry!==s.expiry)||!src.contractSymbols?.size){
+        allComplete=false;allGexComplete=false;
+        part.status=(isSel?src?.chainLoadState==='error':src?.loadState==='error')?'error':'pending';
+        part.error=isSel?(src?.chainLoadError||''):(src?.error||'');continue;
+      }
+      if(!isSel)src.price=s.price;
+      const c=calcSingle(src,now,{skipFlip:true});
+      part.contracts=c.totalContracts;part.quotes=c.rows.length;part.complete=!!c.complete;part.gexComplete=!!c.gexComplete;part.gexCoverage=c.gexCoverage;
+      part.callOI=c.callOI;part.putOI=c.putOI;part.callGex=c.callGexTotal||0;part.putGexAbs=c.putGexAbsTotal||0;
+      part.netGex=part.callGex-part.putGexAbs;part.gross=part.callGex+part.putGexAbs;
+      part.maxPain=c.maxPain;part.maxPainReason=c.maxPainReason;
+      const loadError=isSel?src.chainLoadError:src.error;
+      part.status=expiryPartStatus(src,c,isSel);
+      part.error=loadError||((isSel?'':src.loadMessage)||'');
+      if(!c.complete)allComplete=false;
+      if(!c.gexComplete)allGexComplete=false;
+      invalid+=src.chainListInvalidCount||0;
+      for(const q of c.rows)rows.push({...q,_expiry:d});
+      for(const sym of src.contractSymbols)contractSymbols.add(sym);
+      for(const item of src.contracts)contracts.push(item);
+    }
+    const quotes=new Map(rows.map(q=>[q.optionSymbol,q]));
+    // Max Pain is never summed across expiries: report the selected expiry's (if in scope) else the nearest completed one.
+    const mpPart=parts.find(x=>x.selected&&x.maxPain)||parts.find(x=>x.maxPain)||null;
+    const v={cfg:s.cfg,expiry:null,price:s.price,quotes,contracts,contractSymbols,chainComplete:allComplete,chainListInvalidCount:invalid,
+      _gammaFlipCache:s._scopeFlipCache||null};
+    const c=calcSingle(v,now,{multi:true,maxPain:mpPart?mpPart.maxPain:null,maxPainReason:mpPart?'Max Pain riêng từng expiry':(set.length?'Chưa có expiry nào tải đủ OI để tính Max Pain':'Không có expiry trong scope')});
+    s._scopeFlipCache=v._gammaFlipCache;
+    const grossTotal=parts.reduce((a,x)=>a+x.gross,0),near=parts.filter(x=>x.dte<=nearTermDte).reduce((a,x)=>a+x.gross,0);
+    const gammaShareComplete=allGexComplete&&grossTotal>0;
+    for(const x of parts)x.share=gammaShareComplete?x.gross/grossTotal:null;
+    const loaded=parts.filter(x=>x.complete).length,gexLoaded=parts.filter(x=>x.gexComplete).length;
+    c.scopeInfo={scope:s.scope,label:`${scopeLabels[s.scope]} · ${set.length} expiry`,expiries:set,parts,loaded,gexLoaded,total:set.length,maxPainExpiry:mpPart?.expiry||null,
+      gammaShareComplete,gammaShareStatus:gammaShareComplete?'complete':allGexComplete?'no-exposure':'provisional',
+      nearShare:gammaShareComplete?near/grossTotal:null,farShare:gammaShareComplete?1-near/grossTotal:null,nearTermDte,grossTotal,netTotal:parts.reduce((a,x)=>a+x.netGex,0)};
+    s._scopeMemo={key,at:now,value:c};
+    return c;
+  }
+  function calc(s,now=Date.now()){
+    return (s.scope&&s.scope!=='selected')?calcAggregate(s,now):calcSingle(s,now);
+  }
+  function scopeStatusText(s,c){
+    if(s.scope==='selected')return '';
+    const i=c.scopeInfo;
+    if(!i.total)return s.scope==='0dte'?`Hôm nay (${isoTodayNY()}) không có expiry 0DTE khả dụng. Expiry gần nhất: ${(s.expirations.find(x=>x.date>=isoTodayNY())||{}).date||'—'}.`:'Không có expiry nào trong scope.';
+    const scan=s.expiryDiscovery?.source==='90-day-scan'?` · dò ${s.expiryDiscovery.calendarDays} ngày (${s.expiryDiscovery.checked} ngày giao dịch)`:s.expiryDiscovery?.source==='exchange-info'?' · expiry từ Binance exchange info':s.expiryDiscovery?.source==='options-page'?' · expiry từ Binance Options page':'';
+    const base=`${i.total} expiry trong scope · chain ${i.loaded}/${i.total} · GEX ${i.gexLoaded}/${i.total}${scan}`;
+    if(s.scopeLoading)return `${base} · đang tải thêm (${s.scopeProgress.done}/${s.scopeProgress.total})… số liệu tạm tính, Gamma Flip chờ đủ chain`;
+    if(s.scopeError)return `${base} · lỗi: ${s.scopeError}`;
+    return `${base} · Option Chain bên dưới vẫn hiển thị expiry đang chọn (${s.expiry||'—'}).`;
+  }
+  function renderScope(s){
+    const p='so-'+s.cfg.key,box=$(`${p}-scope`);if(!box)return;
+    const scope=s.scope||'selected';
+    if(box.querySelectorAll)for(const b of box.querySelectorAll('.so-scope-opt')){const on=b.dataset.scope===scope;b.classList.toggle('is-active',on);b.setAttribute('aria-checked',on?'true':'false');}
+    const multi=scope!=='selected',c=multi?calc(s):null;
+    const st=$(`${p}-scope-status`);if(st)st.textContent=multi?scopeStatusText(s,c):'';
+    const sub=$(`${p}-levels-sub`);if(sub)sub.textContent=multi?`Tổng hợp OI/GEX theo strike · ${scopeLabels[scope]} · Max Pain giữ riêng từng expiry`:'Ước lượng từ OI và Greeks của expiry được chọn';
+    const gs=$(`${p}-greeks-sub`);if(gs)gs.textContent=multi?`${scopeLabels[scope]} · ${c.scopeInfo.total} expiry`:'Expiry đang chọn';
+    const card=$(`${p}-breakdown-card`);if(card)card.hidden=!multi;
+    if(multi)renderBreakdown(s,c);
+  }
+  function renderBreakdown(s,c){
+    const p='so-'+s.cfg.key,body=$(`${p}-breakdown`),sum=$(`${p}-breakdown-summary`),i=c.scopeInfo;if(!body)return;
+    if(sum)sum.innerHTML=i.nearShare===null?`<span>${i.gammaShareStatus==='no-exposure'?'Không có gross GEX dương để tính tỷ trọng.':'Gamma Share tạm ẩn: cần GEX hoàn chỉnh cho toàn bộ expiry trong scope.'} (${i.gexLoaded}/${i.total} expiry có GEX hoàn chỉnh)</span>`:
+      `<span>Gamma ≤ ${i.nearTermDte} DTE: <b>${(i.nearShare*100).toFixed(1)}%</b></span><span>Gamma &gt; ${i.nearTermDte} DTE: <b>${(i.farShare*100).toFixed(1)}%</b></span><span>Net GEX toàn scope: <b class="${i.netTotal>=0?'pos-t':'neg-t'}">${i.netTotal>=0?'+':'−'}${compact(Math.abs(i.netTotal))}</b></span>`;
+    if(!i.parts.length){body.innerHTML='<tr><td colspan="8" class="opt-empty">Không có expiry trong scope.</td></tr>';return;}
+    const statusText={ok:'Đủ dữ liệu',partial:'Partial · thiếu dữ liệu',loading:'Đang tải',pending:'Chờ tải',error:'Error · request lỗi'};
+    body.innerHTML=i.parts.map(x=>{
+      const share=x.share===null?null:x.share*100;
+      return `<tr class="${x.selected?'is-selected':''}"><td>${esc(x.expiry)}${x.selected?' <em class="so-scope-badge">Current</em>':''}</td><td>${x.dte===0?'0DTE':x.dte+'d'}</td><td>${x.complete?compact(x.callOI):'—'}</td><td>${x.complete?compact(x.putOI):'—'}</td>`+
+        `<td class="${x.netGex>=0?'pos-t':'neg-t'}">${x.complete?(x.netGex>=0?'+':'−')+compact(Math.abs(x.netGex)):'—'}</td>`+
+        `<td><span class="so-share"><i style="width:${share===null?0:Math.max(1,share).toFixed(1)}%"></i></span> ${share===null?'—':share.toFixed(1)+'%'}</td>`+
+        `<td>${x.maxPain?fmt(x.maxPain.strike,2)+(x.maxPain.isTie?'*':''):'—'}</td><td title="${esc(x.error||x.maxPainReason||'')}">${statusText[x.status]||x.status}</td></tr>`;
+    }).join('');
+  }
+  function renderScopeViews(s){try{renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);updateChainMeta(s);renderScope(s);}catch(e){}}
+
   function renderAll(s){
-    renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderChain(s);updateChainMeta(s);
+    renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderChain(s);updateChainMeta(s);renderScope(s);
     try{if(typeof window.crossAssetMapDataUpdated==='function')window.crossAssetMapDataUpdated(s.cfg.key)}catch(e){}
   }
   function metric(value,label,sub,cls=''){
@@ -792,10 +1214,10 @@
       {key:'gex-call',label:'CW · GEX CALL WALL',tag:'MAX +NET GEX',value:c.gexCallWall?fmt(c.gexCallWall.strike,2):'—',meta:c.gexCallWall?`Net GEX +${compact(c.gexCallWall.gex)}${c.gexComplete?'':' · provisional'}`:c.gexAvailable?'Không có Net GEX dương':'Cần OI + multiplier và Gamma provider hoặc IV + DTE'},
       {key:'gex-put',label:'PW · GEX PUT WALL',tag:'MAX |−NET GEX|',value:c.gexPutWall?fmt(c.gexPutWall.strike,2):'—',meta:c.gexPutWall?`Net GEX −${compact(Math.abs(c.gexPutWall.gex))}${c.gexComplete?'':' · provisional'}`:c.gexAvailable?'Không có Net GEX âm':'Cần OI + multiplier và Gamma provider hoặc IV + DTE'},
       {key:'gamma-flip',label:'GAMMA FLIP / ZERO GAMMA',tag:'BSM · NET GEX ZERO-CROSS',value:c.gammaFlip===null?'—':fmt(c.gammaFlip,2),meta:c.gammaFlip!==null?`Mức Net GEX đổi dấu khi repricing underlying${c.oiAssumedZero?` · ${c.oiAssumedZero} OI null→0`:''}`:(c.multiplierMissing?`Thiếu multiplier ở ${c.multiplierMissing} contract`:c.ivMissing?`Thiếu IV ở ${c.ivMissing} contracts OI > 0`:c.gammaFlipReason||'Cần IV và DTE hợp lệ')},
-      {key:'pain',label:'MAX PAIN',tag:'EXPIRY',value:c.maxPain?fmt(c.maxPain.strike,2):'—',meta:c.maxPain?`Payout · ${compact(c.maxPain.payout)}${c.maxPain.isTie?` · đồng hạng: ${c.maxPain.tiedStrikes.map(x=>fmt(x,2)).join(' / ')}`:''}${c.oiAssumedZero?` · ${c.oiAssumedZero} OI null→0`:''}`:c.maxPainReason},
+      {key:'pain',label:'MAX PAIN',tag:'EXPIRY',value:c.maxPain?fmt(c.maxPain.strike,2):'—',meta:c.maxPain?`${c.scopeInfo?`Expiry ${c.scopeInfo.maxPainExpiry||'—'} · `:''}Payout · ${compact(c.maxPain.payout)}${c.maxPain.isTie?` · đồng hạng: ${c.maxPain.tiedStrikes.map(x=>fmt(x,2)).join(' / ')}`:''}${c.oiAssumedZero?` · ${c.oiAssumedZero} OI null→0`:''}`:c.maxPainReason},
       {key:'gex-ratio',label:'GEX RATIO',tag:'CALL GEX / |PUT GEX|',value:c.gexRatioState==='call-only'?'∞':c.gexRatio===null?'—':`${c.gexProvisional?'~':''}${c.gexRatio.toFixed(2)}x`,meta:c.gexRatioBias==='call-dominant'?'Call Gamma trội · xu hướng ổn định, biên độ hẹp':c.gexRatioBias==='put-dominant'?'Put Gamma trội · rủi ro biến động và trượt giá cao':c.gexRatioBias==='balanced'?'Call/Put Gamma tương đối cân bằng':c.gexRatioState==='no-gex'?'Không có GEX hợp lệ':c.gexRatioState==='provisional'?'Tạm tính · đang tải phần còn lại':'Chưa có Gamma hoặc IV hợp lệ'}
     ];
-    const status=!c.complete?'<span class="kl-status is-loading">Đang tải full chain</span>':!c.oiComplete?'<span class="kl-status is-loading">Có OCC contract không hợp lệ</span>':c.gexProvisional?'<span class="kl-status is-loading">GEX tạm tính · thiếu Gamma/IV/multiplier</span>':c.gexComplete&&c.ivMissing>0?`<span class="kl-status is-loading">GEX & Max Pain sẵn sàng · Zero Gamma thiếu IV (${c.ivMissing})</span>`:c.gexComplete?`<span class="kl-status">Full analytics loaded${c.oiAssumedZero?` · ${c.oiAssumedZero} OI null→0`:''}</span>`:'<span class="kl-status">Quotes/OI loaded · GEX unavailable</span>';
+    const status=c.scopeInfo&&!c.scopeInfo.gammaShareComplete?'<span class="kl-status is-loading">Gamma Share provisional · chờ GEX đầy đủ toàn scope</span>':!c.complete?'<span class="kl-status is-loading">Đang tải full chain</span>':!c.oiComplete?'<span class="kl-status is-loading">Có OCC contract không hợp lệ</span>':c.gexProvisional?'<span class="kl-status is-loading">GEX tạm tính · thiếu Gamma/IV/multiplier</span>':c.gexComplete&&c.ivMissing>0?`<span class="kl-status is-loading">GEX & Max Pain sẵn sàng · Zero Gamma thiếu IV (${c.ivMissing})</span>`:c.gexComplete?`<span class="kl-status">Full analytics loaded${c.oiAssumedZero?` · ${c.oiAssumedZero} OI null→0`:''}</span>`:'<span class="kl-status">Quotes/OI loaded · GEX unavailable</span>';
     const cardsHtml=cards.map(x=>`<article class="kl-card kl-${x.key}"><div class="kl-card-top"><span class="kl-label">${x.label}</span><span class="kl-tag">${x.tag}</span></div><strong class="kl-value">${esc(x.value)}</strong><span class="kl-meta">${esc(x.meta)}</span></article>`).join('');
     const maxGex=Math.max(1,...c.gexLevels.map(x=>Math.abs(x.gex)));
     const gexHtml=c.gexLevels.length?c.gexLevels.map((x,i)=>{const pos=x.gex>=0,ratio=Math.max(2,Math.abs(x.gex)/maxGex*100);return `<div class="kl-gex-row ${pos?'is-positive':'is-negative'}"><span class="kl-rank">${String(i+1).padStart(2,'0')}</span><strong class="kl-strike">${fmt(x.strike,2)}</strong><span class="kl-track"><i style="width:${ratio.toFixed(1)}%"></i></span><b class="kl-gex-value">${x.gex>=0?'+':'−'}${compact(Math.abs(x.gex))}</b><span class="kl-side">${pos?'NET +':'NET −'}</span></div>`}).join(''):`<div class="kl-empty">${c.gexMissing>0?`GEX chưa đủ ${c.gexMissing}/${c.totalContracts} contracts · OI thiếu ${c.oiMissing} · multiplier thiếu ${c.multiplierMissing} · Gamma/IV thiếu ${c.missingGreekSamples.length?c.missingGreekSamples.length:'xem Data Status'} · coverage ${(c.gexCoverage*100).toFixed(1)}%.`: 'Chưa có GEX khác 0 để xếp hạng.'}</div>`;
@@ -913,7 +1335,7 @@
     const missingMultSample=c.missingMultiplierSamples.length?` · ${c.missingMultiplierSamples.slice(0,3).join(', ')}`:'';
     const missingGreekSample=c.missingGreekSamples.length?` · ${c.missingGreekSamples.slice(0,3).join(', ')}`:'';
     const missingIVSample=c.missingIVSamples.length?` · ${c.missingIVSamples.slice(0,3).join(', ')}`:'';
-    el.innerHTML=`<span>Expiry: <b>${esc(s.expiry||'—')}</b></span><span>OCC contracts: <b>${c.totalContracts}${s.chainListInvalidCount?` · ${s.chainListInvalidCount} dòng lỗi OCC`:''}${s.chainListDuplicateCount?` · ${s.chainListDuplicateCount} OCC trùng`:''}</b></span><span>Quotes: <b>${s.quotes.size}/${c.totalContracts}</b></span><span>OI observed: <b>${c.oiKnown}/${c.totalContracts} · ${c.oiAssumedZero} null → 0 assumed${esc(missingOISample)}</b></span><span>IV coverage (OI > 0): <b>${c.ivKnown}/${c.ivKnown+c.ivMissing} · thiếu ${c.ivMissing}${esc(missingIVSample)}</b></span><span>Multiplier: <b>${c.multiplierKnown} hợp lệ · ${c.multiplierAssumed} suy ra ×100 · thiếu ${c.multiplierMissing}${esc(missingMultSample)}</b></span><span>GEX: <b>${c.gexKnown}/${c.totalContracts} · ${c.gammaProviderKnown} provider + ${c.gammaDerivedKnown} BSM/IV · thiếu ${c.gexMissing}${esc(missingGreekSample)}</b></span><span>Full quote universe: <b>${c.complete?'Loaded':'Loading / partial'}</b></span><span>Last quote update: <b>${s.oiLastUpdate?new Date(s.oiLastUpdate).toLocaleTimeString('vi-VN'):'—'}</b></span>`;
+    el.innerHTML=`<span>${c.scopeInfo?'Scope':'Expiry'}: <b>${esc(c.scopeInfo?c.scopeInfo.label:(s.expiry||'—'))}</b></span><span>OCC contracts: <b>${c.totalContracts}${s.chainListInvalidCount?` · ${s.chainListInvalidCount} dòng lỗi OCC`:''}${s.chainListDuplicateCount?` · ${s.chainListDuplicateCount} OCC trùng`:''}</b></span><span>Quotes: <b>${c.scopeInfo?c.rows.length:s.quotes.size}/${c.totalContracts}</b></span><span>OI observed: <b>${c.oiKnown}/${c.totalContracts} · ${c.oiAssumedZero} null → 0 assumed${esc(missingOISample)}</b></span><span>IV coverage (OI > 0): <b>${c.ivKnown}/${c.ivKnown+c.ivMissing} · thiếu ${c.ivMissing}${esc(missingIVSample)}</b></span><span>Multiplier: <b>${c.multiplierKnown} hợp lệ · ${c.multiplierAssumed} suy ra ×100 · thiếu ${c.multiplierMissing}${esc(missingMultSample)}</b></span><span>GEX: <b>${c.gexKnown}/${c.totalContracts} · ${c.gammaProviderKnown} provider + ${c.gammaDerivedKnown} BSM/IV · thiếu ${c.gexMissing}${esc(missingGreekSample)}</b></span><span>Full quote universe: <b>${c.complete?'Loaded':'Loading / partial'}</b></span><span>Last quote update: <b>${s.oiLastUpdate?new Date(s.oiLastUpdate).toLocaleTimeString('vi-VN'):'—'}</b></span>`;
     const multiplier=[...s.quotes.values()].map(q=>effectiveMultiplier(q).value).find(x=>x!==null)??null;
     const mult=$(`so-${s.cfg.key}-multiplier`),toolbarMult=$(`so-${s.cfg.key}-contract-multiplier`);
     const multiplierLabel=multiplier?`${fmt(multiplier,0)} shares${c.multiplierAssumed?' · includes standard fallback':''}`:'—';
@@ -1000,41 +1422,75 @@
     try{await loadChain(s,true);}catch(e){s.crossAssetError=e.message||String(e);showError(s,e.message);setStatus(s,'Quote refresh lỗi','bad');try{if(typeof window.crossAssetMapDataUpdated==='function')window.crossAssetMapDataUpdated(s.cfg.key)}catch{}}
     finally{s.quoteLoading=false;}
   }
-  function startPolling(s){
+  function startPolling(s,activationToken=s.activationToken){
     if(s.pollTimer)clearInterval(s.pollTimer);
-    s.pollTimer=setInterval(()=>refreshQuotes(s),60000);
+    s.pollTimer=setInterval(()=>{if(s.active&&s.activationToken===activationToken)refreshQuotes(s);},60000);
   }
 
   async function activate(s){
     if(s.active)return;
     s.active=true;
+    const activationToken=(s.activationToken||0)+1;
+    s.activationToken=activationToken;
+    const controller=typeof AbortController!=='undefined'?new AbortController():null;
+    s.activationController=controller;
+    const requestOptions=controller?{signal:controller.signal}:{};
+    const isCurrent=()=>s.active&&s.activationToken===activationToken;
     clearError(s);
     setStatus(s,'Đang kết nối Binance…','loading');
     try{
-      const exps=await loadExpirations(s);
+      const exps=await loadExpirations(s,requestOptions);
+      if(!isCurrent())return;
+      if(!exps.length)throw new Error('Activation đã bị hủy trước khi expiry được tải xong.');
       const select=$(`so-${s.cfg.key}-expiry`);
       if(select){select.innerHTML=exps.map(x=>`<option value="${esc(x.date)}">${esc(dateLabel(x.date))} · ${esc(x.root)}</option>`).join('');
         const today=isoTodayNY(),preferred=exps.find(x=>x.date>=today)||exps[0];s.expiry=preferred.date;select.value=s.expiry;}
+      if(!isCurrent())return;
       subscribe(s);
-      await loadChain(s);
-      startPolling(s);
+      await loadChain(s,false,requestOptions);
+      if(!isCurrent())return;
+      startPolling(s,activationToken);startScopeTimer(s,activationToken);
+      if(s.scope!=='selected')loadScope(s,false,requestOptions).catch(e=>{if(isCurrent()){s.scopeError=e.message||String(e);renderScopeViews(s);}});
+      s.activateRetries=0;
       setStatus(s,`Connected · ${s.quotes.size} option quotes`,'ok');
-    }catch(e){s.crossAssetError=e.message||String(e);showError(s,e.message);setStatus(s,'Không tải được dữ liệu','bad');try{if(typeof window.crossAssetMapDataUpdated==='function')window.crossAssetMapDataUpdated(s.cfg.key)}catch{}}
+    }catch(e){
+      // A deactivated/replaced activation owns neither UI state nor retry scheduling.
+      if(!isCurrent()||e?.cancelled||e?.name==='AbortError')return;
+      deactivate(s);
+      s.crossAssetError=e.message||String(e);showError(s,e.message);setStatus(s,'Không tải được dữ liệu · sẽ thử lại','bad');try{if(typeof window.crossAssetMapDataUpdated==='function')window.crossAssetMapDataUpdated(s.cfg.key)}catch{}
+      if(wantsActive(s))scheduleActivateRetry(s);
+    }
+  }
+
+  // Auto-recovery after a failed activation: exponential backoff (5s,10s,20s,... max 60s) while the view is still wanted.
+  function wantsActive(s){return s.cfg.key+'Options'===(document.body?.dataset?.v||null)||s.cfg.key===crossAssetRequested;}
+  function scheduleActivateRetry(s){
+    if(s.activateRetryTimer)return;
+    s.activateRetries=(s.activateRetries||0)+1;
+    const wait=Math.min(60000,5000*Math.pow(2,s.activateRetries-1));
+    s.activateRetryTimer=setTimeout(()=>{s.activateRetryTimer=null;if(!s.active&&wantsActive(s))activate(s);},wait);
   }
   function deactivate(s){
-    s.active=false;closeSocket(s);
+    s.active=false;s.activationToken=(s.activationToken||0)+1;
+    if(s.activationController){try{s.activationController.abort();}catch{}s.activationController=null;}
+    s.chainLoadToken++;closeSocket(s);
+    if(s.activateRetryTimer){clearTimeout(s.activateRetryTimer);s.activateRetryTimer=null;}
     if(s.pollTimer){clearInterval(s.pollTimer);s.pollTimer=null;}
+    if(s.scopeTimer){clearInterval(s.scopeTimer);s.scopeTimer=null;}
+    s.scopeToken++;s.scopeLoading=false;s.hydrating=false;
+    for(const sub of s.scopeData.values()){sub.chainLoadToken++;sub.hydrating=false;if(sub.loadState==='loading')sub.loadState=sub.chainComplete?'loaded':'pending';}
   }
   function bindView(s){
     const p='so-'+s.cfg.key,view=$('v-'+s.cfg.key+'Options');if(!view||view.dataset.stockOptionsBound)return;
     view.dataset.stockOptionsBound='1';
-    $(`${p}-refresh`).onclick=()=>{clearError(s);refreshQuotes(s);};
-    $(`${p}-expiry`).onchange=e=>{s.expiry=e.target.value;loadChain(s).catch(err=>{showError(s,err.message);setStatus(s,'Không tải được expiry','bad')});};
+    $(`${p}-refresh`).onclick=()=>{clearError(s);refreshQuotes(s);if(s.scope!=='selected')loadScope(s,true).catch(()=>{});};
+    $(`${p}-expiry`).onchange=e=>{s.expiry=e.target.value;s._scopeMemo=null;s.scopeRev++;loadChain(s).catch(err=>{showError(s,err.message);setStatus(s,'Không tải được expiry','bad')});if(s.scope!=='selected')loadScope(s).catch(()=>{});};
+    const scopeBox=$(`${p}-scope`);if(scopeBox&&scopeBox.querySelectorAll){for(const b of scopeBox.querySelectorAll('.so-scope-opt'))b.onclick=()=>setScope(s,b.dataset.scope);renderScope(s);}
     const strikeSelect=$(`${p}-strike-count`);if(strikeSelect){strikeSelect.value=String(s.displayStrikes);strikeSelect.onchange=e=>{s.displayStrikes=e.target.value==='all'?'all':Math.max(5,+e.target.value||15);saveDisplayStrikes(s.cfg.key,s.displayStrikes);renderChain(s);};}
     $(`${p}-method-toggle`).onclick=()=>{const box=$(`${p}-method`);box.hidden=!box.hidden;};
     $(`${p}-exposure-metric`).onchange=()=>renderExposure(s);
     $(`${p}-copy`).onclick=()=>{
-      const c=calc(s),text=[`${s.cfg.symbol} · ${s.expiry}`,`Call OI Wall: ${c.callOIWall?.strike??'—'}`,`Put OI Wall: ${c.putOIWall?.strike??'—'}`,`CW (max +Net GEX): ${c.gexCallWall?.strike??'—'}`,`PW (max |−Net GEX|): ${c.gexPutWall?.strike??'—'}`,`Gamma Flip / Zero Gamma (BSM repriced): ${c.gammaFlip??'—'}`,`Max Pain: ${c.maxPain?.strike??'—'}${c.maxPain?.isTie?` (tied: ${c.maxPain.tiedStrikes.join('/')})`:''}`,`GEX Ratio (Call GEX / |Put GEX|): ${c.gexRatioState==='call-only'?'∞':c.gexRatio===null?'—':c.gexRatio.toFixed(4)+'x'}`,`GEX 1-10: ${c.gexLevels.map(x=>x.strike).join(', ')}`,`Call OI: ${c.callOI}`,`Put OI: ${c.putOI}`,`GEX: ${c.gamma}`,`DEX: ${c.delta}`,`OI observed: ${(c.coverage*100).toFixed(1)}% · zero-filled ${c.oiAssumedZero}`].join('\n');
+      const c=calc(s),text=[`${s.cfg.symbol} · ${c.scopeInfo?c.scopeInfo.label:s.expiry}`,`Call OI Wall: ${c.callOIWall?.strike??'—'}`,`Put OI Wall: ${c.putOIWall?.strike??'—'}`,`CW (max +Net GEX): ${c.gexCallWall?.strike??'—'}`,`PW (max |−Net GEX|): ${c.gexPutWall?.strike??'—'}`,`Gamma Flip / Zero Gamma (BSM repriced): ${c.gammaFlip??'—'}`,`Max Pain${c.scopeInfo?` (${c.scopeInfo.maxPainExpiry||'—'}, per expiry)`:''}: ${c.maxPain?.strike??'—'}${c.maxPain?.isTie?` (tied: ${c.maxPain.tiedStrikes.join('/')})`:''}`,`GEX Ratio (Call GEX / |Put GEX|): ${c.gexRatioState==='call-only'?'∞':c.gexRatio===null?'—':c.gexRatio.toFixed(4)+'x'}`,`GEX 1-10: ${c.gexLevels.map(x=>x.strike).join(', ')}`,`Call OI: ${c.callOI}`,`Put OI: ${c.putOI}`,`GEX: ${c.gamma}`,`DEX: ${c.delta}`,`OI observed: ${(c.coverage*100).toFixed(1)}% · zero-filled ${c.oiAssumedZero}`].join('\n');
       if(navigator.clipboard?.writeText)navigator.clipboard.writeText(text).catch(()=>{});else{const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();document.execCommand('copy');t.remove();}
     };
   }
@@ -1062,15 +1518,16 @@
   }
   function crossAssetSnapshot(key){
     const s=sessions[key];if(!s)return null;
-    const c=calc(s);
-    return {key,symbol:s.cfg.symbol,price:s.price,priceTime:s.priceTime,expiry:s.expiry,expirations:s.expirations.map(x=>({date:x.date,root:x.root})),updatedAt:s.oiLastUpdate,error:s.crossAssetError||'',
+    const c=calcSingle(s); // Cross-Asset Map is defined on the selected expiry, independent of Analysis Scope
+    const expiryMismatch=!!(s.expiry&&s.quotesExpiry!==s.expiry);
+    return {key,symbol:s.cfg.symbol,price:s.price,priceTime:s.priceTime,expiry:s.expiry,dataExpiry:s.quotesExpiry||null,expiryMismatch,expirations:s.expirations.map(x=>({date:x.date,root:x.root})),updatedAt:s.oiLastUpdate,error:s.crossAssetError||'',
       coverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiKnown:c.oiKnown,oiAssumedZero:c.oiAssumedZero,volumeAssumedZero:c.volumeAssumedZero,oiAnalyticsComplete:c.oiComplete,totalContracts:c.totalContracts,callOI:c.callOI,putOI:c.putOI,callVol:c.callVol,putVol:c.putVol,
       callOIWall:c.oiComplete&&c.callOIWall?{strike:c.callOIWall.strike,oi:c.callOIWall.callOI}:null,
       putOIWall:c.oiComplete&&c.putOIWall?{strike:c.putOIWall.strike,oi:c.putOIWall.putOI}:null,
       gexCallWall:c.gexCallWall?{strike:c.gexCallWall.strike,gex:c.gexCallWall.gex}:null,
       gexPutWall:c.gexPutWall?{strike:c.gexPutWall.strike,gex:c.gexPutWall.gex}:null,
       gexAvailable:c.gexAvailable,gexComplete:c.gexComplete,gexProvisional:c.gexProvisional,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gammaProviderKnown:c.gammaProviderKnown,gammaDerivedKnown:c.gammaDerivedKnown,gexCoverage:c.gexCoverage,
-      gammaFlip:c.gammaFlipComplete?c.gammaFlip:null,gammaFlipMethod:'Gamma Flip / Zero Gamma · BSM repricing · fixed OI/IV · r=q=0 · expiry 16:00 America/New_York · bisection-refined Net GEX zero-cross',maxPain:c.maxPain?{strike:c.maxPain.strike,tiedStrikes:c.maxPain.tiedStrikes,payout:c.maxPain.payout}:null,gexRatio:c.gexRatio,gexRatioState:c.gexRatioState,gexRatioBias:c.gexRatioBias,callGexTotal:c.callGexTotal,putGexAbsTotal:c.putGexAbsTotal,complete:c.complete,oiComplete:c.oiComplete,maxPainComplete:c.maxPainComplete,
+      gammaFlip:c.gammaFlipComplete?c.gammaFlip:null,gammaFlipMethod:'Gamma Flip / Zero Gamma · BSM repricing · fixed OI/IV · r=q=0 · expiry 16:00 America/New_York · bisection-refined Net GEX zero-cross',maxPain:c.maxPain?{strike:c.maxPain.strike,tiedStrikes:c.maxPain.tiedStrikes,payout:c.maxPain.payout}:null,gexRatio:c.gexRatio,gexRatioState:c.gexRatioState,gexRatioBias:c.gexRatioBias,callGexTotal:c.callGexTotal,putGexAbsTotal:c.putGexAbsTotal,complete:c.complete&&!expiryMismatch,oiComplete:c.oiComplete&&!expiryMismatch,maxPainComplete:c.maxPainComplete&&!expiryMismatch,
       gexLevels:c.gexLevels.map((x,i)=>({rank:i+1,strike:x.strike,gex:x.gex})),gexRankedCandidates:c.gexRankedCandidates.map(x=>({strike:x.strike,gex:x.gex})),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gexMethod:{providerGamma:c.gammaProviderKnown,bsmDerivedGamma:c.gammaDerivedKnown},oiWall:c.oiWall?{strike:c.oiWall.strike,oi:c.oiWall.oi}:null,
       dist:c.dist.map(x=>({strike:x.strike,callOI:x.callOI,putOI:x.putOI,callVol:x.callVol,putVol:x.putVol,gex:c.gexComplete?x.gex:null,callGex:c.gexComplete?x.callGex:null,putGex:c.gexComplete?x.putGex:null}))};
   }
@@ -1081,5 +1538,6 @@
   window.stockOptionsCrossAssetStop=crossAssetStop;
   window.stockOptionsCrossAssetSnapshot=crossAssetSnapshot;
   window.stockOptionsCrossAssetSetExpiry=crossAssetSetExpiry;
+  window.stockOptionsSetScope=(key,scope)=>{const s=sessions[key];if(!s)throw new Error('Nguồn ETF không hợp lệ: '+key);setScope(s,scope);};
   window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,quotes:s.quotes.size,contracts:c.totalContracts,quotesExpiry:s.quotesExpiry,complete:c.complete,hydrating:s.hydrating,missingQuoteSymbols:c.missingQuoteSymbols.slice(0,20),lastHydrationIncompleteSymbols:s.lastHydrationIncompleteSymbols||[],incompleteContractDetails:(s.lastHydrationIncompleteSymbols||[]).slice(0,12).map(symbol=>{const q=s.quotes.get(symbol)||{},m=s.contractMeta?.get(symbol)||{};return {symbol,side:q.side??m.side,strike:q.strike??m.strike,oi:q.openInterest??m.openInterest,iv:q.iv??m.iv,gamma:q.gamma??m.gamma,multiplier:q.multiplier??m.multiplier,effectiveMultiplier:effectiveMultiplier(q.optionSymbol?q:m)}}),quoteSamples:[...s.quotes.values()].slice(0,3).map(q=>({symbol:q.optionSymbol,side:q.side,strike:q.strike,oi:q.openInterest,iv:q.iv,gamma:q.gamma,multiplier:q.multiplier,effectiveMultiplier:effectiveMultiplier(q)})),chainListInvalidCount:s.chainListInvalidCount,chainListDuplicateCount:s.chainListDuplicateCount,displayStrikes:s.displayStrikes,oiKnown:c.oiKnown,oiMissing:c.oiMissing,oiAssumedZero:c.oiAssumedZero,volumeKnown:c.volumeKnown,volumeAssumedZero:c.volumeAssumedZero,oiObservedCoverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiMissingSamples:c.oiMissingSamples,multiplierKnown:c.multiplierKnown,multiplierAssumed:c.multiplierAssumed,multiplierMissing:c.multiplierMissing,missingMultiplierSamples:c.missingMultiplierSamples,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,missingGreekSamples:c.missingGreekSamples,gexCoverage:c.gexCoverage,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexComplete:c.gexComplete,oiComplete:c.oiComplete,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,maxPainTiedStrikes:c.maxPain?.tiedStrikes||[],maxPainComplete:c.maxPainComplete,gexRatio:c.gexRatio,price:s.price}] }));
 })();
