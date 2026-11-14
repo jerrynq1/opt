@@ -777,3 +777,93 @@ test('normalizer skips zero IV placeholders and falls through to a valid nested 
   assert.equal(q.iv,0.235);
   assert.equal(q.providerIVSource,'mark');
 });
+
+
+test('BSM Vanna and Charm match finite-difference derivatives for Calls and Puts with carry', () => {
+  const S=100,K=103,T=0.22,sigma=0.31,r=0.035,h=1e-5;
+  for (const q of [0,0.0045]) { // GLD and QQQ dividend-yield assumptions
+    for (const side of ['C','P']) {
+      const model=volatilityApi.bsmVannaCharm(S,K,T,sigma,side,r,q);
+      const vannaFD=(volatilityApi.bsmDelta(S,K,T,sigma+h,side,r,q)-volatilityApi.bsmDelta(S,K,T,sigma-h,side,r,q))/(2*h);
+      // The model defines Charm as calendar-clock time advancing (remaining T decreases).
+      const charmFD=-(volatilityApi.bsmDelta(S,K,T+h,sigma,side,r,q)-volatilityApi.bsmDelta(S,K,T-h,sigma,side,r,q))/(2*h);
+      assert.ok(Math.abs(model.vanna-vannaFD)<2e-5,`${side} Vanna finite difference q=${q}`);
+      assert.ok(Math.abs(model.charm-charmFD)<2e-5,`${side} Charm finite difference q=${q}`);
+    }
+  }
+});
+
+test('Vanna/Charm exposure uses Greek × positive OI × multiplier × Spot with correct unit scaling', () => {
+  const now=Date.parse('2026-11-14T15:00:00Z');
+  const expiry='2026-12-18';
+  const T=volatilityApi.timeToExpiry(expiry,now,'QQQ');
+  const S=100,sigma=.28,m=100;
+  const callOI=20,putOI=30;
+  const session={cfg:{key:'qqq',symbol:'QQQ'},price:S,expiry,chainComplete:true,
+    contracts:[{os:'QQQ261218C00100000'},{os:'QQQ261218P00100000'}],
+    quotes:new Map([
+      ['c',{optionSymbol:'QQQ261218C00100000',side:'C',strike:100,multiplier:m,openInterest:callOI,volume:1,iv:sigma}],
+      ['p',{optionSymbol:'QQQ261218P00100000',side:'P',strike:100,multiplier:m,openInterest:putOI,volume:1,iv:sigma}]
+    ])};
+  const result=helpers.calc(session,now);
+  const c=volatilityApi.bsmVannaCharm(S,100,T,sigma,'C',0,.0045);
+  const p=volatilityApi.bsmVannaCharm(S,100,T,sigma,'P',0,.0045);
+  const expectedVanna=(c.vanna*callOI*m*S*.01)+(p.vanna*putOI*m*S*.01);
+  const expectedCharm=(c.charm*callOI*m*S/365.25)+(p.charm*putOI*m*S/365.25);
+  assert.ok(Math.abs(result.vannaExposure-expectedVanna)<1e-8);
+  assert.ok(Math.abs(result.charmExposure-expectedCharm)<1e-8);
+  assert.equal(result.vannaKnown,2);
+  assert.equal(result.charmKnown,2);
+  assert.equal(result.vannaRequired,2);
+  assert.equal(result.charmRequired,2);
+  assert.equal(result.vannaCoverage,1);
+  assert.equal(result.charmCoverage,1);
+});
+
+test('Vanna/Charm coverage shows partial model inputs instead of reporting full coverage', () => {
+  const now=Date.parse('2026-11-14T15:00:00Z');
+  const session={cfg:{key:'qqq',symbol:'QQQ'},price:100,expiry:'2026-12-18',chainComplete:true,
+    contracts:[{os:'QQQ261218C00100000'},{os:'QQQ261218P00100000'}],
+    quotes:new Map([
+      ['c',{optionSymbol:'QQQ261218C00100000',side:'C',strike:100,multiplier:100,openInterest:20,volume:1,iv:.28}],
+      ['p',{optionSymbol:'QQQ261218P00100000',side:'P',strike:100,multiplier:100,openInterest:30,volume:1,iv:null}]
+    ])};
+  const result=helpers.calc(session,now);
+  assert.equal(result.vannaRequired,2);
+  assert.equal(result.vannaKnown,1);
+  assert.equal(result.vannaCoverage,.5);
+  assert.equal(result.charmRequired,2);
+  assert.equal(result.charmKnown,1);
+  assert.equal(result.charmCoverage,.5);
+  assert.ok(Number.isFinite(result.vannaExposure));
+  assert.ok(Number.isFinite(result.charmExposure));
+});
+
+test('Vanna/Charm Exposure renderer emits visible signed bar width, value, coverage and honest labels', () => {
+  const quotes=new Map([
+    ['c',{optionSymbol:'QQQ261218C00100000',side:'C',strike:100,multiplier:100,openInterest:20,volume:1,iv:.28}],
+    ['p',{optionSymbol:'QQQ261218P00100000',side:'P',strike:100,multiplier:100,openInterest:30,volume:1,iv:.28}],
+    ['c2',{optionSymbol:'QQQ261218C00105000',side:'C',strike:105,multiplier:100,openInterest:15,volume:1,iv:.31}]
+  ]);
+  const session={cfg:{key:'qqq',symbol:'QQQ'},price:100,expiry:'2026-12-18',chainComplete:true,
+    contracts:[{os:'c'},{os:'p'},{os:'c2'}],quotes};
+  const metricId='so-qqq-exposure-metric';
+  if(!helpers.elements.has(metricId))helpers.elements.set(metricId,{id:metricId,value:'gamma',innerHTML:'',textContent:''});
+  const metric=helpers.elements.get(metricId);
+  const htmlEl=helpers.elements.get('so-qqq-gex');
+  for (const selected of ['vanna','charm']) {
+    metric.value=selected;
+    helpers.renderExposure(session);
+    const html=htmlEl.innerHTML;
+    assert.match(html,/exposure-signed-track/);
+    assert.match(html,/--signed-width:(?!0\.00)[0-9.]+%/);
+    assert.match(html,/exposure-signed-value/);
+    assert.match(html,/OI-weighted model Greek sensitivity/);
+    assert.match(html,/MODEL COVERAGE/);
+    assert.doesNotMatch(html,/Net Vanna|Net Charm/);
+    const title=helpers.elements.get('so-qqq-exposure-title').textContent;
+    assert.match(title,/OI-WEIGHTED MODEL SENSITIVITY/);
+  }
+  const css=fs.readFileSync(path.join(__dirname,'..','css','stock-options.css'),'utf8');
+  assert.match(css,/exposure-signed-track i\{[^}]*width:var\(--signed-width,0%\)/);
+});

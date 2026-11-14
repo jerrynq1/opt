@@ -93,19 +93,24 @@
 .stock-options-view .so-surface-cell small{font:7px var(--mono);color:rgba(202,217,232,.65);white-space:nowrap}
 .stock-options-view .so-surface-scale{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:9px;color:var(--mut);font:8px var(--mono);letter-spacing:.25px}
 .stock-options-view .so-surface-foot{margin-top:10px;padding-top:9px;border-top:1px solid rgba(128,148,172,.13);color:var(--mut);font-size:9px;line-height:1.5}
-.stock-options-view .exposure-rows.is-signed-exposure-rows{grid-auto-rows:12px;gap:2px}
-.stock-options-view .exposure-row-signed{grid-template-columns:54px minmax(0,1fr);height:12px}
-.stock-options-view .exposure-signed-track{position:relative;display:block;height:8px;min-width:0;margin:0 2px;border-left:1px solid rgba(160,180,202,.38);border-right:1px solid rgba(160,180,202,.12);background:linear-gradient(90deg,rgba(225,91,115,.045) 0 50%,rgba(38,190,139,.045) 50% 100%);overflow:hidden}
-.stock-options-view .exposure-signed-track i{position:absolute;top:1px;display:block;height:6px;max-width:50%;border-radius:2px;transition:width .16s ease-out}
-.stock-options-view .exposure-signed-track i.is-positive{left:50%;background:linear-gradient(90deg,#269f7a,#45d6a7);box-shadow:0 0 7px rgba(69,214,167,.13)}
-.stock-options-view .exposure-signed-track i.is-negative{right:50%;background:linear-gradient(270deg,#e05b73,#a74459);box-shadow:0 0 7px rgba(224,91,115,.13)}
-.stock-options-view .exposure-row-signed.is-near-spot{background:rgba(101,214,232,.035)}
-@media(max-width:680px){.stock-options-view .so-surface-lab{padding:13px 11px}.stock-options-view .so-surface-axis-note{width:100%;margin-left:0;padding-bottom:0}.stock-options-view .so-surface-tabs button{flex:1 1 calc(50% - 6px)}.stock-options-view .so-surface-row{grid-template-columns:104px repeat(var(--surface-cols),minmax(54px,1fr))}}
+.stock-options-view .exposure-rows.is-signed-exposure-rows{grid-auto-rows:18px;gap:3px}
+.stock-options-view .exposure-row-signed{grid-template-columns:54px minmax(0,1fr) 82px;height:18px}
+.stock-options-view .exposure-signed-track{position:relative;display:block;height:12px;min-width:0;margin:0 3px;border-left:1px solid rgba(160,180,202,.48);border-right:1px solid rgba(160,180,202,.16);background:linear-gradient(90deg,rgba(225,91,115,.075) 0 50%,rgba(38,190,139,.075) 50% 100%);overflow:hidden;border-radius:3px}
+.stock-options-view .exposure-signed-track i{position:absolute;top:2px;display:block;width:var(--signed-width,0%);height:8px;max-width:50%;border-radius:2px;transition:width .16s ease-out}
+.stock-options-view .exposure-signed-track i.is-positive{left:50%;background:linear-gradient(90deg,#269f7a,#45d6a7);box-shadow:0 0 8px rgba(69,214,167,.2)}
+.stock-options-view .exposure-signed-track i.is-negative{right:50%;background:linear-gradient(270deg,#e05b73,#a74459);box-shadow:0 0 8px rgba(224,91,115,.2)}
+.stock-options-view .exposure-signed-value{padding-left:5px;text-align:right;font:700 8px/1 var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.stock-options-view .exposure-signed-value.is-positive{color:#54d7a8}
+.stock-options-view .exposure-signed-value.is-negative{color:#ed7284}
+.stock-options-view .exposure-plot.is-signed-exposure .exposure-marker{right:84px}
+.stock-options-view .exposure-axis-head.is-signed-axis{grid-template-columns:54px minmax(0,1fr) 82px;height:24px}
+.stock-options-view .exposure-axis-head.is-signed-axis span:nth-child(2){text-align:center;padding:0 6px}
+.stock-options-view .exposure-axis-head.is-signed-axis span:nth-child(3){display:block;text-align:right;color:#a8b7c9;padding-right:4px}
+.stock-options-view .exposure-row-signed.is-near-spot{background:rgba(101,214,232,.045)}
+.stock-options-view .so-exposure-legend i.model-positive{background:#45d6a7}
+.stock-options-view .so-exposure-legend i.model-negative{background:#e05b73}
+@media(max-width:680px){.stock-options-view .exposure-row-signed{grid-template-columns:45px minmax(0,1fr) 70px}.stock-options-view .exposure-axis-head.is-signed-axis{grid-template-columns:45px minmax(0,1fr) 70px}.stock-options-view .exposure-plot.is-signed-exposure .exposure-marker{left:45px;right:72px}.stock-options-view .exposure-signed-value{font-size:7px}.stock-options-view .so-surface-lab{padding:13px 11px}.stock-options-view .so-surface-axis-note{width:100%;margin-left:0;padding-bottom:0}.stock-options-view .so-surface-tabs button{flex:1 1 calc(50% - 6px)}.stock-options-view .so-surface-row{grid-template-columns:104px repeat(var(--surface-cols),minmax(54px,1fr))}}
 
-.stock-options-view .exposure-axis-head.is-signed-axis{grid-template-columns:54px minmax(0,1fr) auto minmax(0,1fr)}
-.stock-options-view .exposure-axis-head.is-signed-axis span:nth-child(2){text-align:left;padding:0 0 0 8px}
-.stock-options-view .exposure-axis-head.is-signed-axis span:nth-child(3){width:auto;padding:0 7px;text-align:center;color:#9eb0c5}
-.stock-options-view .exposure-axis-head.is-signed-axis span:nth-child(4){text-align:right;padding:0 8px 0 0}
 
 /* ================= IV SURFACE & VOLATILITY ANALYTICS ================= */
 .so-vol-card{margin:0 0 14px;padding:16px 18px;min-width:0}
