@@ -152,7 +152,7 @@ test('indicator search/list UI and browser load order are wired before the engin
   assert.equal([...html.matchAll(/<script src="indicators\/individual\/[^"]+\.js"/g)].length, 224);
   assert.match(engine, /new Set\(\["of","mm","ov","osc"\]\)/);
   assert.match(engine, /t\.id==="indSearch"/);
-  assert.match(sw, /ict-quantlab-shell-v53/);
+  assert.match(sw, /ict-quantlab-shell-v55/);
   assert.match(sw, /\.\/indicators\/atas-catalog\.js/);
   assert.match(sw, /\.\/indicators\/atas-technical-runtime\.js/);
   assert.match(sw, /\.\/indicators\/atas-tick-runtime\.js/);

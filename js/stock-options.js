@@ -112,6 +112,13 @@
         </div>
         <div class="so-scope-status" id="${p}-scope-status"></div>
       </div>
+      <section class="card so-ai-card" aria-label="Automatic Options Market Intelligence">
+        <div class="so-ai-head">
+          <div><span class="so-ai-eyebrow">A · OPTIONS MARKET INTELLIGENCE</span><h3>Automatic Market Analysis</h3><p>Greeks · Exposure · Volatility · Positioning · Conditional Scenarios</p></div>
+          <span class="so-ai-status" id="${p}-analysis-status">Đang chờ dữ liệu Options…</span>
+        </div>
+        <div class="so-ai-content" id="${p}-analysis"><div class="so-ai-empty">Analysis sẽ tự cập nhật khi Spot và Option Chain sẵn sàng.</div></div>
+      </section>
       <section class="card so-vol-card" aria-label="IV Surface and Volatility Analysis">
         <div class="so-vol-head">
           <div><span class="so-vol-eyebrow">B · IV SURFACE & VOLATILITY</span><h3>Volatility Analytics</h3><p>Mark IV được ưu tiên; IV suy ra từ mid chỉ dùng làm fallback và được đánh dấu riêng.</p></div>
@@ -1540,6 +1547,7 @@
     const {inputs,expected}=collectVolatilityInputs(s),api=window.StockOptionsVolatility;
     if(!api?.calculate){status.textContent='Volatility module unavailable';return;}
     const result=api.calculate({spot:s.price,symbol:s.cfg.symbol,expiries:inputs});
+    s._volatilityAnalysis=result;
     const current=result.expiries.find(row=>row.expiry===s.expiry)||null;
     const kpis=$(`${p}-vol-kpis`),wings=$(`${p}-vol-wings`),skew=$(`${p}-vol-skew-lines`),move=$(`${p}-vol-move`),range=$(`${p}-vol-range`),skewChart=$(`${p}-vol-skew-chart`),skewChartMeta=$(`${p}-vol-skew-chart-meta`);
     if(skewChart){
@@ -1713,10 +1721,53 @@
     }
   }
 
-  function renderScopeViews(s){try{renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderVolatilityAnalysis(s);renderGreeks3D(s);renderOptionSurfaces(s);updateChainMeta(s);renderScope(s);}catch(e){}}
+  function renderOptionsAnalysis(s){
+    const p=`so-${s.cfg.key}`,host=$(`${p}-analysis`),status=$(`${p}-analysis-status`);
+    if(!host)return;
+    const api=window.StockOptionsAnalysis,volApi=window.StockOptionsVolatility;
+    if(!api?.analyse||!api?.render){host.innerHTML='<div class="so-ai-empty">Options Analysis module chưa được tải.</div>';return;}
+    try{
+      const now=Date.now(),scope=s.scope||'selected';
+      const version=[s.cfg.symbol,s.expiry,scope,s.scopeRev||0,s.oiLastUpdate||0,s.quotes?.size||0,s.chainLoadState||''].join('|');
+      const signature=[version,s.price??'',s.priceAgeMs??'',s.marketPhase||'',s.priceFeedState||''].join('|');
+      // Spot and quote updates can trigger renderAll at market-data frequency.
+      // Rebuild the multi-contract BSM stress grid at most once per second for
+      // spot-only changes; expiry/scope/chain revisions bypass this throttle.
+      if(signature===s._optionsAnalysisSignature)return;
+      if(version===s._optionsAnalysisVersion&&now-(s._optionsAnalysisAt||0)<1000)return;
+      const c=calc(s),volatility=s._volatilityAnalysis||volApi?.calculate?.({spot:s.price,symbol:s.cfg.symbol,expiries:collectVolatilityInputs(s).inputs})||null;
+      const result=api.analyse({
+        symbol:s.cfg.symbol,spot:s.price,previousClose:s.previousClose,priceAgeMs:s.priceAgeMs,
+        marketPhase:s.marketPhase,priceFeedState:s.priceFeedState,calc:c,expiry:s.expiry,
+        scope,scopeLabel:c.scopeInfo?.label||scopeLabels[scope],
+        volatility,volatilityApi:volApi,now
+      });
+      s._optionsAnalysisResult=result;
+      s._optionsAnalysisSignature=signature;s._optionsAnalysisVersion=version;s._optionsAnalysisAt=now;
+      host.innerHTML=api.render(result);
+      if(status)status.textContent=`Updated · ${result.scopeLabel} · ${result.majorWarnings.length?`${result.majorWarnings.length} data notices`:'No major data notices'}`;
+    }catch(error){
+      if(status)status.textContent='Analysis error';
+      host.innerHTML=`<div class="so-ai-empty">Không thể tạo Market Analysis: ${esc(error?.message||error)}</div>`;
+    }
+    host.onclick=event=>{
+      const button=event.target?.closest?.('[data-copy-analysis]');
+      if(!button)return;
+      const report=s._optionsAnalysisResult?.report||'';
+      if(!report)return;
+      const copied=()=>{button.textContent='Copied';setTimeout(()=>{if(button.isConnected)button.textContent='Copy Full Analysis';},1400);};
+      if(navigator.clipboard?.writeText){navigator.clipboard.writeText(report).then(copied).catch(()=>fallbackCopy(report,button,copied));}
+      else fallbackCopy(report,button,copied);
+    };
+  }
+  function fallbackCopy(text,button,onSuccess){
+    try{const area=document.createElement('textarea');area.value=text;area.setAttribute('readonly','');area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);area.select();const ok=document.execCommand('copy');area.remove();if(ok)onSuccess();else button.textContent='Copy unavailable';}
+    catch{button.textContent='Copy unavailable';}
+  }
+  function renderScopeViews(s){try{renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderVolatilityAnalysis(s);renderOptionsAnalysis(s);renderGreeks3D(s);renderOptionSurfaces(s);updateChainMeta(s);renderScope(s);}catch(e){}}
 
   function renderAll(s){
-    renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderChain(s);renderVolatilityAnalysis(s);renderGreeks3D(s);renderOptionSurfaces(s);updateChainMeta(s);renderScope(s);
+    renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderChain(s);renderVolatilityAnalysis(s);renderOptionsAnalysis(s);renderGreeks3D(s);renderOptionSurfaces(s);updateChainMeta(s);renderScope(s);
     try{if(typeof window.crossAssetMapDataUpdated==='function')window.crossAssetMapDataUpdated(s.cfg.key)}catch(e){}
   }
   function metric(value,label,sub,cls=''){
@@ -2323,5 +2374,5 @@
   window.stockOptionsCrossAssetSnapshot=crossAssetSnapshot;
   window.stockOptionsCrossAssetSetExpiry=crossAssetSetExpiry;
   window.stockOptionsSetScope=(key,scope)=>{const s=sessions[key];if(!s)throw new Error('Nguồn ETF không hợp lệ: '+key);setScope(s,scope);};
-  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,price:s.price,previousClose:s.previousClose,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,priceAgeMs:s.priceAgeMs,priceReceivedAgeMs:s.priceReceivedAgeMs,priceType:s.priceType,marketPhase:s.marketPhase,priceFeedState:s.priceFeedState,priceFeedDetail:s.priceFeedDetail,priceSource:s.priceSource,priceEndpointIndex:s.priceEndpointIndex,priceActivationAt:s.priceActivationAt,priceConnectStartedAt:s.priceConnectStartedAt,priceSocketOpenedAt:s.priceSocketOpenedAt,priceUpstreamConnectedAt:s.priceUpstreamConnectedAt,priceFirstMessageAt:s.priceFirstMessageAt,priceFirstSnapshotAt:s.priceFirstSnapshotAt,priceStartupMs:s.priceStartupMs,priceSocketState:s.priceSocket?.readyState??null,optionFeedState:s.optionFeedState,optionFeedError:s.optionFeedError,optionSocketState:s.socket?.readyState??null,quotes:s.quotes.size,contracts:c.totalContracts,quotesExpiry:s.quotesExpiry,complete:c.complete,hydrating:s.hydrating,missingQuoteSymbols:c.missingQuoteSymbols.slice(0,20),lastHydrationIncompleteSymbols:s.lastHydrationIncompleteSymbols||[],incompleteContractDetails:(s.lastHydrationIncompleteSymbols||[]).slice(0,12).map(symbol=>{const q=s.quotes.get(symbol)||{},m=s.contractMeta?.get(symbol)||{};return {symbol,side:q.side??m.side,strike:q.strike??m.strike,oi:q.openInterest??m.openInterest,iv:q.iv??m.iv,gamma:q.gamma??m.gamma,multiplier:q.multiplier??m.multiplier,effectiveMultiplier:effectiveMultiplier(q.optionSymbol?q:m)}}),quoteSamples:[...s.quotes.values()].slice(0,3).map(q=>({symbol:q.optionSymbol,side:q.side,strike:q.strike,oi:q.openInterest,iv:q.iv,gamma:q.gamma,multiplier:q.multiplier,effectiveMultiplier:effectiveMultiplier(q)})),chainListInvalidCount:s.chainListInvalidCount,chainListDuplicateCount:s.chainListDuplicateCount,displayStrikes:s.displayStrikes,oiKnown:c.oiKnown,oiMissing:c.oiMissing,oiAssumedZero:c.oiAssumedZero,volumeKnown:c.volumeKnown,volumeAssumedZero:c.volumeAssumedZero,oiObservedCoverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiMissingSamples:c.oiMissingSamples,vannaExposure:c.vannaExposure,charmExposure:c.charmExposure,vannaKnown:c.vannaKnown,vannaRequired:c.vannaRequired,vannaCoverage:c.vannaCoverage,charmKnown:c.charmKnown,charmRequired:c.charmRequired,charmCoverage:c.charmCoverage,multiplierKnown:c.multiplierKnown,multiplierAssumed:c.multiplierAssumed,multiplierMissing:c.multiplierMissing,missingMultiplierSamples:c.missingMultiplierSamples,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,missingGreekSamples:c.missingGreekSamples,gexCoverage:c.gexCoverage,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexComplete:c.gexComplete,oiComplete:c.oiComplete,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,maxPainTiedStrikes:c.maxPain?.tiedStrikes||[],maxPainComplete:c.maxPainComplete,gexRatio:c.gexRatio,volatility:window.StockOptionsVolatility?.calculate?.({spot:s.price,symbol:s.cfg.symbol,expiries:collectVolatilityInputs(s).inputs})||null,price:s.price}] }));
+  window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,price:s.price,previousClose:s.previousClose,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,priceAgeMs:s.priceAgeMs,priceReceivedAgeMs:s.priceReceivedAgeMs,priceType:s.priceType,marketPhase:s.marketPhase,priceFeedState:s.priceFeedState,priceFeedDetail:s.priceFeedDetail,priceSource:s.priceSource,priceEndpointIndex:s.priceEndpointIndex,priceActivationAt:s.priceActivationAt,priceConnectStartedAt:s.priceConnectStartedAt,priceSocketOpenedAt:s.priceSocketOpenedAt,priceUpstreamConnectedAt:s.priceUpstreamConnectedAt,priceFirstMessageAt:s.priceFirstMessageAt,priceFirstSnapshotAt:s.priceFirstSnapshotAt,priceStartupMs:s.priceStartupMs,priceSocketState:s.priceSocket?.readyState??null,optionFeedState:s.optionFeedState,optionFeedError:s.optionFeedError,optionSocketState:s.socket?.readyState??null,quotes:s.quotes.size,contracts:c.totalContracts,quotesExpiry:s.quotesExpiry,complete:c.complete,hydrating:s.hydrating,missingQuoteSymbols:c.missingQuoteSymbols.slice(0,20),lastHydrationIncompleteSymbols:s.lastHydrationIncompleteSymbols||[],incompleteContractDetails:(s.lastHydrationIncompleteSymbols||[]).slice(0,12).map(symbol=>{const q=s.quotes.get(symbol)||{},m=s.contractMeta?.get(symbol)||{};return {symbol,side:q.side??m.side,strike:q.strike??m.strike,oi:q.openInterest??m.openInterest,iv:q.iv??m.iv,gamma:q.gamma??m.gamma,multiplier:q.multiplier??m.multiplier,effectiveMultiplier:effectiveMultiplier(q.optionSymbol?q:m)}}),quoteSamples:[...s.quotes.values()].slice(0,3).map(q=>({symbol:q.optionSymbol,side:q.side,strike:q.strike,oi:q.openInterest,iv:q.iv,gamma:q.gamma,multiplier:q.multiplier,effectiveMultiplier:effectiveMultiplier(q)})),chainListInvalidCount:s.chainListInvalidCount,chainListDuplicateCount:s.chainListDuplicateCount,displayStrikes:s.displayStrikes,oiKnown:c.oiKnown,oiMissing:c.oiMissing,oiAssumedZero:c.oiAssumedZero,volumeKnown:c.volumeKnown,volumeAssumedZero:c.volumeAssumedZero,oiObservedCoverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiMissingSamples:c.oiMissingSamples,vannaExposure:c.vannaExposure,charmExposure:c.charmExposure,vannaKnown:c.vannaKnown,vannaRequired:c.vannaRequired,vannaCoverage:c.vannaCoverage,charmKnown:c.charmKnown,charmRequired:c.charmRequired,charmCoverage:c.charmCoverage,multiplierKnown:c.multiplierKnown,multiplierAssumed:c.multiplierAssumed,multiplierMissing:c.multiplierMissing,missingMultiplierSamples:c.missingMultiplierSamples,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,missingGreekSamples:c.missingGreekSamples,gexCoverage:c.gexCoverage,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexComplete:c.gexComplete,oiComplete:c.oiComplete,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,maxPainTiedStrikes:c.maxPain?.tiedStrikes||[],maxPainComplete:c.maxPainComplete,gexRatio:c.gexRatio,analysis:s._optionsAnalysisResult?{regime:s._optionsAnalysisResult.regime,majorWarnings:s._optionsAnalysisResult.majorWarnings,stressCoverage:s._optionsAnalysisResult.stress.coverage}:null,volatility:window.StockOptionsVolatility?.calculate?.({spot:s.price,symbol:s.cfg.symbol,expiries:collectVolatilityInputs(s).inputs})||null,price:s.price}] }));
 })();
