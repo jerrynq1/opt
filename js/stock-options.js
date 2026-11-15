@@ -1796,6 +1796,9 @@
   function renderAll(s){
     renderKpis(s);renderLevels(s);renderExposure(s);renderGreeks(s);renderOI(s);renderChain(s);renderVolatilityAnalysis(s);renderOptionsAnalysis(s);renderGreeks3D(s);renderOptionSurfaces(s);updateChainMeta(s);renderScope(s);
     try{if(typeof window.crossAssetMapDataUpdated==='function')window.crossAssetMapDataUpdated(s.cfg.key)}catch(e){}
+    // QuantLab GEX Lab consumes this same in-memory Option Chain snapshot.
+    // It never creates a second Binance request path or sends market data to the server.
+    try{window.QuantLabGex?.onDataUpdated?.(s.cfg.key)}catch(e){}
   }
   function metric(value,label,sub,cls=''){
     return `<div class="opt-metric"><span>${label}</span><strong class="${cls}">${value}</strong><small>${sub||''}</small></div>`;
@@ -2383,7 +2386,7 @@
     const c=calcSingle(s); // Cross-Asset Map is defined on the selected expiry, independent of Analysis Scope
     const expiryMismatch=!!(s.expiry&&s.quotesExpiry!==s.expiry);
     return {key,symbol:s.cfg.symbol,price:s.price,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,priceAgeMs:s.priceAgeMs,priceType:s.priceType,priceFeedState:s.priceFeedState,marketPhase:s.marketPhase,expiry:s.expiry,dataExpiry:s.quotesExpiry||null,expiryMismatch,expirations:s.expirations.map(x=>({date:x.date,root:x.root})),updatedAt:s.oiLastUpdate,error:s.crossAssetError||'',
-      coverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiKnown:c.oiKnown,oiAssumedZero:c.oiAssumedZero,volumeAssumedZero:c.volumeAssumedZero,oiAnalyticsComplete:c.oiComplete,totalContracts:c.totalContracts,callOI:c.callOI,putOI:c.putOI,callVol:c.callVol,putVol:c.putVol,
+      coverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiKnown:c.oiKnown,oiAssumedZero:c.oiAssumedZero,volumeAssumedZero:c.volumeAssumedZero,oiAnalyticsComplete:c.oiComplete,totalContracts:c.totalContracts,callOI:c.callOI,putOI:c.putOI,callVol:c.callVol,putVol:c.putVol,volumeKnown:c.volumeKnown,
       callOIWall:c.oiComplete&&c.callOIWall?{strike:c.callOIWall.strike,oi:c.callOIWall.callOI}:null,
       putOIWall:c.oiComplete&&c.putOIWall?{strike:c.putOIWall.strike,oi:c.putOIWall.putOI}:null,
       gexCallWall:c.gexCallWall?{strike:c.gexCallWall.strike,gex:c.gexCallWall.gex}:null,
@@ -2391,7 +2394,15 @@
       gexAvailable:c.gexAvailable,gexComplete:c.gexComplete,gexProvisional:c.gexProvisional,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gammaProviderKnown:c.gammaProviderKnown,gammaDerivedKnown:c.gammaDerivedKnown,gexCoverage:c.gexCoverage,
       gammaFlip:c.gammaFlipComplete?c.gammaFlip:null,gammaFlipMethod:`Gamma Flip / Zero Gamma · BSM repricing · fixed OI/IV · r=0%, q=${(window.StockOptionsVolatility?.dividendYieldForSymbol?.(s.cfg.symbol)??0)*100}% · expiry ${/^(GLD|QQQ)$/i.test(s.cfg.symbol)?'16:15':'16:00'} America/New_York · bisection-refined Net GEX zero-cross`,maxPain:c.maxPain?{strike:c.maxPain.strike,tiedStrikes:c.maxPain.tiedStrikes,payout:c.maxPain.payout}:null,gexRatio:c.gexRatio,gexRatioState:c.gexRatioState,gexRatioBias:c.gexRatioBias,callGexTotal:c.callGexTotal,putGexAbsTotal:c.putGexAbsTotal,complete:c.complete&&!expiryMismatch,oiComplete:c.oiComplete&&!expiryMismatch,maxPainComplete:c.maxPainComplete&&!expiryMismatch,
       gexLevels:c.gexLevels.map((x,i)=>({rank:i+1,strike:x.strike,gex:x.gex})),gexRankedCandidates:c.gexRankedCandidates.map(x=>({strike:x.strike,gex:x.gex})),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gexMethod:{providerGamma:c.gammaProviderKnown,bsmDerivedGamma:c.gammaDerivedKnown},oiWall:c.oiWall?{strike:c.oiWall.strike,oi:c.oiWall.oi}:null,
-      dist:c.dist.map(x=>({strike:x.strike,callOI:x.callOI,putOI:x.putOI,callVol:x.callVol,putVol:x.putVol,gex:c.gexComplete?x.gex:null,callGex:c.gexComplete?x.callGex:null,putGex:c.gexComplete?x.putGex:null}))};
+      vannaExposure:c.vannaExposure,charmExposure:c.charmExposure,vannaKnown:c.vannaKnown,vannaRequired:c.vannaRequired,vannaCoverage:c.vannaCoverage,charmKnown:c.charmKnown,charmRequired:c.charmRequired,charmCoverage:c.charmCoverage,
+      dist:c.dist.map(x=>({
+        strike:x.strike,callOI:x.callOI,putOI:x.putOI,callVol:x.callVol,putVol:x.putVol,
+        gex:c.gexComplete?x.gex:null,callGex:c.gexComplete?x.callGex:null,putGex:c.gexComplete?x.putGex:null,
+        // Vanna/Charm are published only when every positive-OI contract in the chain
+        // has a valid model input; partial values are not presented as a complete surface.
+        vanna:c.vannaCoverage===1?x.vannaEx:null,charm:c.charmCoverage===1?x.charmEx:null,
+        dex:x.dex,vega:x.vgex,theta:x.thex
+      }))};
   }
 
   buildViews();
@@ -2399,6 +2410,9 @@
   window.stockOptionsCrossAssetStart=crossAssetStart;
   window.stockOptionsCrossAssetStop=crossAssetStop;
   window.stockOptionsCrossAssetSnapshot=crossAssetSnapshot;
+  // Public read-only bridge for the QuantLab GEX dashboard. It exposes the
+  // already-loaded selected-expiry data; it does not fetch or mutate anything.
+  window.stockOptionsQuantLabSnapshot=crossAssetSnapshot;
   window.stockOptionsCrossAssetSetExpiry=crossAssetSetExpiry;
   window.stockOptionsSetScope=(key,scope)=>{const s=sessions[key];if(!s)throw new Error('Nguồn ETF không hợp lệ: '+key);setScope(s,scope);};
   window.stockOptionsDebug=()=>Object.fromEntries(Object.values(sessions).map(s=>{const c=calc(s);return [s.cfg.symbol,{expiry:s.expiry,price:s.price,previousClose:s.previousClose,priceTime:s.priceTime,priceReceivedAt:s.priceReceivedAt,priceAgeMs:s.priceAgeMs,priceReceivedAgeMs:s.priceReceivedAgeMs,priceType:s.priceType,marketPhase:s.marketPhase,priceFeedState:s.priceFeedState,priceFeedDetail:s.priceFeedDetail,priceSource:s.priceSource,priceEndpointIndex:s.priceEndpointIndex,priceActivationAt:s.priceActivationAt,priceConnectStartedAt:s.priceConnectStartedAt,priceSocketOpenedAt:s.priceSocketOpenedAt,priceUpstreamConnectedAt:s.priceUpstreamConnectedAt,priceFirstMessageAt:s.priceFirstMessageAt,priceFirstSnapshotAt:s.priceFirstSnapshotAt,priceStartupMs:s.priceStartupMs,priceSocketState:s.priceSocket?.readyState??null,optionFeedState:s.optionFeedState,optionFeedError:s.optionFeedError,optionSocketState:s.socket?.readyState??null,quotes:s.quotes.size,contracts:c.totalContracts,quotesExpiry:s.quotesExpiry,complete:c.complete,hydrating:s.hydrating,missingQuoteSymbols:c.missingQuoteSymbols.slice(0,20),lastHydrationIncompleteSymbols:s.lastHydrationIncompleteSymbols||[],incompleteContractDetails:(s.lastHydrationIncompleteSymbols||[]).slice(0,12).map(symbol=>{const q=s.quotes.get(symbol)||{},m=s.contractMeta?.get(symbol)||{};return {symbol,side:q.side??m.side,strike:q.strike??m.strike,oi:q.openInterest??m.openInterest,iv:q.iv??m.iv,gamma:q.gamma??m.gamma,multiplier:q.multiplier??m.multiplier,effectiveMultiplier:effectiveMultiplier(q.optionSymbol?q:m)}}),quoteSamples:[...s.quotes.values()].slice(0,3).map(q=>({symbol:q.optionSymbol,side:q.side,strike:q.strike,oi:q.openInterest,iv:q.iv,gamma:q.gamma,multiplier:q.multiplier,effectiveMultiplier:effectiveMultiplier(q)})),chainListInvalidCount:s.chainListInvalidCount,chainListDuplicateCount:s.chainListDuplicateCount,displayStrikes:s.displayStrikes,oiKnown:c.oiKnown,oiMissing:c.oiMissing,oiAssumedZero:c.oiAssumedZero,volumeKnown:c.volumeKnown,volumeAssumedZero:c.volumeAssumedZero,oiObservedCoverage:c.coverage,oiAnalyticsCoverage:c.oiAnalyticsCoverage,oiMissingSamples:c.oiMissingSamples,vannaExposure:c.vannaExposure,charmExposure:c.charmExposure,vannaKnown:c.vannaKnown,vannaRequired:c.vannaRequired,vannaCoverage:c.vannaCoverage,charmKnown:c.charmKnown,charmRequired:c.charmRequired,charmCoverage:c.charmCoverage,multiplierKnown:c.multiplierKnown,multiplierAssumed:c.multiplierAssumed,multiplierMissing:c.multiplierMissing,missingMultiplierSamples:c.missingMultiplierSamples,iv:[...s.quotes.values()].filter(q=>q.iv!==null).length,providerGamma:[...s.quotes.values()].filter(q=>q.gamma!==null).length,bsmGamma:c.gammaDerivedKnown,missingGreekSamples:c.missingGreekSamples,gexCoverage:c.gexCoverage,gexKnown:c.gexKnown,gexMissing:c.gexMissing,gexComplete:c.gexComplete,oiComplete:c.oiComplete,callOIWall:c.callOIWall?.strike??null,putOIWall:c.putOIWall?.strike??null,gexCW:c.gexCallWall?.strike??null,gexPW:c.gexPutWall?.strike??null,gexLevels:c.gexLevels.map(x=>x.strike),gexLadderExcludedLevels:c.gexLadderExcludedLevels,gammaFlip:c.gammaFlip,maxPain:c.maxPain?.strike??null,maxPainTiedStrikes:c.maxPain?.tiedStrikes||[],maxPainComplete:c.maxPainComplete,gexRatio:c.gexRatio,analysis:s._optionsAnalysisResult?{regime:s._optionsAnalysisResult.regime,majorWarnings:s._optionsAnalysisResult.majorWarnings,stressCoverage:s._optionsAnalysisResult.stress.coverage}:null,volatility:window.StockOptionsVolatility?.calculate?.({spot:s.price,symbol:s.cfg.symbol,expiries:collectVolatilityInputs(s).inputs})||null,price:s.price}] }));

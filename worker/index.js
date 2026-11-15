@@ -5,7 +5,7 @@
  */
 const PREFIX = '/api/binance-stock-proxy';
 const UPSTREAM = 'https://www.binance.com';
-const UPSTREAM_PRICE_WS = 'wss://nbstream.binance.com/equity/ws/price';
+const UPSTREAM_PRICE_WS = 'https://nbstream.binance.com/equity/ws/price';
 const ROUTES = [
   /^\/bapi\/equity\/v1\/public\/equity\/option\/(?:chain-symbols|get-config|get-exchange-info)$/,
   /^\/bapi\/equity\/v1\/friendly\/equity\/option\/get-option-quote$/,

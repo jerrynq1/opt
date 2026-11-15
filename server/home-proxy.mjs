@@ -6,6 +6,8 @@ import http from 'node:http';
 import worker from '../worker/index.js';
 import { createQuickOptionsService } from './quick-options.mjs';
 import { createEquityPriceFeed } from './equity-price-feed.mjs';
+import { createExtensionApiKeyStore } from './extension-api-keys.mjs';
+import { createExtensionOptionsApi } from './extension-options-api.mjs';
 
 const PORT = Number(process.env.PORT || 8788);
 const env = { ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS || '*' };
@@ -14,6 +16,8 @@ const spotFeed = createEquityPriceFeed();
 // Integration tests can opt out so they remain deterministic and offline.
 if (process.env.DISABLE_SPOT_PREWARM !== '1') spotFeed.connect();
 const quickOptions = createQuickOptionsService({ worker, env, spotFeed });
+const extensionKeys = createExtensionApiKeyStore({ filePath: process.env.EXTENSION_API_KEY_STORE_PATH || undefined });
+const extensionApi = createExtensionOptionsApi({ keyStore: extensionKeys, optionsService: quickOptions });
 
 function corsFor(origin = '') {
   const allowed = String(env.ALLOWED_ORIGINS || '*').split(',').map(value => value.trim()).filter(Boolean);
@@ -21,7 +25,7 @@ function corsFor(origin = '') {
   return {
     'access-control-allow-origin': ok ? (allowed.includes('*') ? '*' : origin) : 'null',
     'access-control-allow-methods': 'GET, OPTIONS',
-    'access-control-allow-headers': 'Authorization, Accept, Content-Type',
+    'access-control-allow-headers': 'Authorization, X-API-Key, Accept, Content-Type',
     'access-control-max-age': '86400',
     'vary': 'Origin'
   };
@@ -102,6 +106,14 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (requestUrl.pathname.startsWith('/api/extension/v1/')) {
+      if (!['GET', 'OPTIONS'].includes(req.method)) req.resume();
+      const extensionRequest = new Request(requestUrl, { method: req.method, headers: req.headers });
+      const response = await extensionApi.handle(extensionRequest, cors);
+      await sendResponse(res, response);
+      return;
+    }
+
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
     const body = chunks.length ? Buffer.concat(chunks) : undefined;
@@ -124,6 +136,7 @@ server.listen(PORT, () => {
   console.log(`Spot GLD: http://localhost:${PORT}/api/spot?symbol=GLD`);
   console.log(`Spot QQQ: http://localhost:${PORT}/api/spot?symbol=QQQ`);
   console.log(`Quick Options GLD: http://localhost:${PORT}/api/quick-options?symbol=GLD`);
+  console.log(`Extension API: http://localhost:${PORT}/api/extension/v1/health (API key required)`);
   console.log(`Quick Options token file: ${quickOptions.tokenFile} (keep private; do not commit or publish server/).`);
 });
 

@@ -177,10 +177,10 @@ function ivSigma(value) {
   return v >= 0.01 && v <= 5 ? v : null;
 }
 
-function expiryAtUsCloseUtc(expiry) {
+function expiryAtUsCloseUtc(expiry, closeMinutes = 16 * 60) {
   const match = String(expiry || '').slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) return null;
-  const targetWall = Date.UTC(+match[1], +match[2] - 1, +match[3], 16, 0, 0);
+  if (!match || !Number.isInteger(closeMinutes) || closeMinutes < 0 || closeMinutes >= 24 * 60) return null;
+  const targetWall = Date.UTC(+match[1], +match[2] - 1, +match[3], Math.floor(closeMinutes / 60), closeMinutes % 60, 0);
   const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
@@ -196,31 +196,31 @@ function expiryAtUsCloseUtc(expiry) {
   return guess;
 }
 
-function yearsToExpiry(expiry, now) {
-  const end = expiryAtUsCloseUtc(expiry);
+function yearsToExpiry(expiry, now, closeMinutes = 16 * 60) {
+  const end = expiryAtUsCloseUtc(expiry, closeMinutes);
   if (end === null) return null;
   const time = (end - now) / (365.25 * 86_400_000);
   return Number.isFinite(time) && time > 0 ? time : null;
 }
 
-function bsmGamma(spot, strike, time, sigma) {
-  if (!(spot > 0 && strike > 0 && time > 0 && sigma > 0)) return null;
+function bsmGamma(spot, strike, time, sigma, rate = 0, dividendYield = 0) {
+  if (!(spot > 0 && strike > 0 && time > 0 && sigma > 0) || !Number.isFinite(rate) || !Number.isFinite(dividendYield)) return null;
   const denominator = sigma * Math.sqrt(time);
-  const d1 = (Math.log(spot / strike) + 0.5 * sigma * sigma * time) / denominator;
-  const gamma = Math.exp(-0.5 * d1 * d1) / (spot * denominator * Math.sqrt(2 * Math.PI));
+  const d1 = (Math.log(spot / strike) + (rate - dividendYield + 0.5 * sigma * sigma) * time) / denominator;
+  const gamma = Math.exp(-dividendYield * time) * Math.exp(-0.5 * d1 * d1) / (spot * denominator * Math.sqrt(2 * Math.PI));
   return Number.isFinite(gamma) ? gamma : null;
 }
 
-function resolveGamma(q, spot, time) {
+function resolveGamma(q, spot, time, rate = 0, dividendYield = 0) {
   const provider = num(q.gamma);
   if (provider !== null && Math.abs(provider) > 0) return { gamma: Math.abs(provider), source: 'provider' };
   const sigma = ivSigma(q.iv);
-  const derived = spot > 0 && time !== null && sigma !== null ? bsmGamma(spot, q.strike, time, sigma) : null;
+  const derived = spot > 0 && time !== null && sigma !== null ? bsmGamma(spot, q.strike, time, sigma, rate, dividendYield) : null;
   return derived !== null ? { gamma: derived, source: 'bsm-iv' } : { gamma: null, source: 'missing' };
 }
 
-function gammaFlipOf(rows, spot, expiry, now) {
-  const time = yearsToExpiry(expiry, now);
+function gammaFlipOf(rows, spot, expiry, now, closeMinutes = 16 * 60, rate = 0, dividendYield = 0) {
+  const time = yearsToExpiry(expiry, now, closeMinutes);
   if (time === null) return { level: null, crosses: [], complete: false, reason: 'Thiếu DTE hợp lệ', coverage: 0 };
   const valid = rows.filter(q => Number.isFinite(q.strike) && q.strike > 0 && (q.side === 'C' || q.side === 'P'));
   const invalidCount = rows.length - valid.length;
@@ -238,7 +238,7 @@ function gammaFlipOf(rows, spot, expiry, now) {
   const netAt = price => {
     let total = 0;
     for (const q of eligible) {
-      const gamma = bsmGamma(price, q.strike, time, ivSigma(q.iv));
+      const gamma = bsmGamma(price, q.strike, time, ivSigma(q.iv), rate, dividendYield);
       const multiplier = effectiveMultiplier(q).value;
       if (gamma === null || multiplier === null) return null;
       const value = gamma * q.openInterest * multiplier * price * price * 0.01;
@@ -318,7 +318,7 @@ function isExcludedStrike(strike, excluded) {
   return Number.isFinite(strike) && excluded.some(value => Number.isFinite(value) && Math.abs(strike - value) <= 1e-4);
 }
 
-function calculateLevels({ quotes, symbols, expiry, spot, now, invalidChainRows = 0 }) {
+function calculateLevels({ quotes, symbols, expiry, spot, now, invalidChainRows = 0, symbol = '', dividendYield = 0, expiryCloseMinutes = 16 * 60 }) {
   const rows = [...quotes.values()].sort((a, b) => (a.strike ?? 0) - (b.strike ?? 0));
   const missingSymbols = symbols.filter(symbol => !quotes.has(symbol));
   const totalContracts = symbols.length;
@@ -368,7 +368,7 @@ function calculateLevels({ quotes, symbols, expiry, spot, now, invalidChainRows 
       byStrike.set(key, item);
       continue;
     }
-    const resolved = resolveGamma(q, spot, yearsToExpiry(expiry, now));
+    const resolved = resolveGamma(q, spot, yearsToExpiry(expiry, now, expiryCloseMinutes), 0, dividendYield);
     if (resolved.gamma === null) {
       gexMissing++;
     } else {
@@ -410,7 +410,7 @@ function calculateLevels({ quotes, symbols, expiry, spot, now, invalidChainRows 
         : !maxPain ? 'Expiry không có OI dương để xác định Max Pain' : 'Max Pain tính từ toàn bộ expiry';
 
   const flipCalc = complete
-    ? gammaFlipOf(rows, spot ?? 0, expiry, now)
+    ? gammaFlipOf(rows, spot ?? 0, expiry, now, expiryCloseMinutes, 0, dividendYield)
     : { level: null, crosses: [], complete: false, reason: 'Full Option Chain chưa tải xong', coverage: 0 };
   const gammaFlip = flipCalc.complete && spot > 0 && flipCalc.crosses?.length
     ? flipCalc.crosses.slice().sort((a, b) => Math.abs(a - spot) - Math.abs(b - spot))[0]
@@ -447,21 +447,25 @@ function calculateLevels({ quotes, symbols, expiry, spot, now, invalidChainRows 
     maxPainPayout: maxPain?.payout ?? null, maxPainComplete, maxPainReason,
     multiplierMissing, gammaProviderKnown, gammaDerivedKnown, gexKnown, gexMissing,
     gexCoverage: totalContracts ? gexKnown / totalContracts : 0,
-    gexRatio, gexRatioState, gexLevels
+    gexRatio, gexRatioState, gexLevels,
+    callGexTotal, putGexAbsTotal, netGexTotal: gexAvailable ? distribution.reduce((sum, row) => sum + (row.gex || 0), 0) : null,
+    grossGexTotal: gexAvailable ? callGexTotal + putGexAbsTotal : null,
+    strikeLevels: distribution.map(row => ({ strike: row.strike, call_oi: row.callOI, put_oi: row.putOI, net_gex: row.gex, call_gex: row.callGex, put_gex: row.putGex }))
   };
 }
 
-function extractSpot(payload) {
+function extractSpot(payload, symbol = 'GLD') {
+  const target = String(symbol || 'GLD').toUpperCase();
   const data = payload?.data ?? payload;
   const rows = Array.isArray(data?.rates) ? data.rates : Array.isArray(data) ? data : [data];
-  const hit = rows.find(row => row && ((row.ac ?? row.assetCode) === 'EQ_GLD' || (row.s ?? row.symbol) === 'GLD'));
+  const hit = rows.find(row => row && ((row.ac ?? row.assetCode) === `EQ_${target}` || (row.s ?? row.symbol) === target));
   if (!hit) return null;
   const price = num(hit.p ?? hit.price ?? hit.c ?? hit.close);
   if (!(price > 0)) return null;
   return { price, previousClose: num(hit.pc ?? hit.prevClose ?? hit.lastRegularClose ?? hit.prc ?? hit.prevRegularClose), time: num(hit.t ?? hit.time ?? hit.E ?? hit.eventTime), marketPhase: typeof hit.mp === 'string' ? hit.mp.toUpperCase() : null, receivedAt: Date.now() };
 }
 
-async function readSpotOnce() {
+async function readSpotOnce(symbol = 'GLD') {
   if (typeof globalThis.WebSocket !== 'function') {
     throw new Error('Node.js hiện tại chưa hỗ trợ WebSocket toàn cục. Cần Node.js 22 trở lên cho Quick Options.');
   }
@@ -486,7 +490,7 @@ async function readSpotOnce() {
         try {
           const raw = typeof event.data === 'string' ? event.data : await event.data.text();
           const parsed = JSON.parse(raw);
-          const spot = extractSpot(parsed?.data ?? parsed);
+          const spot = extractSpot(parsed?.data ?? parsed, symbol);
           if (spot) finish(spot);
         } catch {
           // Ignore non-data/control WebSocket messages and keep waiting for the price event.
@@ -528,12 +532,12 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
     return payload;
   }
 
-  async function findExpiry(requestedExpiry) {
+  async function findExpiry(symbol, requestedExpiry) {
     if (requestedExpiry) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedExpiry)) throw new Error('Expiry phải có định dạng YYYY-MM-DD.');
-      const reply = await callBinance(`${CHAIN_PATH}?${new URLSearchParams({ symbol: 'GLD', rootSymbol: 'GLD', expirationDate: requestedExpiry })}`);
+      const reply = await callBinance(`${CHAIN_PATH}?${new URLSearchParams({ symbol, rootSymbol: symbol, expirationDate: requestedExpiry })}`);
       const contracts = reply?.data?.l || [];
-      if (!contracts.length) throw new Error(`Binance không có GLD Option Chain cho expiry ${requestedExpiry}.`);
+      if (!contracts.length) throw new Error(`Binance không có ${symbol} Option Chain cho expiry ${requestedExpiry}.`);
       return { date: requestedExpiry, contracts };
     }
 
@@ -545,7 +549,7 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
       while (next < dates.length) {
         const date = dates[next++];
         try {
-          const reply = await callBinance(`${CHAIN_PATH}?${new URLSearchParams({ symbol: 'GLD', rootSymbol: 'GLD', expirationDate: date })}`);
+          const reply = await callBinance(`${CHAIN_PATH}?${new URLSearchParams({ symbol, rootSymbol: symbol, expirationDate: date })}`);
           const contracts = reply?.data?.l || [];
           if (contracts.length) found.push({ date, contracts });
         } catch (error) {
@@ -556,7 +560,7 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
     await Promise.all(Array.from({ length: 4 }, workerLoop));
     found.sort((a, b) => a.date.localeCompare(b.date));
     const preferred = found.find(item => item.date >= todayNewYork()) || found[0];
-    if (!preferred) throw new Error(`Không tìm thấy expiry GLD. ${firstError || 'Không có contract trong các ngày đã kiểm tra.'}`);
+    if (!preferred) throw new Error(`Không tìm thấy expiry ${symbol}. ${firstError || 'Không có contract trong các ngày đã kiểm tra.'}`);
     return preferred;
   }
 
@@ -601,11 +605,11 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
     return { quotes, pending, error: lastError };
   }
 
-  async function buildSummary(requestedExpiry) {
-    const spotPromise = (spotFeed ? spotFeed.get('GLD', { timeoutMs: 10_000 }) : readSpotOnce())
+  async function buildSummary(symbol, requestedExpiry, expiryCloseMinutes = 16 * 60) {
+    const spotPromise = (spotFeed ? spotFeed.get(symbol, { timeoutMs: 10_000 }) : readSpotOnce(symbol))
       .then(value => ({ value, error: '' }))
       .catch(error => ({ value: null, error: error?.message || String(error) }));
-    const expiryInfo = await findExpiry(requestedExpiry);
+    const expiryInfo = await findExpiry(symbol, requestedExpiry);
     const canonicalBySymbol = new Map();
     let invalidChainRows = 0;
     let duplicateChainRows = 0;
@@ -617,7 +621,7 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
     }
     const canonical = [...canonicalBySymbol.values()];
     const symbols = canonical.map(item => item.os);
-    if (!symbols.length) throw new Error(`Binance trả danh sách nhưng không có OCC symbol hợp lệ cho GLD ${expiryInfo.date}.`);
+    if (!symbols.length) throw new Error(`Binance trả danh sách nhưng không có OCC symbol hợp lệ cho ${symbol} ${expiryInfo.date}.`);
     const metadataBySymbol = new Map(canonical.map(item => [item.os, normaliseQuote(item)]));
     const quoteResult = await fetchAllQuotes(symbols, metadataBySymbol);
     const spotResult = await spotPromise;
@@ -631,7 +635,10 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
       expiry: expiryInfo.date,
       spot: spot?.price ?? null,
       now,
-      invalidChainRows
+      invalidChainRows,
+      symbol,
+      dividendYield: symbol === 'QQQ' ? 0.0045 : 0,
+      expiryCloseMinutes
     });
     const chainComplete = levels.chainComplete;
     const partialNotes = [];
@@ -644,12 +651,18 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
 
     return {
       ok: true,
-      symbol: 'GLD',
+      symbol,
       spot: spot?.price ?? null,
       spot_updated_at: (spot?.priceTime ?? spot?.time) ? new Date(spot.priceTime ?? spot.time).toISOString() : null,
       spot_market_phase: spot?.marketPhase || null,
       spot_received_at: spot?.receivedAt ? new Date(spot.receivedAt).toISOString() : null,
-      spot_age_ms: Number.isFinite(spot?.ageMs) ? spot.ageMs : 0,
+      spot_age_ms: Number.isFinite(spot?.priceAgeMs ?? spot?.ageMs) ? (spot.priceAgeMs ?? spot.ageMs) : null,
+      spot_received_age_ms: Number.isFinite(spot?.receivedAgeMs) ? spot.receivedAgeMs : null,
+      spot_price_type: spot?.priceType || null,
+      spot_feed_state: spot?.feedState || null,
+      spot_previous_close: Number.isFinite(spot?.previousClose) ? spot.previousClose : null,
+      spot_change: Number.isFinite(spot?.price) && Number.isFinite(spot?.previousClose) ? spot.price - spot.previousClose : null,
+      spot_change_pct: Number.isFinite(spot?.price) && Number.isFinite(spot?.previousClose) && spot.previousClose > 0 ? (spot.price - spot.previousClose) / spot.previousClose * 100 : null,
       spot_source: spot?.source || (spotFeed ? 'node-shared-binance-price-feed' : 'binance-raw-websocket'),
       expiry: expiryInfo.date,
       cw: levels.cw,
@@ -665,6 +678,9 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
       gex_ratio: levels.gexRatio,
       gex_ratio_state: levels.gexRatioState,
       gex_1_10: levels.gexLevels.map(item => ({ rank: item.rank, strike: item.strike, gex: item.gex })),
+      gex_totals: { call: levels.callGexTotal, put_abs: levels.putGexAbsTotal, net: levels.netGexTotal, gross: levels.grossGexTotal },
+      oi_totals: { call: levels.callOI, put: levels.putOI, total: levels.callOI + levels.putOI },
+      strike_levels: levels.strikeLevels,
       data_status: {
         chain_complete: levels.chainComplete,
         quotes_received: levels.quotesReceived,
@@ -676,7 +692,9 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
         gex_provisional: levels.gexProvisional,
         gex_coverage: Number((levels.gexCoverage * 100).toFixed(1)),
         oi_observed: levels.oiKnown,
+        oi_observed_coverage: levels.totalContracts ? Number((levels.oiKnown / levels.totalContracts * 100).toFixed(1)) : 0,
         oi_assumed_zero: levels.oiAssumedZero,
+        oi_assumed_zero_coverage: levels.totalContracts ? Number((levels.oiAssumedZero / levels.totalContracts * 100).toFixed(1)) : 0,
         multiplier_missing: levels.multiplierMissing,
         gamma_provider_contracts: levels.gammaProviderKnown,
         gamma_bsm_contracts: levels.gammaDerivedKnown,
@@ -686,17 +704,102 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
         invalid_chain_rows: invalidChainRows,
         duplicate_chain_rows: duplicateChainRows
       },
+      levels: [
+        { id: 'gex-call-wall', label: 'GEX Call Wall', price: levels.cw, kind: 'resistance', source: 'type-signed OI-weighted GEX' },
+        { id: 'gex-put-wall', label: 'GEX Put Wall', price: levels.pw, kind: 'support', source: 'type-signed OI-weighted GEX' },
+        { id: 'call-oi-wall', label: 'Call OI Wall', price: levels.callOIWall, kind: 'resistance', source: 'open interest' },
+        { id: 'put-oi-wall', label: 'Put OI Wall', price: levels.putOIWall, kind: 'support', source: 'open interest' },
+        { id: 'gamma-flip', label: 'Gamma Flip', price: levels.gammaFlip, kind: 'reference', source: 'BSM repriced zero-cross' },
+        { id: 'max-pain', label: 'Max Pain', price: levels.maxPain, kind: 'reference', source: 'per-expiry OI payout model' },
+        ...levels.gexLevels.map(item => ({ id: `gex-${item.rank}`, label: `GEX ${item.rank}`, price: item.strike, kind: item.gex >= 0 ? 'resistance' : 'support', source: 'type-signed OI-weighted GEX', value: item.gex }))
+      ].filter(item => Number.isFinite(item.price) && item.price > 0),
       methods: {
         cw_pw: 'Strike có Net GEX dương lớn nhất / Net GEX âm có trị tuyệt đối lớn nhất; Call GEX dương, Put GEX âm.',
-        gamma_flip: 'BSM repricing; giữ OI/IV/DTE cố định; r=q=0; expiry 16:00 America/New_York; chọn zero-cross gần Spot nhất.',
+        gamma_flip: `BSM repricing; giữ OI/IV/DTE cố định; r=0; q=0.45% cho QQQ và 0% cho GLD; expiry ${String(Math.floor(expiryCloseMinutes / 60)).padStart(2, '0')}:${String(expiryCloseMinutes % 60).padStart(2, '0')} America/New_York; chọn zero-cross gần Spot nhất. Sign convention Call+/Put−; đây là OI-weighted proxy, không phải dealer positioning.`,
         max_pain: 'Tối thiểu hóa tổng intrinsic payout của Call và Put OI × multiplier trên toàn expiry.',
         gex: 'Σ(Gamma × OI × multiplier × Spot² × 0.01); Gamma provider hoặc BSM suy ra từ IV.'
       },
       notes: partialNotes,
       updated_at: new Date(now).toISOString(),
       quote_error: quoteResult.error || null,
-      spot_error: spotError || null
+      spot_error: spotError || null,
+      api_profile: 'extension-market-v1',
+      data_origin: 'Node Gateway fetches Binance Equity Option Chain/quotes through the existing allowlisted Worker and recomputes this expiry summary server-side; this is not a direct serialization of the current browser tab state.',
+      calculation_assumptions: {
+        risk_free_rate: 0,
+        dividend_yield: symbol === 'QQQ' ? 0.0045 : 0,
+        expiry_close_et: `${String(Math.floor(expiryCloseMinutes / 60)).padStart(2, '0')}:${String(expiryCloseMinutes % 60).padStart(2, '0')} America/New_York`,
+        gex_sign_convention: 'Call +1 / Put -1',
+        oi_null_policy: 'Received OCC contract with null OI is zero-filled; OCC quote not received remains missing.'
+      },
+      limitations: ['V1 trả dữ liệu một expiry cho mỗi request; extension có thể gọi nhiều expiry riêng.', 'Không suy luận dealer net positioning từ public OI.', 'Không trả confirmed trade-flow, market-maker inventory, VIX hoặc economic calendar.', 'GEX/Max Pain/Gamma Flip là model-derived; Provider Gamma được ưu tiên, BSM fallback dùng giả định q theo underlying.', 'API summary được tính ở Node từ một snapshot server riêng; timestamp/quote completeness có thể khác tab browser đang mở.']
     };
+  }
+
+  const expiryListCache = new Map();
+  const expiryListInFlight = new Map();
+  async function getMarketSummary(symbol = 'GLD', requestedExpiry = '', { forceRefresh = false, expiryCloseMinutes = 16 * 60 } = {}) {
+    const underlying = String(symbol || '').toUpperCase();
+    if (!['GLD', 'QQQ'].includes(underlying)) throw new Error('Only GLD and QQQ are supported.');
+    const expiry = String(requestedExpiry || '');
+    if (expiry && !/^\d{4}-\d{2}-\d{2}$/.test(expiry)) throw new Error('Expiry phải có định dạng YYYY-MM-DD.');
+    if (!Number.isInteger(expiryCloseMinutes) || expiryCloseMinutes < 0 || expiryCloseMinutes >= 24 * 60) throw new Error('Invalid expiry close time.');
+    const key = `${underlying}:${expiry || 'auto'}:${expiryCloseMinutes}`;
+    const existing = cache.get(key);
+    if (!forceRefresh && existing && existing.expiresAt > Date.now()) return { ...existing.payload, cache: 'HIT' };
+    if (inFlight.has(key)) {
+      const payload = await inFlight.get(key);
+      return { ...payload, cache: 'COALESCED' };
+    }
+    const task = buildSummary(underlying, expiry, expiryCloseMinutes);
+    inFlight.set(key, task);
+    try {
+      const payload = await task;
+      const ttl = payload.data_status.chain_complete && payload.data_status.gex_complete ? CACHE_TTL_MS : PARTIAL_CACHE_TTL_MS;
+      cache.set(key, { payload, expiresAt: Date.now() + ttl });
+      return { ...payload, cache: 'MISS' };
+    } finally {
+      inFlight.delete(key);
+    }
+  }
+
+  async function getExpiries(symbol = 'GLD', limit = 12) {
+    const underlying = String(symbol || '').toUpperCase();
+    if (!['GLD', 'QQQ'].includes(underlying)) throw new Error('Only GLD and QQQ are supported.');
+    const count = Math.max(1, Math.min(24, Number(limit) || 12));
+    const key = `${underlying}:${count}`;
+    const cached = expiryListCache.get(key);
+    if (cached && cached.expiresAt > Date.now()) return { ...cached.payload, cache: 'HIT' };
+    if (expiryListInFlight.has(key)) return { ...(await expiryListInFlight.get(key)), cache: 'COALESCED' };
+    const task = (async () => {
+    const dates = candidateDates(MAX_EXPIRY_CANDIDATES);
+    const found = [];
+    let next = 0;
+    let firstError = '';
+    async function loop() {
+      while (next < dates.length) {
+        const expiry = dates[next++];
+        try {
+          const reply = await callBinance(`${CHAIN_PATH}?${new URLSearchParams({ symbol: underlying, rootSymbol: underlying, expirationDate: expiry })}`);
+          const contracts = reply?.data?.l || [];
+          if (contracts.length) found.push({ expiry, contract_count: contracts.length });
+        } catch (error) {
+          if (!firstError) firstError = error?.message || String(error);
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: 4 }, loop));
+    found.sort((a, b) => a.expiry.localeCompare(b.expiry));
+    const payload = { ok: true, symbol: underlying, expiries: found.slice(0, count), scanned_dates: dates.length, updated_at: new Date().toISOString(), warning: found.length ? null : (firstError || 'No expiry contracts found.') };
+    expiryListCache.set(key, { payload, expiresAt: Date.now() + 15 * 60_000 });
+    return payload;
+    })();
+    expiryListInFlight.set(key, task);
+    try {
+      return { ...(await task), cache: 'MISS' };
+    } finally {
+      expiryListInFlight.delete(key);
+    }
   }
 
   async function handle(request) {
@@ -715,33 +818,12 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
     if (symbol !== 'GLD') return json({ ok: false, error: 'Phiên bản Quick Options hiện chỉ bật GLD.' }, 400);
     const requestedExpiry = url.searchParams.get('expiry') || '';
     const forceRefresh = url.searchParams.get('refresh') === '1';
-    const key = `GLD:${requestedExpiry || 'auto'}`;
-    const existing = cache.get(key);
-    if (!forceRefresh && existing && existing.expiresAt > Date.now()) {
-      return json({ ...existing.payload, cache: 'HIT' });
-    }
-    if (inFlight.has(key)) {
-      try {
-        const payload = await inFlight.get(key);
-        return json({ ...payload, cache: 'COALESCED' });
-      } catch (error) {
-        return json({ ok: false, error: error?.message || String(error) }, 502);
-      }
-    }
-    const task = buildSummary(requestedExpiry);
-    inFlight.set(key, task);
     try {
-      const payload = await task;
-      const ttl = payload.data_status.chain_complete && payload.data_status.gex_complete
-        ? CACHE_TTL_MS : PARTIAL_CACHE_TTL_MS;
-      cache.set(key, { payload, expiresAt: Date.now() + ttl });
-      return json({ ...payload, cache: 'MISS' });
+      return json(await getMarketSummary('GLD', requestedExpiry, { forceRefresh }));
     } catch (error) {
       return json({ ok: false, symbol: 'GLD', error: error?.message || String(error), updated_at: new Date().toISOString() }, 502);
-    } finally {
-      inFlight.delete(key);
     }
   }
 
-  return { handle, tokenFile };
+  return { handle, tokenFile, getMarketSummary, getExpiries };
 }

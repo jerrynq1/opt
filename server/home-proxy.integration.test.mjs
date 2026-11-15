@@ -8,7 +8,7 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 const port = 19_000 + Math.floor(Math.random() * 1_000);
 const child = spawn(process.execPath, [path.join(dir, 'home-proxy.mjs')], {
   cwd: path.dirname(dir),
-  env: { ...process.env, PORT: String(port), ALLOWED_ORIGINS: '*', DISABLE_SPOT_PREWARM: '1' },
+  env: { ...process.env, PORT: String(port), ALLOWED_ORIGINS: '*', DISABLE_SPOT_PREWARM: '1', QUICK_OPTIONS_TOKEN: 'home-proxy-integration-test-token' },
   stdio: ['ignore', 'pipe', 'pipe']
 });
 let logs = '';

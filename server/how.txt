@@ -1,0 +1,5 @@
+# Xem danh sách
+node .\manage-extension-api-keys.mjs list
+
+# Thu hồi key
+node .\manage-extension-api-keys.mjs revoke --id qak_xxxxxxxxxxxx
