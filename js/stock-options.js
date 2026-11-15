@@ -1721,6 +1721,25 @@
     }
   }
 
+  // Preserve each Analysis accordion state when live Spot/Options updates
+  // rebuild the panel HTML. The title in the first summary span is a stable key.
+  function captureOptionsAnalysisSectionState(host){
+    const state=Object.create(null);
+    if(!host?.querySelectorAll)return state;
+    host.querySelectorAll('details.so-ai-section').forEach((section,index)=>{
+      const key=section.querySelector('summary span')?.textContent?.trim()||`section-${index}`;
+      state[key]=!!section.open;
+    });
+    return state;
+  }
+  function restoreOptionsAnalysisSectionState(host,state){
+    if(!host?.querySelectorAll||!state)return;
+    host.querySelectorAll('details.so-ai-section').forEach((section,index)=>{
+      const key=section.querySelector('summary span')?.textContent?.trim()||`section-${index}`;
+      if(Object.prototype.hasOwnProperty.call(state,key))section.open=!!state[key];
+    });
+  }
+
   function renderOptionsAnalysis(s){
     const p=`so-${s.cfg.key}`,host=$(`${p}-analysis`),status=$(`${p}-analysis-status`);
     if(!host)return;
@@ -1744,7 +1763,15 @@
       });
       s._optionsAnalysisResult=result;
       s._optionsAnalysisSignature=signature;s._optionsAnalysisVersion=version;s._optionsAnalysisAt=now;
+      // Remember the user's current open/closed choices before replacing the
+      // markup. Keep the state on the QQQ/GLD session so it survives scope,
+      // expiry and live-market refreshes independently for each underlying.
+      const visibleSectionState=captureOptionsAnalysisSectionState(host);
+      if(Object.keys(visibleSectionState).length){
+        s._optionsAnalysisSectionState={...(s._optionsAnalysisSectionState||{}),...visibleSectionState};
+      }
       host.innerHTML=api.render(result);
+      restoreOptionsAnalysisSectionState(host,s._optionsAnalysisSectionState);
       if(status)status.textContent=`Updated · ${result.scopeLabel} · ${result.majorWarnings.length?`${result.majorWarnings.length} data notices`:'No major data notices'}`;
     }catch(error){
       if(status)status.textContent='Analysis error';

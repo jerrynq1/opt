@@ -13,7 +13,7 @@ test('pinned Three.js loads before the QuantLab 3D adapter and is cacheable by P
   const three = html.indexOf('https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js');
   const adapter = html.indexOf('js/stock-options-3d.js');
   assert.ok(three >= 0 && adapter > three, 'Three.js script must precede 3D adapter');
-  assert.match(sw, /ict-quantlab-shell-v55/);
+  assert.match(sw, /ict-quantlab-shell-v56/);
   assert.match(sw, /cdn\\\.jsdelivr\\\.net/);
 });
 
