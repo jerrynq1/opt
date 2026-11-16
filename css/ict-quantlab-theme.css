@@ -306,3 +306,49 @@ body.simple-ui #st{width:100%;max-width:100%;min-width:0;}
   #v-ind .ind-source-file{width:100%}
   #v-ind .ind-search-wrap kbd{display:none}
 }
+
+
+/* Timeframe library — expanded presets, quick favorites, search and custom intervals. */
+body.simple-ui .timeframe-wrap{min-width:0;max-width:100%;}
+body.simple-ui #tfs{display:flex;align-items:center;gap:4px;flex-wrap:nowrap;min-width:0;overflow-x:auto;scrollbar-width:thin;scrollbar-color:#34485e transparent;padding:2px 1px 5px;}
+body.simple-ui #tfs .tf{flex:none;min-height:32px;padding:6px 10px;border:1px solid transparent;border-radius:7px;font:600 12px var(--mono);white-space:nowrap;}
+body.simple-ui #tfs .tf.on{border-color:#36788a;background:#143343;color:#a9edf0;box-shadow:inset 0 0 0 1px rgba(64,190,196,.08);}
+body.simple-ui #tfs .tf.cu{border-bottom-color:#d7ad59;}
+body.simple-ui #tfs .tf-more,body.simple-ui #tfs .tf-add{border-color:#2a4056;background:#101d2c;color:#a8bfd2;min-width:32px;padding-inline:8px;font:700 16px var(--font);}
+body.simple-ui #tfs .tf-more:hover,body.simple-ui #tfs .tf-add:hover{border-color:#4c8b99;color:#e1f8f7;background:#142b3b;}
+.tfp{width:min(360px,calc(100vw - 16px));max-height:min(72vh,620px);overflow:hidden;padding:13px;border-color:#2a4056;background:#0b1421;color:#d7e2ef;border-radius:12px;}
+.tfp-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;}
+.tfp-head strong{font:600 13px var(--font);letter-spacing:.02em;color:#e6edf5;}
+.tfp-close{width:27px;height:27px;border:1px solid #2c4054;border-radius:7px;background:#111f2e;color:#9fb4c7;font-size:18px;cursor:pointer;}
+.tfp-search{width:100%;height:36px;box-sizing:border-box;margin:0 0 12px;padding:0 10px;border:1px solid #30475c;border-radius:8px;background:#101d2b;color:#e4edf4;font:12px var(--font);outline:none;}
+.tfp-search:focus{border-color:#45a9b4;box-shadow:0 0 0 2px rgba(69,169,180,.12);}
+.tfp-favlabel,.tfp-group h4{margin:8px 0 7px;color:#748ba2;font:10px var(--mono);letter-spacing:.1em;}
+.tfp-favs{display:flex;flex-wrap:wrap;gap:5px;padding-bottom:9px;border-bottom:1px solid #24374a;}
+.tfp-muted{font:11px var(--font);color:#60758b;padding:4px 0;}
+.tfp-groups{max-height:min(47vh,390px);overflow:auto;padding-right:3px;}
+.tfp-group{margin-top:9px;}
+.tfp-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;}
+.tfpi{display:flex;align-items:stretch;min-width:0;border:1px solid #23384c;border-radius:7px;background:#101d2b;overflow:hidden;}
+.tfpi[hidden],.tfp-group[hidden]{display:none!important;}
+.tfpick{flex:1;min-width:0;padding:7px 5px;border:0;background:transparent;color:#a9bbcc;text-align:center;font:600 11px var(--mono);cursor:pointer;}
+.tfpick:hover,.tfpick.active{background:#173345;color:#a9edf0;}
+.tfpick span{display:block;color:#d8b66a;font:8px var(--mono);}
+.tffav,.tfdel{flex:none;width:23px;border:0;border-left:1px solid #23384c;background:transparent;color:#536b82;font-size:12px;cursor:pointer;}
+.tffav.on{color:#e7bd62;}.tffav:hover{color:#ffda80;background:#182a3a;}
+.tfdel{color:#a96878;font-size:16px;}.tfdel:hover{color:#ff8ca7;background:#39202c;}
+.tfp-foot{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:11px;padding-top:10px;border-top:1px solid #24374a;color:#70869c;font:10px var(--mono);}
+.tfp-foot .btn{font-size:11px;}
+.tfp-message{min-height:15px;margin-top:6px;color:#e8a56b;font:10px var(--font);}
+.tfp-hint{margin:-3px 0 11px;color:#7f93a8;font:11px var(--font);}
+.tfp-create .tfpr{display:flex;gap:7px;margin-bottom:7px;}
+.tfp-create .tfpr input,.tfp-create .tfpr select{min-width:0;height:36px;padding:0 9px;border:1px solid #30475c;border-radius:8px;background:#101d2b;color:#e4edf4;font:12px var(--font);}
+.tfp-create .tfpr input{flex:1;}.tfp-create .tfpr select{width:118px;}
+.tfp-create .tfpm{min-height:18px;margin:5px 0 9px;color:#e6a36b;font:11px var(--font);}
+.tfp-create #tfpOk{width:100%;}
+@media(max-width:760px){.tfp{width:min(340px,calc(100vw - 16px));}.tfp-grid{grid-template-columns:repeat(3,minmax(0,1fr));}}
+
+/* Small, persistent third-party notice link for the Lightweight Charts attribution/license. */
+body.simple-ui .sidebar-footnote{display:flex;align-items:center;flex-wrap:wrap;gap:6px 8px;}
+body.simple-ui .sidebar-footnote a{display:block;width:100%;padding-left:15px;color:#6f879e;font:9px var(--mono);text-decoration:none;}
+body.simple-ui .sidebar-footnote a:hover{color:var(--cyan);text-decoration:underline;}
+@media(max-width:760px){body.simple-ui.sc .sidebar-footnote a{display:none;}}

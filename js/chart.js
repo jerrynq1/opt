@@ -3,9 +3,10 @@ let m1=[],agg=[],sb=[],loading=false,busy=false,gen=0;
 const SUB=()=>C.tf<60,baseArr=()=>SUB()?sb:m1;   // khung giây (< 60s) dựng từ sb (nến 1 giây từ tick), các khung còn lại dựng từ m1 (nến M1)
 const baseSig=()=>{const A=baseArr(),l=A[A.length-1];return l?l[5]+","+l[4]:"0,0"};
 const COL=()=>P.theme==="dark"?{up:"#3df5c0",dn:"#ff5c8a",tx:"#c4b79a",gr:"rgba(244,201,106,.08)",bd:"rgba(244,201,106,.22)"}:{up:"#08987a",dn:"#d6336c",tx:"#7a6740",gr:"rgba(176,116,26,.1)",bd:"rgba(176,116,26,.25)"};
-const chart=LightweightCharts.createChart($("chart"),{layout:{background:{color:"transparent"},textColor:"#c4b79a",fontFamily:"Space Grotesk"},rightPriceScale:{borderColor:"rgba(244,201,106,.22)"},timeScale:{timeVisible:true,secondsVisible:false},crosshair:{mode:0},autoSize:true});
-const cs=chart.addCandlestickSeries({borderVisible:false});
-const vs=chart.addHistogramSeries({priceFormat:{type:"volume"},priceScaleId:"vol"});
+const chart=LightweightCharts.createChart($("chart"),{layout:{background:{color:"transparent"},textColor:"#c4b79a",fontFamily:"Space Grotesk",attributionLogo:true},rightPriceScale:{borderColor:"rgba(244,201,106,.22)"},timeScale:{timeVisible:true,secondsVisible:false},crosshair:{mode:0},autoSize:true});
+// Lightweight Charts v5: series được tạo qua API thống nhất addSeries().
+const cs=chart.addSeries(LightweightCharts.CandlestickSeries,{borderVisible:false});
+const vs=chart.addSeries(LightweightCharts.HistogramSeries,{priceFormat:{type:"volume"},priceScaleId:"vol"});
 /* ===== Số lẻ của giá theo từng mã =====
    Trước đây series nến không đặt priceFormat nên lightweight-charts dùng mặc định 2 số lẻ (minMove 0.01): vàng (2 số lẻ) hiện đúng nhưng EURUSD/GBPUSD (5 số lẻ) bị làm tròn thành 1.34.
    Giờ: lấy số lẻ (digits) broker báo cho mã đang xem (CT.sym.digits). Nếu chưa có thì suy ra từ chính dữ liệu giá (số lẻ nhiều nhất của các nến gần nhất). */
@@ -225,9 +226,11 @@ function chartWatch(){
   if(CHW.lvl<1){CHW.lvl=1;status("Chart chậm cập nhật, đang khôi phục…","bad");rebuild(false);CT.barDirty=true}
 }
 function buildTfs(){
-  const L=allTfs();if(!L.some(t=>t[1]===C.tf)){L.push([tfName(C.tf),C.tf]);L.sort((a,b)=>a[1]-b[1])}   // khung đang chọn đã bị xoá khỏi danh sách: vẫn hiện tới khi đổi khung
-  $("tfs").innerHTML=L.map(([n,s])=>{const cu=CTF.includes(s);return`<button class="tf${s===C.tf?" on":""}${cu?" cu":""}" data-s="${s}">${n}${cu?`<i class="x" data-del="${s}" role="button" title="Xoá khung này" aria-label="Xoá khung này">×</i>`:""}</button>`}).join("")
-    +`<button type="button" class="tf" id="tfAdd" title="Khung tuỳ chọn" aria-label="Khung tuỳ chọn" aria-haspopup="dialog">+</button>`;
+  const quick=[...TFS,...TFF.filter(s=>!TFS.some(t=>t[1]===s)).slice(0,4).map(s=>[tfName(s),s])];
+  if(!quick.some(t=>t[1]===C.tf))quick.push([tfName(C.tf),C.tf]);
+  $("tfs").innerHTML=quick.map(([name,sec])=>{const custom=CTF.includes(sec);return`<button type="button" class="tf${sec===C.tf?" on":""}${custom?" cu":""}" data-s="${sec}" title="${name}">${name}${custom?`<i class="x" data-del="${sec}" role="button" title="Xoá khung này" aria-label="Xoá khung này">×</i>`:""}</button>`}).join("")
+    +`<button type="button" class="tf tf-more" id="tfMore" title="Tất cả timeframe" aria-label="Tất cả timeframe" aria-haspopup="dialog">⋯</button>`
+    +`<button type="button" class="tf tf-add" id="tfAdd" title="Tạo custom timeframe" aria-label="Tạo custom timeframe" aria-haspopup="dialog">+</button>`;
 }
 const applyTfOpts=()=>allCh().forEach(x=>x.applyOptions({timeScale:{secondsVisible:SUB()}}));
 function setTf(s){
@@ -241,41 +244,70 @@ function setTf(s){
 function tfNote(){   // Footprint / Big Trade / Statistic cần dữ liệu theo phút
   if(!SUB())return;try{if(fpOn()||btOn()||stOn()||haOn())status("Footprint / Big Trade / Statistic / Heavy Absorption cần khung từ M1 trở lên","bad")}catch{}
 }
-function delTf(s){CTF=CTF.filter(x=>x!==s);saveCtf();if(C.tf===s)setTf(900);else buildTfs()}
+function delTf(s){CTF=CTF.filter(x=>x!==s);TFF=TFF.filter(x=>x!==s);saveCtf();saveTfFavs();if(C.tf===s)setTf(900);else buildTfs()}
 $("tfs").onclick=e=>{
-  const x=e.target.closest("[data-del]");if(x){e.stopPropagation();delTf(+x.dataset.del);return}
+  const del=e.target.closest("[data-del]");if(del){e.stopPropagation();delTf(+del.dataset.del);if(tfP)tfMorePop($("tfMore"));return}
   const b=e.target.closest("button");if(!b)return;
   if(b.id==="tfAdd"){tfPop(b);return}
-  setTf(+b.dataset.s);
+  if(b.id==="tfMore"){tfMorePop(b);return}
+  if(b.dataset.s)setTf(+b.dataset.s);
 };
-/* Ô nhập khung tuỳ chọn (nổi, gắn vào body để không bị thanh khung giờ cuộn ngang cắt mất) */
+/* Bộ chọn timeframe mở rộng: nhóm theo đơn vị, tìm kiếm, favorite và xóa custom interval. */
 let tfP=null;
+function tfMorePop(btn){
+  if(tfP){tfClose();return}
+  const el=document.createElement("div");el.className="tfp tfp-more";el.setAttribute("role","dialog");el.setAttribute("aria-label","Chọn timeframe");
+  const all=allTfs(),groups=[
+    ["SECONDS · TICK",all.filter(x=>x[1]<60)],
+    ["MINUTES",all.filter(x=>x[1]>=60&&x[1]<3600)],
+    ["HOURS",all.filter(x=>x[1]>=3600&&x[1]<86400)],
+    ["DAYS",all.filter(x=>x[1]>=86400&&x[1]<604800)],
+    ["WEEKS",all.filter(x=>x[1]>=604800)]
+  ].filter(g=>g[1].length);
+  const item=([name,sec])=>`<div class="tfpi" data-tf-item data-label="${name.toLowerCase()} ${sec<60?sec+"s":sec%604800===0?sec/604800+"w":sec%86400===0?sec/86400+"d":sec%3600===0?sec/3600+"h":sec/60+"m"}"><button type="button" class="tfpick${sec===C.tf?" active":""}" data-s="${sec}">${name}${sec===C.tf?" <span>ACTIVE</span>":""}</button><button type="button" class="tffav${TFF.includes(sec)?" on":""}" data-fav="${sec}" title="${TFF.includes(sec)?"Bỏ yêu thích":"Thêm yêu thích"}" aria-label="${TFF.includes(sec)?"Bỏ yêu thích":"Thêm yêu thích"} ${name}">★</button>${CTF.includes(sec)?`<button type="button" class="tfdel" data-del="${sec}" title="Xóa custom timeframe" aria-label="Xóa ${name}">×</button>`:""}</div>`;
+  el.innerHTML=`<div class="tfp-head"><strong>Timeframe Library</strong><button type="button" class="tfp-close" aria-label="Đóng">×</button></div><input class="tfp-search" type="search" placeholder="Tìm M3, H2, 45m…" autocomplete="off"><div class="tfp-favlabel">FAVORITES · Tối đa ${TF_FAV_CAP}</div><div class="tfp-favs">${TFF.length?TFF.map(s=>item([tfName(s),s])).join(""):`<span class="tfp-muted">Chưa có favorite. Nhấn ★ để ghim timeframe.</span>`}</div><div class="tfp-groups">${groups.map(([title,items])=>`<section class="tfp-group"><h4>${title}</h4><div class="tfp-grid">${items.map(item).join("")}</div></section>`).join("")}</div><div class="tfp-foot"><span>${CTF.length}/${TF_CAP} custom</span><button type="button" class="btn sm" data-create>+ Custom timeframe</button></div><div class="tfp-message" aria-live="polite"></div>`;
+  document.body.appendChild(el);tfP=el;
+  const r=btn.getBoundingClientRect(),w=el.offsetWidth,L=Math.max(8,Math.min(r.left,innerWidth-w-8));
+  el.style.left=L+"px";el.style.top=Math.min(r.bottom+6,Math.max(8,innerHeight-el.offsetHeight-8))+"px";
+  const search=el.querySelector(".tfp-search");
+  search.addEventListener("input",()=>{const q=search.value.trim().toLowerCase();el.querySelectorAll("[data-tf-item]").forEach(x=>x.hidden=!!q&&!x.dataset.label.includes(q));el.querySelectorAll(".tfp-group").forEach(g=>g.hidden=!g.querySelector("[data-tf-item]:not([hidden])"));});
+  el.addEventListener("click",ev=>{
+    const fav=ev.target.closest("[data-fav]");
+    if(fav){const sec=+fav.dataset.fav;if(TFF.includes(sec))TFF=TFF.filter(x=>x!==sec);else if(TFF.length<TF_FAV_CAP)TFF.push(sec);else{el.querySelector(".tfp-message").textContent="Đã đạt giới hạn favorite. Hãy bỏ ghim một khung trước.";return}saveTfFavs();const q=search.value;tfClose();buildTfs();tfMorePop($("tfMore"));if(tfP){const s=tfP.querySelector(".tfp-search");s.value=q;s.dispatchEvent(new Event("input"));}return}
+    if(ev.target.closest(".tfp-close")){tfClose();return}
+    if(ev.target.closest("[data-create]")){const anchor=$("tfAdd");tfClose();tfPop(anchor);return}
+    const del=ev.target.closest("[data-del]");if(del){const q=search.value;delTf(+del.dataset.del);tfClose();tfMorePop($("tfMore"));if(tfP){const next=tfP.querySelector(".tfp-search");next.value=q;next.dispatchEvent(new Event("input"));}return}
+    const pick=ev.target.closest("[data-s]");if(pick){const sec=+pick.dataset.s;tfClose();setTf(sec)}
+  });
+  setTimeout(()=>{document.addEventListener("pointerdown",tfOut,true)},0);
+  search.focus();
+}
+/* Ô tạo custom timeframe; giữ giới hạn tick <60s và tổng hợp M1 cho khung từ 1 phút. */
 function tfPop(btn){
   if(tfP){tfClose();return}
-  const el=document.createElement("div");el.className="tfp";el.setAttribute("role","dialog");el.setAttribute("aria-label","Khung tuỳ chọn");
-  el.innerHTML=`<div class="tfpt">Khung tuỳ chọn</div><div class="tfpr"><input type="number" id="tfpN" min="1" step="1" inputmode="numeric" aria-label="Số" placeholder="vd 7"><select id="tfpU" aria-label="Đơn vị"><option value="s">Giây</option><option value="m" selected>Phút</option><option value="h">Giờ</option><option value="d">Ngày</option><option value="w">Tuần</option></select></div><div class="tfpm" id="tfpM"></div><button type="button" class="btn sm" id="tfpOk">Dùng khung này</button>`;
+  const el=document.createElement("div");el.className="tfp tfp-create";el.setAttribute("role","dialog");el.setAttribute("aria-label","Khung tuỳ chọn");
+  el.innerHTML=`<div class="tfp-head"><strong>Custom timeframe</strong><button type="button" class="tfp-close" aria-label="Đóng">×</button></div><div class="tfp-hint">Tạo khung riêng từ tick hoặc nến M1</div><div class="tfpr"><input type="number" id="tfpN" min="1" step="1" inputmode="numeric" aria-label="Số" placeholder="Ví dụ 7"><select id="tfpU" aria-label="Đơn vị"><option value="s">Giây</option><option value="m" selected>Phút</option><option value="h">Giờ</option><option value="d">Ngày</option><option value="w">Tuần</option></select></div><div class="tfpm" id="tfpM" aria-live="polite"></div><button type="button" class="btn sm" id="tfpOk">Dùng timeframe này</button>`;
   document.body.appendChild(el);tfP=el;
   const r=btn.getBoundingClientRect(),w=el.offsetWidth,L=Math.max(8,Math.min(r.left,innerWidth-w-8));
   el.style.left=L+"px";el.style.top=Math.min(r.bottom+6,Math.max(8,innerHeight-el.offsetHeight-8))+"px";
   const n=el.querySelector("#tfpN"),u=el.querySelector("#tfpU"),m=el.querySelector("#tfpM");
   const go=()=>{
-    const v=Math.round(+n.value),s=v*TF_UNIT[u.value];
+    const v=Math.round(+n.value),sec=v*TF_UNIT[u.value];
     if(!(v>=1)){m.textContent="Nhập số từ 1 trở lên";return}
-    if(u.value==="s"&&v>59){m.textContent="Giây chỉ nhận 1–59 (từ 60 giây hãy chọn Phút)";return}
-    if(s>TF_MAX){m.textContent="Tối đa 4 tuần";return}
-    if(!okTf(s)){m.textContent="Khung không hợp lệ";return}
-    if(!TFS.some(t=>t[1]===s)&&!CTF.includes(s)){
-      if(CTF.length>=TF_CAP){m.textContent="Tối đa "+TF_CAP+" khung tuỳ chọn, hãy xoá bớt (dấu × trên nút khung)";return}
-      CTF.push(s);CTF.sort((a,b)=>a-b);saveCtf();
+    if(u.value==="s"&&v>59){m.textContent="Khung giây tối đa 59s; từ 1 phút hãy chọn đơn vị Phút";return}
+    if(sec>TF_MAX){m.textContent="Tối đa 4 tuần";return}
+    if(!okTf(sec)){m.textContent="Khung không hợp lệ";return}
+    if(!isPresetTf(sec)&&!CTF.includes(sec)){
+      if(CTF.length>=TF_CAP){m.textContent="Đã đạt giới hạn "+TF_CAP+" custom timeframe. Hãy xóa bớt trong Timeframe Library.";return}
+      CTF.push(sec);CTF.sort((a,b)=>a-b);saveCtf();
     }
-    tfClose();setTf(s);
+    tfClose();setTf(sec);
   };
-  el.querySelector("#tfpOk").onclick=go;
-  el.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();go()}else if(e.key==="Escape"){tfClose();btn.focus()}});
-  setTimeout(()=>{document.addEventListener("pointerdown",tfOut,true)},0);
-  n.focus();
+  el.querySelector("#tfpOk").onclick=go;el.querySelector(".tfp-close").onclick=tfClose;
+  el.addEventListener("keydown",ev=>{if(ev.key==="Enter"){ev.preventDefault();go()}else if(ev.key==="Escape"){tfClose();btn.focus()}});
+  setTimeout(()=>{document.addEventListener("pointerdown",tfOut,true)},0);n.focus();
 }
-const tfOut=e=>{if(tfP&&!tfP.contains(e.target)&&!e.target.closest("#tfAdd"))tfClose()};
+const tfOut=e=>{if(tfP&&!tfP.contains(e.target)&&!e.target.closest("#tfAdd,#tfMore"))tfClose()};
 function tfClose(){if(tfP){tfP.remove();tfP=null}document.removeEventListener("pointerdown",tfOut,true)}
 $("sym").value=C.sym;
 /* đổi mã: xem symbols.js (ô chọn mã tuỳ biến) */

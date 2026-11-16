@@ -1,7 +1,7 @@
 /* ICT QuantLab offline shell. Bump CACHE_VERSION whenever the app shell changes. */
-const CACHE_VERSION = "ict-quantlab-shell-v57";
+const CACHE_VERSION = "ict-quantlab-shell-v59";
 const SHELL = [
-  "./", "./index.html", "./manifest.webmanifest",
+  "./", "./index.html", "./manifest.webmanifest", "./THIRD_PARTY_NOTICES_LIGHTWEIGHT_CHARTS.txt",
   "./img/logo.png", "./img/pwa-192.png", "./img/pwa-512.png",
   "./img/pwa-maskable-512.png", "./img/apple-touch-icon.png",
   "./css/style.css", "./css/options.css", "./css/stock-options.css",
@@ -20,6 +20,7 @@ const SHELL = [
   "./js/drawings-interact.js", "./js/mobile.js", "./js/tpo-advanced.js", "./js/pwa.js"
 , "./indicators/atas-session-runtime.js"];
 const STATIC_PATH = /\/(?:css|js|img|indicators)\/[^?#]+$/;
+const NOTICE_PATH = "/THIRD_PARTY_NOTICES_LIGHTWEIGHT_CHARTS.txt";
 const EXTERNAL_STATIC = /^(?:https:\/\/cdn\.jsdelivr\.net\/|https:\/\/fonts\.googleapis\.com\/|https:\/\/fonts\.gstatic\.com\/)/;
 
 self.addEventListener("install", event => {
@@ -82,7 +83,7 @@ self.addEventListener("fetch", event => {
     return;
   }
 
-  if (STATIC_PATH.test(url.pathname) || url.pathname.endsWith("/manifest.webmanifest")) {
+  if (STATIC_PATH.test(url.pathname) || url.pathname.endsWith("/manifest.webmanifest") || url.pathname.endsWith(NOTICE_PATH)) {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_VERSION);
       const cached = await cache.match(request, {ignoreSearch: true});

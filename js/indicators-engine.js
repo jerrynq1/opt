@@ -122,7 +122,7 @@ function mkPane(a){
   el.innerHTML='<div class="rs" title="Kéo để đổi chiều cao" role="separator" aria-orientation="horizontal"></div><div class="pc"></div><div class="pl"></div>';
   $("panes").append(el);
   const c=COL(),g=eff().grid?c.gr:"rgba(0,0,0,0)",box=el.querySelector(".pc");
-  const ch=LightweightCharts.createChart(box,{layout:{background:{color:"transparent"},textColor:c.tx,fontFamily:"Space Grotesk"},
+  const ch=LightweightCharts.createChart(box,{layout:{background:{color:"transparent"},textColor:c.tx,fontFamily:"Space Grotesk",attributionLogo:false},
     rightPriceScale:{borderColor:c.bd,scaleMargins:{top:.14,bottom:.14}},
     timeScale:{timeVisible:true,secondsVisible:SUB(),borderColor:c.bd,tickMarkFormatter:t=>tickFmt(t)},
     localization:{timeFormatter:t=>crossFmt(t)},grid:{vertLines:{color:g},horzLines:{color:g}},crosshair:{mode:0},autoSize:true});
@@ -168,10 +168,10 @@ function mkSer(ch,a,s,pf,E){
     if(s.g){const c=cres(a,s.ci,E);o.gy1=s.g.y1;o.gy2=s.g.y2;o.gc1=hexA(c,s.g.a1);o.gc2=hexA(c,s.g.a2)}
     return ch.addCustomSeries(new FillView(),o)}
   if(pf)base.priceFormat=pf;
-  if(s.k==="h")return ch.addHistogramSeries(base);
-  if(s.k==="c")return ch.addCandlestickSeries({...base,borderVisible:true,wickVisible:true});
+  if(s.k==="h")return ch.addSeries(LightweightCharts.HistogramSeries,base);
+  if(s.k==="c")return ch.addSeries(LightweightCharts.CandlestickSeries,{...base,borderVisible:true,wickVisible:true});
   if(s.ps)base.priceScaleId=s.ps;                    // thang giá riêng (overlay, ẩn): đường không kéo giãn thang giá của nến
-  const ln=ch.addLineSeries({...base,color:s.ci!=null?cres(a,s.ci,E):"#ffffff",lineWidth:s.lw||a.w||2,lineStyle:s.ls||0,crosshairMarkerVisible:false});
+  const ln=ch.addSeries(LightweightCharts.LineSeries,{...base,color:s.ci!=null?cres(a,s.ci,E):"#ffffff",lineWidth:s.lw||a.w||2,lineStyle:s.ls||0,crosshairMarkerVisible:false});
   if(s.ps){try{ch.priceScale(s.ps).applyOptions({visible:false,scaleMargins:s.pm||{top:.7,bottom:.03}})}catch{}}
   return ln}
 function applyColor(a,j){                           // đổi 1 ô màu: cập nhật thẳng vào series, không dựng lại
@@ -180,6 +180,14 @@ function applyColor(a,j){                           // đổi 1 ô màu: cập n
     try{if(m.k==="l")ss[x].applyOptions({color:c});
       else if(m.k==="f"&&m.g)ss[x].applyOptions({gc1:hexA(c,m.g.a1),gc2:hexA(c,m.g.a2)});
       else if(m.k==="f"&&!m.pc)ss[x].applyOptions({color:hexA(c,m.al==null?.1:m.al)})}catch{}})}
+// Lightweight Charts v5 tách markers thành primitive; lưu API theo series để cập nhật ổn định.
+const seriesMarkerApis=new WeakMap();
+function syncSeriesMarkers(series,markers){
+  const list=Array.isArray(markers)?[...markers].sort((a,b)=>a.time-b.time):[];
+  let api=seriesMarkerApis.get(series);
+  if(!api){if(!list.length)return;if(typeof LightweightCharts.createSeriesMarkers!=="function")throw new Error("Lightweight Charts v5 marker API không khả dụng");api=LightweightCharts.createSeriesMarkers(series,list);seriesMarkerApis.set(series,api);return}
+  api.setMarkers(list);
+}
 let riq=0;const rIndSoon=()=>{if(!riq)riq=requestAnimationFrame(()=>{riq=0;renderInd()})};
 window.atasDepthIndicatorsRefresh=()=>{try{rIndSoon()}catch{}};
 function renderInd(){
@@ -196,7 +204,7 @@ function renderInd(){
     if(!R[i])return;const def=IND[a.key],pn=def.t==="osc"?PN[a.id]:null,ch=pn?pn.ch:chart,rs=R[i],ss=new Array(rs.length).fill(null),pf=pfOf(def,rs)||(ch===chart&&def.t==="ov"?priceFmt():null);   // chỉ báo chồng lên giá: cùng số lẻ với mã
     const go=(s,j)=>{try{
       const ser=mkSer(ch,a,s,pf,E);ser.setData(s.data);
-      if(s.mk&&s.mk.length)ser.setMarkers([...s.mk].sort((x,y)=>x.time-y.time));
+      syncSeriesMarkers(ser,s.mk||[]);
       ss[j]=ser}catch(e){console.warn("indicator",a.key,e)}};
     rs.forEach((s,j)=>{if(s.k==="f")go(s,j)});      // vùng tô dựng trước để nằm dưới các đường
     rs.forEach((s,j)=>{if(s.k!=="f")go(s,j)});
@@ -216,7 +224,7 @@ function liveInd(){
   ACT.forEach((a,i)=>{const ss=SER[a.id];if(!R[i]||!ss||R[i].length!==ss.length)return;
     R[i].forEach((s,j)=>{const ser=ss[j];if(!ser)return;
       try{if(s.sp)ser.setData(s.data);else{const q=s.data[s.data.length-1];if(q)ser.update(q)}
-        if(s.mk)ser.setMarkers([...s.mk].sort((x,y)=>x.time-y.time))}catch{}});
+        syncSeriesMarkers(ser,s.mk||[])}catch{}});
     RAW[a.id]=R[i].map(s=>s.raw);LV[a.id]=R[i].map(s=>s.lg?lastV(s.raw):null);
     const pn=PN[a.id];if(pn)pn.raw=RAW[a.id];
   });

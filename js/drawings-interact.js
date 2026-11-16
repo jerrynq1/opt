@@ -5,7 +5,7 @@ function render(){const r=$("chart").getBoundingClientRect(),dp=devicePixelRatio
 /* ---- chạm trúng ---- */
 const dseg=(x,y,a,b)=>{const dx=b[0]-a[0],dy=b[1]-a[1],L=dx*dx+dy*dy;let t=L?((x-a[0])*dx+(y-a[1])*dy)/L:0;t=Math.max(0,Math.min(1,t));return Math.hypot(x-a[0]-t*dx,y-a[1]-t*dy)};
 function hit(d,x,y,soft){const P=geo(d);if(!P)return false;const[a,b]=P,inB=(p,q,m)=>x>=Math.min(p[0],q[0])-m&&x<=Math.max(p[0],q[0])+m&&y>=Math.min(p[1],q[1])-m&&y<=Math.max(p[1],q[1])+m;
-  if(d.k==="hline")return Math.abs(y-a[1])<7*tl;if(d.k==="vline")return Math.abs(x-a[0])<7*tl;if(d.k==="chan"){const dy=cdy(d,a);return dseg(x,y,a,b)<7*tl||dseg(x,y,[a[0],a[1]+dy],[b[0],b[1]+dy])<7*tl}if(d.k==="trend")return dseg(x,y,a,b)<7*tl;if(d.k==="rect"){const x0=Math.min(a[0],b[0]),x1=Math.max(a[0],b[0]),y0=Math.min(a[1],b[1]),y1=Math.max(a[1],b[1]),m=7*tl;if(x<x0-m||x>x1+m||y<y0-m||y>y1+m)return false;return d.bg===false?(Math.min(Math.abs(x-x0),Math.abs(x-x1))<m||Math.min(Math.abs(y-y0),Math.abs(y-y1))<m):true}
+  if(d.k==="hline")return Math.abs(y-a[1])<7*tl;if(d.k==="vline")return Math.abs(x-a[0])<7*tl;if(d.k==="chan"){const dy=cdy(d,a);return dseg(x,y,a,b)<7*tl||dseg(x,y,[a[0],a[1]+dy],[b[0],b[1]+dy])<7*tl}if(d.k==="trend"){const ex=d.ex===true?"r":d.ex||"n",lo=a[0]<=b[0]?a:b,hi=lo===a?b:a;let L=lo,R=hi;const dx=hi[0]-lo[0],W=plot()[0];if(dx){const m=(hi[1]-lo[1])/dx,yy=xx=>lo[1]+m*(xx-lo[0]);if(ex==="l"||ex==="b")L=[0,yy(0)];if(ex==="r"||ex==="b")R=[W,yy(W)]}return dseg(x,y,L,R)<7*tl;}if(d.k==="rect"){const x0=Math.min(a[0],b[0]),x1=Math.max(a[0],b[0]),y0=Math.min(a[1],b[1]),y1=Math.max(a[1],b[1]),m=7*tl;if(x<x0-m||x>x1+m||y<y0-m||y>y1+m)return false;return d.bg===false?(Math.min(Math.abs(x-x0),Math.abs(x-x1))<m||Math.min(Math.abs(y-y0),Math.abs(y-y1))<m):true}
   if(d.k==="fib"){const fl=(d.fl||FIBD).filter(q=>q[0]),r=d.rv,pA=d.pts[r?0:1].p,pB=d.pts[r?1:0].p,ex=d.ex===true?"r":d.ex||"n";let x0=Math.min(a[0],b[0]),x1=Math.max(a[0],b[0]);if(ex==="l"||ex==="b")x0=-1e5;if(ex==="r"||ex==="b")x1=1e5;
     return x>=x0-6&&x<=x1+6&&(fl.some(q=>Math.abs(cs.priceToCoordinate(pA+(pB-pA)*q[1])-y)<6*tl)||dseg(x,y,a,b)<6*tl)}
   if(d.k==="ell"){const rx=Math.abs(b[0]-a[0])/2||1,ry=Math.abs(b[1]-a[1])/2||1;const v=Math.hypot((x-(a[0]+b[0])/2)/rx,(y-(a[1]+b[1])/2)/ry);return d.bg===false?Math.abs(v-1)*Math.min(rx,ry)<7*tl:v<=1.1}
@@ -31,7 +31,7 @@ function tpStart(e,x,y){
     try{navigator.vibrate&&navigator.vibrate(18)}catch(_){}
     dirty=true},LPMS);
 }
-const TOFF=46,TWO=["trend","ray","ruler","chan","fib","rect","ell","vp"];const placing=()=>TWO.includes(tool)||(drag&&drag.m==="new");
+const TOFF=52,TWO=["trend","ray","ext","hray","ruler","chan","fib","fibext","rect","ell","vp"];const placing=()=>TWO.includes(tool)||(drag&&drag.m==="new");
 const rel=e=>{const r=cv.getBoundingClientRect();let y=e.clientY-r.top;if(e.pointerType==="touch"&&placing())y=Math.max(0,y-TOFF);return[e.clientX-r.left,y]};
 const done=()=>{if(dwCur&&dwCur.k==="chan"&&dwCur.off==null){const y0=cs.priceToCoordinate(dwCur.pts[0].p);dwCur.off=cs.coordinateToPrice(y0-60)-dwCur.pts[0].p}if(dwCur&&dwCur.pts[0].t===dwCur.pts[1].t&&dwCur.pts[0].p===dwCur.pts[1].p)D=D.filter(z=>z!==dwCur);else sel=dwCur;dwCur=null;if(!keep)tool="cur";save();ui();dirty=true};
 function openEdit(d){const q=d._b;if(!q)return;edit=d;const i=document.createElement("input");i.id="dwi";i.value=d.x||"";i.placeholder="Nhập nội dung…";const fz=d.fs||14;i.style.fontSize=fz+"px";const fit=()=>{i.style.width=Math.max(i.value?24:100,i.value.length*fz*.62+12)+"px"};i.oninput=fit;fit();i.style.left=Math.max(4,q[0])+"px";i.style.top=Math.max(4,q[1]-4)+"px";
@@ -40,7 +40,7 @@ function openEdit(d){const q=d._b;if(!q)return;edit=d;const i=document.createEle
 /* ---- NHỚ STYLE theo từng công cụ: chỉnh màu/nét/cỡ chữ... xong thì hình vẽ MỚI cùng loại dùng lại style đó (kể cả sau khi xóa hình cũ hoặc tải lại trang) ---- */
 const SDK="tp_dw_style",SDX=["id","k","tk","pts","x","lk","off","qt","vis"],clone=o=>JSON.parse(JSON.stringify(o)),tkOf=d=>d.tk||d.k;
 let SD={};try{SD=JSON.parse(localStorage.getItem(SDK))||{}}catch(e){SD={}}
-const TDEF={ray:{ex:"r"},ruler:{st:"v",as:true,c:"#8b7cff",ls:"d"}};
+const TDEF={ray:{ex:"r"},ext:{ex:"b"},hray:{ex:"r"},fibext:{fl:[[1,1,"#98a2d8"],[1,1.272,"#ffb02e"],[1,1.618,"#35b6ff"],[1,2,"#8b7cff"],[1,2.618,"#f23645"],[1,3.618,"#9c27b0"],[1,4.236,"#e91e63"]]},ruler:{st:"v",as:true,c:"#8b7cff",ls:"d"}};
 function remStyle(d){if(!d||!d.k||(!d.tk&&d.k==="trend"))return;const s={};Object.keys(d).forEach(q=>{if(q[0]!=="_"&&!SDX.includes(q))s[q]=d[q]});SD[tkOf(d)]=clone(s);try{localStorage.setItem(SDK,JSON.stringify(SD))}catch(e){}}
 const mk=(k,p,tk)=>{tk=tk||k;const d={id:Date.now()+""+Math.random().toString(36).slice(2,6),k,tk,pts:[p,{...p}]};Object.assign(d,clone(TDEF[tk]||{}),clone(SD[tk]||{}));return d};
 $("chart").addEventListener("pointerdown",e=>{tl=e.pointerType==="touch"?2.4:1;tch=tl>1;if(e.isPrimary)claim=false;kc=e.ctrlKey||e.metaKey;ks=e.shiftKey;if(hid||e.button||edit||(e.target&&e.target.id==="dwi"))return;if(e.pointerType==="touch"&&!e.isPrimary&&tool==="cur"){cancelTp();return}const[x,y]=rel(e),[w,h]=plot();if(x>w||y>h||e.clientY-cv.getBoundingClientRect().top>h)return;
@@ -49,16 +49,16 @@ $("chart").addEventListener("pointerdown",e=>{tl=e.pointerType==="touch"?2.4:1;t
     if(tool==="long"||tool==="short"){const L=tool==="long",l1=ts.coordinateToLogical(x+170),d=mk(tool,p),t1=l2s(l1==null?s2l(p.t)+10:l1);
       d.pts=[p,{t:t1,p:cs.coordinateToPrice(y+(L?-120:120))},{t:t1,p:cs.coordinateToPrice(y+(L?60:-60))}];D.push(d);dwCur=d;done();return}
     if(tool==="hline"||tool==="vline"){const d=mk(tool,p);d.pts=[p];D.push(d);sel=d;if(!keep)tool="cur";save();ui();dirty=true;return}if(tool==="text"||tool==="note"){const d=mk(tool,p);d.pts=[p];D.push(d);sel=d;tool="cur";ui();render();if(e.pointerType==="touch")pendEdit=d;else openEdit(d);return}
-    if(!dwCur){dwCur=mk(tool==="ray"||tool==="ruler"?"trend":tool,p,tool);D.push(dwCur);drag={m:"new",x,y}}else{dwCur.pts[1]=cp(x,y,dwCur,1)||p;done()}dirty=true;return}
+    if(!dwCur){dwCur=mk(["ray","ext","hray","ruler"].includes(tool)?"trend":tool==="fibext"?"fib":tool,p,tool);D.push(dwCur);drag={m:"new",x,y}}else{dwCur.pts[1]=cp(x,y,dwCur,1)||p;done()}dirty=true;return}
   if(sel&&!sel.lk){const h=hnd(sel).find(q=>Math.hypot(q[0]-x,q[1]-y)<9*tl);if(h){stop();
     if((sel.k==="long"||sel.k==="short")&&h[2]===0)drag={m:"body",o:sel.pts.map(q=>({...q})),l0:ts.coordinateToLogical(x),p0:cs.coordinateToPrice(y),px:x,py:y};else drag={m:"h",i:h[2],gx:e.pointerType==="touch"?h[0]-x:0,gy:e.pointerType==="touch"?h[1]-y:0};return}}
   if(e.pointerType==="touch"){tpStart(e,x,y);return}   // cảm ứng: chưa chọn gì, đợi xem là chạm nhẹ hay kéo/zoom
   for(let i=pickIdx(x,y);i>=0;i=-1){if(D[i].lk){sel=D[i];ui();dirty=true;return}stop();sel=D[i];drag={m:"body",o:sel.pts.map(q=>({...q})),l0:ts.coordinateToLogical(x),p0:cs.coordinateToPrice(y),px:x,py:y};ui();dirty=true;return}
   if(sel){sel=null;ui();dirty=true}},true);
 window.addEventListener("pointermove",e=>{const[x,y]=rel(e);if(tp&&e.pointerId===tp.id&&!tp.lp&&Math.hypot(x-tp.x,y-tp.y)>TAPMV)cancelTp();tch=e.pointerType==="touch";kc=e.ctrlKey||e.metaKey;ks=e.shiftKey;lx=x;ly=y;upd();
-  if(dwCur&&tool==="cur"===false&&dwCur.pts){const p=cp(x,y,dwCur,1);if(p){dwCur.pts[1]=p;dirty=true}}
+  if(dwCur&&tool==="cur"===false&&dwCur.pts){const p=cp(x,y,dwCur,1);if(p){if(dwCur.tk==="hray")p.p=dwCur.pts[0].p;dwCur.pts[1]=p;dirty=true}}
   if(!drag)return;
-  if(drag.m==="new"){const p=cp(x,y,dwCur,1);if(p){dwCur.pts[1]=p;dirty=true}}
+  if(drag.m==="new"){const p=cp(x,y,dwCur,1);if(p){if(dwCur.tk==="hray")p.p=dwCur.pts[0].p;dwCur.pts[1]=p;dirty=true}}
   else if(drag.m==="body"){const l=ts.coordinateToLogical(x),p=cs.coordinateToPrice(y);if(l==null||p==null)return;let dl=l-drag.l0,dp=p-drag.p0;if(ks){if(Math.abs(x-drag.px)>=Math.abs(y-drag.py))dp=0;else dl=0}sel.pts=drag.o.map(q=>({t:l2s(s2l(q.t)+dl),p:q.p+dp}));dirty=true}
   else if(drag.m==="h"){const gy=drag.gy||0,s=sel,p=cp(x+(drag.gx||0),y+gy,s,drag.i);if(!p)return;
     if(s.k==="long"||s.k==="short"){if(drag.i===1){s.pts[1]=p;s.pts[2].t=p.t}else if(drag.i===2){s.pts[2].p=p.p;s.pts[2].t=p.t;s.pts[1].t=p.t}else{s.pts[1].t=s.pts[2].t=p.t}}else if((s.k==="rect"||s.k==="ell")&&drag.i>1)rdrag(s,drag,p);else if(s.k==="chan"&&drag.i===2)s.off=cs.coordinateToPrice(y+gy)-(s.pts[0].p+s.pts[1].p)/2;else s.pts[drag.i]=p;dirty=true}});
@@ -151,7 +151,7 @@ function openDlg(d){
     return R(k==="note"?"Màu nền":"Màu chữ",CB("c",col(d)))+(k==="note"?R("Màu chữ",CB("tc","#2a2000")):"")+R("Cỡ chữ",SE("fs",FS([12,14,18,24,32]),14))+CX("b","Đậm")+CX("i","Nghiêng")+TXT};
   const o=document.createElement("div");o.className="mdl";o.tabIndex=-1;o.setAttribute("role","dialog");o.setAttribute("aria-modal","true");
   const ren=()=>{const y=(o.querySelector(".bd")||{}).scrollTop||0;
-    o.innerHTML=`<div class="box" style="max-width:${k==="fib"?"520px":"460px"}"><header><h3>${TN[k]}</h3><button class="ib" type="button" data-x="c" aria-label="Đóng" style="width:36px;height:36px">✕</button></header><div class="tabs">${TB.map(([t,n])=>`<button type="button" data-tab="${t}" class="${t===tab?"on":""}">${n}</button>`).join("")}</div><div class="bd">${body()}</div><footer><span style="flex:1"></span><button class="btn ghost sm" type="button" data-x="c">Hủy</button><button class="btn sm" type="button" data-x="o">OK</button></footer></div>`;o.querySelector(".bd").scrollTop=y};
+    o.innerHTML=`<div class="box" style="max-width:${k==="fib"?"520px":"460px"}"><header><h3>${d.tk==="ext"?"Đường xu hướng mở rộng":d.tk==="hray"?"Tia ngang":d.tk==="fibext"?"Fibonacci Extension":TN[k]}</h3><button class="ib" type="button" data-x="c" aria-label="Đóng" style="width:36px;height:36px">✕</button></header><div class="tabs">${TB.map(([t,n])=>`<button type="button" data-tab="${t}" class="${t===tab?"on":""}">${n}</button>`).join("")}</div><div class="bd">${body()}</div><footer><span style="flex:1"></span><button class="btn ghost sm" type="button" data-x="c">Hủy</button><button class="btn sm" type="button" data-x="o">OK</button></footer></div>`;o.querySelector(".bd").scrollTop=y};
   const close=ok=>{closePal();if(!ok){const i=D.indexOf(d);if(i>=0){D[i]=JSON.parse(bak);sel=D[i]}}else remStyle(d);o.remove();save();ui();dirty=true};
   o.onclick=e=>{const t=e.target.closest("[data-tab],[data-x],[data-fc]");if(!t)return;
     if(t.dataset.tab){tab=t.dataset.tab;closePal();ren()}else if(t.dataset.x)close(t.dataset.x==="o");
