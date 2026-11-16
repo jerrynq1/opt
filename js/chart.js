@@ -1,11 +1,11 @@
 /* ================= CHART ================= */
-let m1=[],agg=[],sb=[],loading=false,busy=false,gen=0;
+let m1=[],agg=[],rawAgg=[],sb=[],loading=false,busy=false,gen=0;
 const SUB=()=>C.tf<60,baseArr=()=>SUB()?sb:m1;   // khung giây (< 60s) dựng từ sb (nến 1 giây từ tick), các khung còn lại dựng từ m1 (nến M1)
 const baseSig=()=>{const A=baseArr(),l=A[A.length-1];return l?l[5]+","+l[4]:"0,0"};
 const COL=()=>P.theme==="dark"?{up:"#3df5c0",dn:"#ff5c8a",tx:"#c4b79a",gr:"rgba(244,201,106,.08)",bd:"rgba(244,201,106,.22)"}:{up:"#08987a",dn:"#d6336c",tx:"#7a6740",gr:"rgba(176,116,26,.1)",bd:"rgba(176,116,26,.25)"};
 const chart=LightweightCharts.createChart($("chart"),{layout:{background:{color:"transparent"},textColor:"#c4b79a",fontFamily:"Space Grotesk",attributionLogo:true},rightPriceScale:{borderColor:"rgba(244,201,106,.22)"},timeScale:{timeVisible:true,secondsVisible:false},crosshair:{mode:0},autoSize:true});
 // Lightweight Charts v5: series được tạo qua API thống nhất addSeries().
-const cs=chart.addSeries(LightweightCharts.CandlestickSeries,{borderVisible:false});
+let cs=chart.addSeries(LightweightCharts.CandlestickSeries,{borderVisible:false});
 const vs=chart.addSeries(LightweightCharts.HistogramSeries,{priceFormat:{type:"volume"},priceScaleId:"vol"});
 /* ===== Số lẻ của giá theo từng mã =====
    Trước đây series nến không đặt priceFormat nên lightweight-charts dùng mặc định 2 số lẻ (minMove 0.01): vàng (2 số lẻ) hiện đúng nhưng EURUSD/GBPUSD (5 số lẻ) bị làm tròn thành 1.34.
@@ -34,7 +34,7 @@ function applyPrec(){                              // đặt lại định dạn
 chart.priceScale("vol").applyOptions({scaleMargins:{top:.85,bottom:0}});
 const PN={};                                   // id chỉ báo -> {el,ch,lg,series,raw}: mỗi chỉ báo dao động có 1 chart riêng bên dưới
 const allCh=()=>[chart,...Object.values(PN).map(p=>p.ch)];
-chart.subscribeCrosshairMove(p=>{const d=p.seriesData&&p.seriesData.get(cs);{const f=v=>(+v).toFixed(PDIG());$("ohlc").textContent=d?`O ${f(d.open)}   H ${f(d.high)}   L ${f(d.low)}   C ${f(d.close)}`:""}});
+chart.subscribeCrosshairMove(p=>{const d=p.seriesData&&p.seriesData.get(cs);const f=v=>(+v).toFixed(PDIG());if(!d){$("ohlc").textContent="";return}if(d.open!=null&&d.close!=null){$("ohlc").textContent=`O ${f(d.open)}   H ${f(d.high)}   L ${f(d.low)}   C ${f(d.close)}`}else if(d.value!=null){$("ohlc").textContent=`${QLChartTypes.byId[CHART_TYPE]?.label||"Value"}  ${f(d.value)}`}else $("ohlc").textContent=""});
 function themeChart(){
   const c=COL();
   allCh().forEach(x=>x.applyOptions({layout:{textColor:c.tx},rightPriceScale:{borderColor:c.bd},timeScale:{borderColor:c.bd}}));
@@ -142,6 +142,117 @@ chart.timeScale().subscribeVisibleLogicalRangeChange(r=>{
   clearTimeout(fpKick);fpKick=setTimeout(()=>{if(window.fpSync)fpSync()},400);   // footprint tick cũng tải thêm theo vùng đang xem
 });
 const bucket=(t,tf)=>tf>=604800&&tf%604800===0?Math.floor((t-345600)/tf)*tf+345600:Math.floor(t/tf)*tf;
+const CHART_TYPE_KEY="tp_chart_type",CHART_TYPE_SETTINGS_KEY="tp_chart_type_settings";
+const CHART_TYPE_DEFAULTS={rangeSize:40,rangeUnit:"ticks",renkoSize:10,renkoUnit:"ticks",tickSize:250,volumeSize:500,lineBreakCount:3,kagiReversal:40,kagiUnit:"ticks",pnfBoxSize:10,pnfUnit:"ticks",pnfReversal:3};
+let CHART_TYPE=ld(CHART_TYPE_KEY,"candles"),CHART_TYPE_SETTINGS={...CHART_TYPE_DEFAULTS};
+try{CHART_TYPE_SETTINGS={...CHART_TYPE_SETTINGS,...JSON.parse(ld(CHART_TYPE_SETTINGS_KEY,"{}"))}}catch{}
+if(!QLChartTypes.byId[CHART_TYPE])CHART_TYPE="candles";
+window.QL_CHART_TYPE=CHART_TYPE;
+const typeTickSize=()=>{
+  const s=typeof CT!=="undefined"&&CT.sym?CT.sym:{};
+  const t=+(s.tickSize||s.minPriceIncrement||s.tick_size);
+  return t>0&&isFinite(t)?t:Math.pow(10,-PDIG());
+};
+const typeSize=(value,unit)=>Math.max(1e-12,(+value||1)*(unit==="ticks"?typeTickSize():1));
+function chartTypeOptions(){return{
+  rangeSize:typeSize(CHART_TYPE_SETTINGS.rangeSize,CHART_TYPE_SETTINGS.rangeUnit),
+  renkoSize:typeSize(CHART_TYPE_SETTINGS.renkoSize,CHART_TYPE_SETTINGS.renkoUnit),
+  tickSize:CHART_TYPE_SETTINGS.tickSize,volumeSize:CHART_TYPE_SETTINGS.volumeSize,
+  lineBreakCount:CHART_TYPE_SETTINGS.lineBreakCount,
+  kagiReversal:typeSize(CHART_TYPE_SETTINGS.kagiReversal,CHART_TYPE_SETTINGS.kagiUnit),
+  pnfBoxSize:typeSize(CHART_TYPE_SETTINGS.pnfBoxSize,CHART_TYPE_SETTINGS.pnfUnit),pnfReversal:CHART_TYPE_SETTINGS.pnfReversal
+}}
+function chartTypeColors(){const e=typeof eff==="function"?eff():COL();return{up:e.up||COL().up,down:e.dn||COL().dn};}
+function chartSeriesKind(type){
+  if(type==="ohlc"||type==="tick"||type==="volume")return LightweightCharts.BarSeries;
+  if(type==="line"||type==="step"||type==="trend"||type==="kagi")return LightweightCharts.LineSeries;
+  if(type==="area")return LightweightCharts.AreaSeries;
+  if(type==="baseline")return LightweightCharts.BaselineSeries;
+  return LightweightCharts.CandlestickSeries;
+}
+function chartSeriesOptions(type){
+  const c=chartTypeColors(),up=c.up,down=c.down,gold="#d8b66a";
+  const common={priceScaleId:"right",lastValueVisible:true,priceLineVisible:true};
+  if(type==="ohlc"||type==="tick"||type==="volume")return{...common,upColor:up,downColor:down,openVisible:true,thinBars:false};
+  if(type==="line")return{...common,color:gold,lineWidth:2,crosshairMarkerVisible:false};
+  if(type==="area")return{...common,lineColor:gold,lineWidth:2,topColor:"rgba(216,182,106,.24)",bottomColor:"rgba(216,182,106,.015)"};
+  if(type==="baseline")return{...common,baseValue:{type:"price",price:rawAgg[0]?.open||0},topLineColor:up,bottomLineColor:down,topFillColor:"rgba(61,245,192,.18)",bottomFillColor:"rgba(255,92,138,.16)",topLineWidth:2,bottomLineWidth:2};
+  if(type==="step")return{...common,color:gold,lineWidth:2,lineType:LightweightCharts.LineType.WithSteps,crosshairMarkerVisible:false};
+  if(type==="kagi")return{...common,color:gold,lineWidth:2,lineType:LightweightCharts.LineType.WithSteps,crosshairMarkerVisible:false};
+  if(type==="trend")return{...common,color:gold,lineWidth:2,crosshairMarkerVisible:false};
+  if(type==="hollow")return{...common,upColor:"rgba(0,0,0,0)",downColor:down,borderVisible:true,borderUpColor:up,borderDownColor:down,wickUpColor:up,wickDownColor:down};
+  return{...common,upColor:up,downColor:down,borderVisible:true,borderUpColor:up,borderDownColor:down,wickUpColor:up,wickDownColor:down};
+}
+function seriesDataForLast(b){return QLChartTypes.dataForSeries([b],CHART_TYPE,chartTypeColors())[0]}
+function renderCurrentChartData(fit=false,full=true){
+  const source=rawAgg;
+  const transformed=QLChartTypes.transform(source,CHART_TYPE,chartTypeOptions());
+  agg=[];let lastT=-Infinity;
+  for(const b of transformed){
+    const st=Number.isFinite(+b.st)?+b.st:+b.time,whole=Math.floor(st),fraction=st-whole,t=disp(whole)+fraction;
+    if(!Number.isFinite(t)||t<=lastT)continue;
+    agg.push({...b,st,time:t});lastT=t;
+  }
+  const data=QLChartTypes.dataForSeries(agg,CHART_TYPE,chartTypeColors());
+  if(CHART_TYPE==="baseline"&&rawAgg.length){try{cs.applyOptions({baseValue:{type:"price",price:rawAgg[0].open}})}catch{}}
+  try{
+    if(full)cs.setData(data);
+    else if(data.length)cs.update(data[data.length-1]);
+    vs.setData(QLChartTypes.dataForVolume(agg,chartTypeColors()));
+  }catch(e){chErr("chart type render",e);try{cs.setData(data);vs.setData(QLChartTypes.dataForVolume(agg,chartTypeColors()))}catch(x){chErr("chart type rebuild",x)}}
+  if(fit)chart.timeScale().scrollToRealTime();
+  updateChartTypeHint();
+}
+function setChartType(type,save=true){
+  if(!QLChartTypes.byId[type])return;
+  const vr=chart.timeScale().getVisibleLogicalRange();
+  if(typeof resetBAForSeries==="function")resetBAForSeries();
+  try{chart.removeSeries(cs)}catch(e){}
+  CHART_TYPE=type;window.QL_CHART_TYPE=type;
+  if(save)sv(CHART_TYPE_KEY,type);
+  cs=chart.addSeries(chartSeriesKind(type),chartSeriesOptions(type));
+  pfDig=-1;applyPrec();
+  renderCurrentChartData(true,true);
+  try{if(typeof applyCand==="function")applyCand()}catch(e){chErr("apply chart type style",e)}
+  if(vr&&agg.length>1){try{chart.timeScale().setVisibleLogicalRange(vr)}catch{}}
+  const sel=$("chartType");if(sel)sel.value=type;
+  try{renderInd()}catch(e){chErr("render indicators after chart type",e)}
+  CHW.applied=Date.now();
+}
+function buildChartTypePicker(){
+  const sel=$("chartType");if(!sel)return;
+  const groups=[...new Set(QLChartTypes.DEFINITIONS.map(x=>x.group))];
+  sel.innerHTML=groups.map(group=>`<optgroup label="${group}">`+QLChartTypes.DEFINITIONS.filter(x=>x.group===group).map(x=>`<option value="${x.id}">${x.label}</option>`).join("")+"</optgroup>").join("");
+  sel.value=CHART_TYPE;sel.onchange=()=>setChartType(sel.value);
+  const btn=$("chartTypeSettings");if(btn)btn.onclick=()=>openChartTypeSettings(btn);
+  updateChartTypeHint();
+  // Apply a previously saved chart mode on first load; otherwise the picker can show
+  // one style while the underlying series is still a CandlestickSeries.
+  if(CHART_TYPE!=="candles")setChartType(CHART_TYPE,false);
+}
+function updateChartTypeHint(){
+  const el=$("chartTypeHint");if(!el)return;
+  const names={range:"Range bars are reconstructed from source OHLC bars; tick order inside each source bar is not available.",renko:"Renko bricks use source-bar closes; this is a close-based reconstruction.",tick:"Tick bars use broker tick-volume counts aggregated in source bars, not individual tick sequencing.",volume:"Volume bars use cTrader broker tick-volume (not centralized exchange volume).",linebreak:"Three Line Break uses source-bar closing prices.",kagi:"Kagi reversals use source-bar closes and the selected reversal threshold.",pnf:"Point & Figure columns use source-bar closes and the selected box/reversal settings."};
+  const note=names[CHART_TYPE]||"";el.textContent=note;el.title=note;
+}
+function openChartTypeSettings(btn){
+  const old=document.querySelector(".ct-settings");if(old){old.remove();return}
+  const el=document.createElement("div");el.className="ct-settings";el.setAttribute("role","dialog");el.setAttribute("aria-label","Cài đặt chart type");
+  const rows=[
+    ["rangeSize","Range size","number",1], ["rangeUnit","Range unit","unit",0],
+    ["renkoSize","Renko brick size","number",1], ["renkoUnit","Renko unit","unit",0],
+    ["tickSize","Ticks per bar","number",1], ["volumeSize","Tick-volume per bar","number",1],
+    ["lineBreakCount","Line Break count","number",1], ["kagiReversal","Kagi reversal","number",1], ["kagiUnit","Kagi unit","unit",0],
+    ["pnfBoxSize","P&F box size","number",1], ["pnfUnit","P&F unit","unit",0], ["pnfReversal","P&F reversal boxes","number",1]
+  ];
+  el.innerHTML=`<div class="ct-settings-head"><strong>Chart type settings</strong><button type="button" data-close aria-label="Đóng">×</button></div><p>Ticks được quy đổi theo tick size của broker; nếu broker không cung cấp, dùng bước giá theo digits của symbol.</p><div class="ct-settings-grid">${rows.map(([k,label,kind,min])=>`<label data-setting="${k}"><span>${label}</span>${kind==="unit"?`<select data-key="${k}"><option value="ticks">Ticks</option><option value="points">Price points</option></select>`:`<input data-key="${k}" type="number" min="${min}" step="1" value="${CHART_TYPE_SETTINGS[k]}">`}</label>`).join("")}</div><div class="ct-settings-actions"><button type="button" data-reset>Defaults</button><button type="button" data-save>Apply</button></div>`;
+  document.body.appendChild(el);const r=btn.getBoundingClientRect();el.style.left=Math.max(8,Math.min(r.left,innerWidth-340)) + "px";el.style.top=Math.min(r.bottom+6,innerHeight-el.offsetHeight-8)+"px";
+  el.querySelectorAll("select[data-key]").forEach(x=>x.value=CHART_TYPE_SETTINGS[x.dataset.key]);
+  el.querySelector("[data-close]").onclick=()=>el.remove();
+  el.querySelector("[data-reset]").onclick=()=>{CHART_TYPE_SETTINGS={...CHART_TYPE_DEFAULTS};sv(CHART_TYPE_SETTINGS_KEY,JSON.stringify(CHART_TYPE_SETTINGS));el.remove();renderCurrentChartData(true,true);renderInd()};
+  el.querySelector("[data-save]").onclick=()=>{for(const x of el.querySelectorAll("[data-key]")){const k=x.dataset.key,v=x.tagName==="SELECT"?x.value:+x.value;if(x.tagName!=="SELECT"&&(!Number.isFinite(v)||v<=0)){x.focus();return}CHART_TYPE_SETTINGS[k]=v}sv(CHART_TYPE_SETTINGS_KEY,JSON.stringify(CHART_TYPE_SETTINGS));el.remove();renderCurrentChartData(true,true);renderInd()};
+  const outside=e=>{if(!el.contains(e.target)&&e.target!==btn){el.remove();document.removeEventListener("pointerdown",outside,true)}};setTimeout(()=>document.addEventListener("pointerdown",outside,true),0);
+}
 function rebuild(fit){
   const raw=[];let cur=null;
   for(const x of baseArr()){
@@ -149,27 +260,36 @@ function rebuild(fit){
     if(!cur||cur.st!==k){cur={st:k,time:0,open:x[1],high:x[2],low:x[3],close:x[4],v:x[5]};raw.push(cur)}
     else{if(x[2]>cur.high)cur.high=x[2];if(x[3]<cur.low)cur.low=x[3];cur.close=x[4];cur.v+=x[5]}
   }
-  // đổi sang giờ hiển thị; chart cần thời gian tăng dần, nên lúc đổi giờ mùa làm giờ lùi lại thì bỏ các nến trùng giờ
-  agg=[];let lastT=-1;
-  for(const b of raw){b.time=disp(b.st);if(b.time>lastT){agg.push(b);lastT=b.time}}
+  rawAgg=[];let lastT=-1;
+  for(const b of raw){b.time=disp(b.st);if(b.time>lastT){rawAgg.push(b);lastT=b.time}}
   applyPrec();
-  cs.setData(agg);
-  vs.setData(agg.map(c=>({time:c.time,value:c.v,color:vcol(c.open,c.close)})));
-  if(fit)chart.timeScale().scrollToRealTime();   // đổi khung giờ: về nến mới nhất (dữ liệu cũ hơn tự tải khi kéo sang trái)
+  renderCurrentChartData(!!fit,true);
   renderInd();
 }
+function scheduleSyntheticRefresh(){
+  clearTimeout(chartTypeRefreshTimer);
+  chartTypeRefreshTimer=setTimeout(()=>{try{renderCurrentChartData(false,true);safeInd()}catch(e){chErr("synthetic chart refresh",e)}},450);
+}
+let chartTypeRefreshTimer=0;
 function applyLive(b,A){
   A=A||m1;const last=A[A.length-1];
-  if(last&&last[0]===b[0])A[A.length-1]=b;else if(!last||b[0]>last[0])A.push(b);else{if(Date.now()-cuAt>15000)catchUp();return}   // nến live cũ hơn nến cuối: dữ liệu lệch, bù lại thay vì im lặng bỏ qua
+  if(last&&last[0]===b[0])A[A.length-1]=b;else if(!last||b[0]>last[0])A.push(b);else{if(Date.now()-cuAt>15000)catchUp();return}
   const k=bucket(b[0],C.tf);let o,h,l,c,v=0;
   for(let i=A.length-1;i>=0&&A[i][0]>=k;i--){const x=A[i];o=x[1];c=c??x[4];h=Math.max(h??x[2],x[2]);l=Math.min(l??x[3],x[3]);v+=x[5]}
   if(o===undefined)return;
-  const bar={st:k,time:disp(k),open:o,high:h,low:l,close:c,v},a=agg[agg.length-1];
-  if(a&&a.st===k)agg[agg.length-1]=bar;else if(!a||bar.time>a.time)agg.push(bar);else{if(Date.now()-cuAt>15000)catchUp();return}
-  try{cs.update(bar);vs.update({time:bar.time,value:v,color:vcol(o,c)})}
-  catch(e){chErr("cs.update",e);try{rebuild(false)}catch(x){chErr("rebuild",x)}return}   // series lệch thứ tự thời gian...: dựng lại từ m1
+  const bar={st:k,time:disp(k),open:o,high:h,low:l,close:c,v},a=rawAgg[rawAgg.length-1];
+  if(a&&a.st===k)rawAgg[rawAgg.length-1]=bar;else if(!a||bar.time>a.time)rawAgg.push(bar);else{if(Date.now()-cuAt>15000)catchUp();return}
+  if(QLChartTypes.isSynthetic(CHART_TYPE)){
+    scheduleSyntheticRefresh();
+  }else{
+    try{
+      agg=QLChartTypes.transform(rawAgg,CHART_TYPE,chartTypeOptions());
+      const lastBar=agg[agg.length-1],data=lastBar?seriesDataForLast(lastBar):null;
+      if(data)cs.update(data);
+      if(lastBar)vs.update(QLChartTypes.dataForVolume([lastBar],chartTypeColors())[0]);
+    }catch(e){chErr("cs.update",e);try{rebuild(false)}catch(x){chErr("rebuild",x)}return}
+  }
   CHW.applied=Date.now();
-  /* chỉ báo tính lại trên toàn bộ nến nên khá nặng: tối đa ~3 lần/giây (nến + giá vẫn cập nhật từng tick) */
   const n=performance.now();if(n-liveIndAt>330){liveIndAt=n;clearTimeout(liveIndT);safeInd()}else{clearTimeout(liveIndT);liveIndT=setTimeout(()=>{liveIndAt=performance.now();safeInd()},330)}
 }
 let liveIndAt=0,liveIndT=0;
@@ -310,6 +430,7 @@ function tfPop(btn){
 const tfOut=e=>{if(tfP&&!tfP.contains(e.target)&&!e.target.closest("#tfAdd,#tfMore"))tfClose()};
 function tfClose(){if(tfP){tfP.remove();tfP=null}document.removeEventListener("pointerdown",tfOut,true)}
 $("sym").value=C.sym;
+buildChartTypePicker();
 /* đổi mã: xem symbols.js (ô chọn mã tuỳ biến) */
 
 /* ================= KHUNG GIÂY (< 60 giây) =================

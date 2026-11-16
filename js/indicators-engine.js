@@ -241,8 +241,8 @@ ICO.up='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width=
 ICO.dn='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
 // Hàng legend chỉ dựng lại khi danh sách/thông số đổi; còn lại chỉ cập nhật số, để nút bấm không bị mất khi chart cập nhật mỗi giây.
 function lrow(a){
-  const d=IND[a.key],on=isOn(a),hid=a.on&&!on?" (ẩn ở khung này)":"",lb=d.lab?d.lab(a.p):Object.values(a.p).join(" ");
-  return `<div class="lr${on?"":" off"}" data-id="${a.id}"><span style="color:${cres(a,0)};font-weight:600">${d.n} ${lb}${hid}</span><span class="lvs"></span><span class="la"><button type="button" data-k="ey" title="${a.on?"Ẩn":"Hiện"}" aria-label="${a.on?"Ẩn":"Hiện"} ${d.n}">${a.on?ICO.ey:ICO.eo}</button><button type="button" data-k="gr" title="Cài đặt" aria-label="Cài đặt ${d.n}">${ICO.gr}</button><button type="button" data-k="tr" title="Xóa" aria-label="Xóa ${d.n}">${ICO.tr}</button></span></div>`;
+  const d=IND[a.key],on=isOn(a);
+  return `<div class="lr${on?"":" off"}" data-id="${a.id}" title="${d.n}"><span class="lr-name" style="color:${cres(a,0)};font-weight:600">${d.n}</span><span class="la"><button type="button" data-k="ey" title="${a.on?"Ẩn":"Hiện"}" aria-label="${a.on?"Ẩn":"Hiện"} ${d.n}">${a.on?ICO.ey:ICO.eo}</button><button type="button" data-k="gr" title="Cài đặt" aria-label="Cài đặt ${d.n}">${ICO.gr}</button><button type="button" data-k="tr" title="Xóa" aria-label="Xóa ${d.n}">${ICO.tr}</button></span></div>`;
 }
 const fmtV=v=>{const x=Math.abs(v);return x>=1e6?(v/1e6).toFixed(2)+"M":x>=1e3?(v/1e3).toFixed(2)+"K":v.toFixed(0)};
 const lastI=raw=>{for(let i=raw.length-1;i>=0;i--){const x=raw[i];if(x!=null&&(typeof x!=="number"||isFinite(x)))return x}return null};
@@ -256,14 +256,7 @@ function legend(p){
     el.innerHTML=head+(LGC?"":mainL.map(lrow).join(""));
     ACT.forEach(a=>{const pn=PN[a.id];if(pn)pn.lg.innerHTML=lrow(a)});
   }
-  const card=$("chartCard"),i=p&&p.time!=null?idxOf(p.time):-2;
-  ACT.forEach(a=>{const r=card.querySelector(`[data-id="${a.id}"] .lvs`);if(!r)return;
-    const ms=SM[a.id];if(!isOn(a)||!ms){r.innerHTML="";return}
-    const F=IND[a.key].fm==="vol"?fmtV:IND[a.key].t==="ov"?(v=>(+v).toFixed(PDIG())):fv;
-    r.innerHTML=ms.map((m,j)=>{if(!m.lg)return"";
-      const raw=RAW[a.id]&&RAW[a.id][j],v=i===-2?(LV[a.id]||[])[j]:(i>=0&&raw?val(raw[i]):null),
-        it=raw?(i===-2?lastI(raw):i>=0?raw[i]:null):null,col=m.ci!=null?cres(a,m.ci):(it&&(it.c||it.col))||"inherit";
-      return `<b style="color:${col}">${v==null?"–":F(v)}</b>`}).join(" ")});
+  /* QuantLab chart overlay legend chỉ hiển thị tên indicator; thông số vẫn nằm trong hộp Settings. */
 }
 function legClick(e){
   const b=e.target.closest("[data-k]");if(!b)return;

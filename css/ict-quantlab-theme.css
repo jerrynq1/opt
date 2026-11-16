@@ -352,3 +352,9 @@ body.simple-ui .sidebar-footnote{display:flex;align-items:center;flex-wrap:wrap;
 body.simple-ui .sidebar-footnote a{display:block;width:100%;padding-left:15px;color:#6f879e;font:9px var(--mono);text-decoration:none;}
 body.simple-ui .sidebar-footnote a:hover{color:var(--cyan);text-decoration:underline;}
 @media(max-width:760px){body.simple-ui.sc .sidebar-footnote a{display:none;}}
+
+body.simple-ui .chart-type-wrap{flex:0 1 180px;min-width:126px}
+body.simple-ui #chartType{border-color:#2a4056;background:#101d2b;color:#c7d6e4}
+body.simple-ui .chart-type-settings{border-color:#2a4056;background:#101d2b;color:#a8bfd2}
+body.simple-ui .chart-type-settings:hover{border-color:#4c8b99;color:#e1f8f7}
+@media(max-width:760px){body.simple-ui .chart-type-wrap{flex:1 1 130px;min-width:112px;max-width:180px}}

@@ -17,11 +17,24 @@ function eff(){
   const c=COL(),s=CSx,up=s.up||c.up,dn=s.dn||c.dn,lk=s.link!==false;
   return{up,dn,bu:lk?up:(s.bu||up),bd:lk?dn:(s.bd||dn),wu:lk?up:(s.wu||up),wd:lk?dn:(s.wd||dn),hollow:!!s.hollow,vol:s.vol!==false,grid:s.grid!==false};
 }
+function resetBAForSeries(){BL.bid=null;BL.ask=null}
 function applyCand(){
-  const e=eff(),c=COL(),g=e.grid?c.gr:"rgba(0,0,0,0)";
-  cs.applyOptions({upColor:e.hollow?"rgba(0,0,0,0)":e.up,downColor:e.dn,borderVisible:true,borderUpColor:e.bu,borderDownColor:e.bd,wickUpColor:e.wu,wickDownColor:e.wd});
+  const e=eff(),c=COL(),g=e.grid?c.gr:"rgba(0,0,0,0)",type=window.QL_CHART_TYPE||"candles",gold="#d8b66a";
+  if(["candles","hollow","heikin","range","renko","linebreak","pnf"].includes(type)){
+    cs.applyOptions({upColor:(type==="hollow"||e.hollow)?"rgba(0,0,0,0)":e.up,downColor:e.dn,borderVisible:true,borderUpColor:e.bu,borderDownColor:e.bd,wickUpColor:e.wu,wickDownColor:e.wd});
+  }else if(type==="ohlc"||type==="tick"||type==="volume"){
+    cs.applyOptions({upColor:e.up,downColor:e.dn});
+  }else if(type==="area"){
+    cs.applyOptions({lineColor:gold,topColor:"rgba(216,182,106,.24)",bottomColor:"rgba(216,182,106,.015)"});
+  }else if(type==="baseline"){
+    cs.applyOptions({topLineColor:e.up,bottomLineColor:e.dn,topFillColor:"rgba(61,245,192,.18)",bottomFillColor:"rgba(255,92,138,.16)"});
+  }else if(type==="trend"){
+    cs.applyOptions({color:gold});
+  }else{
+    cs.applyOptions({color:gold});
+  }
   vs.applyOptions({visible:e.vol});
-  if(window.FPHIDE){const T="rgba(0,0,0,0)";cs.applyOptions({upColor:T,downColor:T,borderUpColor:T,borderDownColor:T,wickUpColor:T,wickDownColor:T})}
+  if(window.FPHIDE&&["candles","hollow","heikin","range","renko","linebreak","pnf"].includes(type)){const T="rgba(0,0,0,0)";cs.applyOptions({upColor:T,downColor:T,borderUpColor:T,borderDownColor:T,wickUpColor:T,wickDownColor:T})}
   allCh().forEach(x=>x.applyOptions({grid:{vertLines:{color:g},horzLines:{color:g}}}));
   baUpdate();
 }
@@ -53,3 +66,6 @@ $("csBody").onclick=e=>{
   CSx=b.dataset.reset?{}:Object.assign(keep,PRE[+b.dataset.pre][1]);
   saveCS();applyCand();recolor();renderInd();buildCS();
 };
+// chart.js may restore a saved non-candlestick series before this module is loaded.
+// Re-apply the user's candle/theme preferences now that its style layer is available.
+applyCand();
