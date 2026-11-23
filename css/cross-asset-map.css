@@ -28,3 +28,44 @@
 @media(max-width:650px){.xmap-panel{padding:10px}.xmap-controls>label:not(.xmap-check):not(.xmap-opacity){min-width:calc(50% - 8px);flex:1}.xmap-controls .btn{flex:1}.xmap-legend{gap:7px}}
 
 .xmap-line.pain{border-color:#b68cff}.xmap-panel .xmap-controls .btn{height:32px;padding:5px 12px;font-size:11px}
+
+/* Trade Structure Analyzer — clickable bubble details and expiration payoff scenarios */
+.xmap-trade-panel{position:absolute;z-index:30;top:12px;right:14px;width:min(372px,calc(100% - 28px));max-height:calc(100% - 24px);overflow:auto;padding:13px;border:1px solid rgba(101,214,232,.34);border-radius:13px;background:rgba(8,15,25,.96);color:#e8eef7;box-shadow:0 14px 42px rgba(0,0,0,.48);backdrop-filter:blur(12px);font:11px/1.45 'Space Grotesk',sans-serif;scrollbar-width:thin}
+.xmap-trade-panel[hidden]{display:none!important}
+.xmap-trade-head{display:flex;justify-content:space-between;gap:10px;align-items:flex-start;padding-bottom:9px;border-bottom:1px solid rgba(148,163,184,.18)}
+.xmap-trade-eyebrow{font-size:9px;letter-spacing:.14em;font-weight:800;color:#6fd8eb}
+.xmap-trade-head h3{margin:3px 0 1px;font-size:17px;color:#f4f7fb}
+.xmap-trade-head p{margin:0;color:#92a1b5;font-size:10px}
+.xmap-trade-close{width:27px;height:27px;flex:none;border:1px solid rgba(148,163,184,.28);border-radius:7px;background:#142234;color:#c9d5e3;font-size:19px;line-height:1;cursor:pointer}
+.xmap-trade-event{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:10px 0}
+.xmap-trade-kv{min-width:0;padding:7px 8px;border:1px solid rgba(148,163,184,.14);border-radius:8px;background:rgba(17,31,48,.72)}
+.xmap-trade-kv small{display:block;color:#8294aa;font-size:9px;letter-spacing:.04em;text-transform:uppercase}
+.xmap-trade-kv strong{display:block;margin-top:2px;color:#edf4fa;font-size:12px;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xmap-trade-kv.volume strong{color:#5ce0a7;font-size:15px}
+.xmap-trade-controls{display:grid;grid-template-columns:minmax(0,1fr) 104px;gap:8px;margin:8px 0}
+.xmap-trade-controls label{display:flex;flex-direction:column;gap:4px;color:#92a1b5;font-size:9px;font-weight:800;letter-spacing:.07em}
+.xmap-trade-controls select,.xmap-trade-controls input{width:100%;height:32px;min-width:0;padding:4px 7px;border:1px solid rgba(148,163,184,.28);border-radius:7px;background:#101c2b;color:#e8eef7;font:11px 'Space Grotesk',sans-serif}
+.xmap-trade-quote{margin:8px 0;padding:8px 9px;border-radius:8px;background:rgba(55,111,145,.12);color:#b9c9d8;font-size:10px}
+.xmap-trade-quote strong{color:#e8f5ff}
+.xmap-trade-section{margin-top:9px}
+.xmap-trade-section-title{display:flex;justify-content:space-between;align-items:center;margin:0 0 5px;color:#dce7f2;font-size:10px;font-weight:800;letter-spacing:.07em}
+.xmap-trade-section-title small{color:#8294aa;font-size:9px;font-weight:500;letter-spacing:0}
+.xmap-trade-leg{display:grid;grid-template-columns:58px 45px minmax(48px,1fr) 86px;gap:5px;align-items:center;margin:4px 0;padding:5px 6px;border:1px solid rgba(148,163,184,.13);border-radius:7px;background:rgba(15,27,42,.7)}
+.xmap-trade-leg select,.xmap-trade-leg input{width:100%;min-width:0;height:27px;padding:3px 5px;border:1px solid rgba(148,163,184,.22);border-radius:5px;background:#0c1725;color:#e7edf4;font:10px 'Space Grotesk',sans-serif}
+.xmap-trade-leg .contract{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#dce7f2;font-size:10px}
+.xmap-trade-results{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:10px}
+.xmap-trade-stat{padding:8px;border-radius:8px;border:1px solid rgba(148,163,184,.14);background:rgba(17,31,48,.75)}
+.xmap-trade-stat small{display:block;color:#8294aa;font-size:9px;text-transform:uppercase}
+.xmap-trade-stat strong{display:block;margin-top:2px;font-size:14px;color:#eaf2f8;font-variant-numeric:tabular-nums}
+.xmap-trade-stat.profit strong{color:#5ce0a7}.xmap-trade-stat.loss strong{color:#ff7087}.xmap-trade-breakeven{grid-column:1/-1;padding:8px;border:1px solid rgba(101,214,232,.2);border-radius:8px;color:#b8c9d7;background:rgba(42,122,145,.1)}
+.xmap-trade-breakeven strong{color:#75e1f0}
+.xmap-trade-related{margin-top:10px;padding-top:8px;border-top:1px solid rgba(148,163,184,.16)}
+.xmap-trade-related h4{margin:0 0 5px;font-size:10px;letter-spacing:.07em;color:#dce7f2}
+.xmap-trade-candidate{padding:6px 7px;margin:4px 0;border-radius:7px;background:rgba(148,163,184,.08);color:#adbdcd;font-size:10px}
+.xmap-trade-candidate strong{color:#e3edf6}
+.xmap-trade-disclaimer{margin:9px 0 0;padding-top:8px;border-top:1px solid rgba(148,163,184,.14);color:#8b9aae;font-size:9px;line-height:1.45}
+@media(max-width:650px){.xmap-trade-panel{top:8px;right:8px;max-height:calc(100% - 16px);width:min(360px,calc(100% - 16px));padding:10px}.xmap-trade-controls{grid-template-columns:minmax(0,1fr) 92px}}
+
+.xmap-trade-assumption{margin:7px 0;padding:7px 8px;border-left:2px solid #d9a84f;background:rgba(217,168,79,.08);color:#d8c49b;font-size:9px;line-height:1.4}
+
+.xmap-trade-candidate button{margin-top:5px;padding:5px 8px;border:1px solid rgba(101,214,232,.32);border-radius:5px;background:rgba(47,116,142,.16);color:#9fe5f0;font:700 9px "Space Grotesk",sans-serif;cursor:pointer}.xmap-trade-candidate button:hover{background:rgba(47,116,142,.3);border-color:#65d6e8}

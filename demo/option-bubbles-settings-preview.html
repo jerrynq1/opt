@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Gexadecimal Option Bubbles — Settings Preview</title>
+<style>
+:root{color-scheme:dark;--bg:#080d16;--panel:#101927;--panel2:#0c1420;--line:#243448;--muted:#8295aa;--text:#e7eef7;--green:#29c98b;--red:#ef5c76;--cyan:#4dc9e8;--purple:#b78cff;--gold:#e9c46a}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 10% -10%,#14243a 0,transparent 36%),var(--bg);color:var(--text);font:13px/1.4 Inter,Segoe UI,Arial,sans-serif}
+.top{height:54px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 22px;background:#0b1320}.brand{font-weight:800;letter-spacing:1.5px}.brand span{color:var(--cyan)}.top small{color:var(--muted);letter-spacing:1px}
+.wrap{display:grid;grid-template-columns:minmax(620px,1fr) 380px;gap:14px;padding:14px;max-width:1600px;margin:auto}.chartbox,.settings{background:linear-gradient(180deg,#101a28,#0b1420);border:1px solid #26374c;border-radius:13px;overflow:hidden;box-shadow:0 16px 40px #0005}.charthead{height:48px;padding:0 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}.charthead strong{font-size:14px}.tag{border:1px solid #705d2c;color:#f4cd76;border-radius:20px;padding:4px 9px;font-size:10px;letter-spacing:.4px}.chartmeta{height:32px;display:flex;align-items:center;gap:14px;padding:0 16px;color:var(--muted);font-size:11px}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}.canvaswrap{padding:0 8px 8px}.canvaswrap canvas{display:block;width:100%;height:610px}.legend{height:35px;border-top:1px solid var(--line);padding:8px 15px;color:#aab9c9;display:flex;gap:18px;font-size:11px}.settings{max-height:735px;overflow:auto}.sethead{padding:16px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#101927;z-index:2}.sethead strong{font-size:15px}.sethead p{margin:3px 0 0;color:var(--muted);font-size:11px}.group{padding:13px 15px;border-bottom:1px solid #1e2c3d}.gtitle{font-size:11px;font-weight:800;color:#8fa6bd;text-transform:uppercase;letter-spacing:1.1px;margin-bottom:10px}.field{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:8px 0;min-height:25px}.field label{color:#d5dfeb;font-size:12px}.field small{display:block;color:#758ba2;font-size:10px;margin-top:2px}.field input[type=number],.field select{background:#0a1320;color:#e5eef8;border:1px solid #2b4057;border-radius:6px;padding:6px 8px;width:132px;font-size:11px}.field input[type=checkbox]{accent-color:#22c78b;width:15px;height:15px}.inline{display:flex;gap:6px;align-items:center}.chip{font-size:10px;padding:3px 7px;background:#17283a;border:1px solid #2a4057;border-radius:5px;color:#a9c3dc}.hint{padding:12px 15px;color:#8195aa;font-size:10px;line-height:1.5}.footer{padding:10px 14px;border-top:1px solid var(--line);display:flex;justify-content:space-between;color:#8295aa;font-size:10px}.btn{background:#10263b;color:#d7edff;border:1px solid #2a5577;border-radius:6px;padding:6px 10px;font-size:11px;cursor:pointer}.btn:hover{background:#173954}
+@media(max-width:1050px){.wrap{grid-template-columns:1fr}.settings{max-height:none}.canvaswrap canvas{height:500px}}
+</style>
+</head>
+<body>
+<header class="top"><div class="brand">GEXADECIMAL <span>／</span> OPTION BUBBLES</div><small>LOCAL PREVIEW · SYNTHETIC DATA ONLY</small></header>
+<main class="wrap">
+<section class="chartbox">
+  <div class="charthead"><strong>GLD → XAUUSD · ETF Options Volume Flow</strong><span class="tag">SIMULATED EVENTS · NOT LIVE</span></div>
+  <div class="chartmeta"><span><i class="dot" style="background:var(--green)"></i>CALL</span><span><i class="dot" style="background:var(--red)"></i>PUT</span><span>Bubble size = active metric</span><span>Y = mapped strike</span></div>
+  <div class="canvaswrap"><canvas id="chart" width="1100" height="650"></canvas></div>
+  <div class="legend"><span>◌ dotted ring: unlinked event</span><span>◌ dashed purple: possible multi-leg</span><span>◯ white ring: top 5% event</span><span>Zone = options activity, not resting liquidity</span></div>
+</section>
+<aside class="settings">
+  <div class="sethead"><strong>ETF Option Liq Map · Settings</strong><p>Settings available with the current Volume/quote cache. Unsupported order-side tags are intentionally omitted.</p></div>
+  <div class="group"><div class="gtitle">Filter & Size</div>
+    <div class="field"><label>Filter / size by</label><select id="metric"><option value="volume">Volume contracts (Delta)</option><option value="premium">Estimated Premium (USD)</option></select></div>
+    <div class="field"><label>Minimum Volume Delta</label><input id="minVol" type="number" min="0" value="0" step="50"></div>
+    <div class="field"><label>Minimum Estimated Premium</label><input id="minPrem" type="number" min="0" value="0" step="10000"></div>
+    <div class="field"><label>Auto Filter</label><select id="auto"><option value="off">Off</option><option value="strong">Strong · Top 5%</option><option value="medium">Medium · Top 10%</option><option value="weak">Weak · Top 20%</option></select></div>
+    <div class="field"><label>Size scaling</label><select id="scale"><option value="auto">Auto · Session percentile</option><option value="absolute">Absolute · Reference value</option></select></div>
+    <div class="field"><label>Scale reference</label><input id="scaleRef" type="number" min="1" value="5000"></div>
+    <div class="field"><label>Size factor</label><input id="factor" type="number" min="0.25" max="4" step="0.25" value="1"></div>
+    <div class="field"><label>Smallest / Biggest (px)</label><div class="inline"><input id="minPx" type="number" value="0" style="width:58px"><input id="maxPx" type="number" value="0" style="width:58px"></div></div>
+    <div class="field"><label>Show EST. Premium</label><input id="premiumLabel" type="checkbox" checked></div>
+    <div class="field"><label>Largest event per candle</label><input id="largest" type="checkbox"></div>
+  </div>
+  <div class="group"><div class="gtitle">Appearance</div>
+    <div class="field"><label>Bubble label</label><select id="label"><option value="volume">Volume Delta</option><option value="cp">Call / Put (C/P)</option></select></div>
+    <div class="field"><label>Bubble style</label><select id="style"><option value="flat">Flat</option><option value="glossy">3D Glossy</option></select></div>
+    <div class="field"><label>Shape</label><select id="shape"><option value="circle">Bubble</option><option value="rectangle">Rectangle</option><option value="diamond">Diamond</option></select></div>
+    <div class="field"><label>Opacity</label><input id="opacity" type="number" min="0.1" max="1" step="0.05" value="0.9"></div>
+  </div>
+  <div class="group"><div class="gtitle">Position & Activity Zones</div>
+    <div class="field"><label>Horizontal position</label><select id="position"><option value="time">By detected time</option><option value="candle">By candle · centered</option></select></div>
+    <div class="field"><label>Draw Activity Zones</label><input id="zones" type="checkbox" checked></div>
+    <div class="field"><label>Zone height (% price)</label><input id="zoneHeight" type="number" min="0.01" max="10" step="0.05" value="0.2"></div>
+    <div class="field"><label>Zone length (candles)</label><input id="zoneLength" type="number" min="0" max="500" value="8"></div>
+    <div class="field"><label>Zones from size ≥</label><input id="zoneMin" type="number" min="0" value="500"></div>
+  </div>
+  <div class="group"><div class="gtitle">Option Filters</div>
+    <div class="field"><label>Show Calls</label><input id="calls" type="checkbox" checked></div>
+    <div class="field"><label>Show Puts</label><input id="puts" type="checkbox" checked></div>
+    <div class="field"><label>Moneyness at event time</label><select id="money"><option value="all">All</option><option value="itm">ITM</option><option value="atm">ATM ±1% spot</option><option value="otm">OTM</option></select></div>
+    <div class="field"><label>Expiry / DTE</label><select id="dte"><option value="all">All expiries</option><option value="0dte">0DTE</option><option value="7d">≤ 7 days</option><option value="7_30d">7–30 days</option><option value="30d_plus">&gt; 30 days</option></select></div>
+  </div>
+  <div class="group"><div class="gtitle">Structure & Rings</div>
+    <div class="field"><label>Show event rings</label><input id="rings" type="checkbox" checked></div>
+    <div class="field"><label>Unlinked event · dotted</label><input id="unlinked" type="checkbox" checked></div>
+    <div class="field"><label>Possible multi-leg · dashed purple</label><input id="multi" type="checkbox" checked></div>
+    <div class="field"><label>Large event · solid white</label><input id="large" type="checkbox" checked></div>
+    <div class="field"><label>Possible structure confidence</label><span class="chip">Heuristic only</span></div>
+  </div>
+  <div class="hint">Estimated Premium = Volume Delta × recent reference quote × contract multiplier. It is not execution premium. ITM/ATM/OTM uses a fresh event-time underlying snapshot. Call/Put identifies contract type, not buyer/seller direction. Sweeps and liquidation are not shown because current data does not identify them.</div>
+  <div class="footer"><span>Gexadecimal preview v6</span><button class="btn" id="reset">Reset demo</button></div>
+</aside>
+</main>
+<script>
+const cv=document.getElementById('chart'),ctx=cv.getContext('2d');
+const $=id=>document.getElementById(id);
+const events=[
+ {x:.08,p:381.1,side:'C',strike:380,vol:180,prem:8100,multi:false,large:false,dte:3,money:'itm'},
+ {x:.17,p:381.8,side:'P',strike:382,vol:720,prem:28800,multi:false,large:false,dte:3,money:'atm'},
+ {x:.28,p:382.6,side:'C',strike:382,vol:1350,prem:67500,multi:true,large:true,dte:3,money:'atm'},
+ {x:.34,p:383.1,side:'P',strike:384,vol:940,prem:42300,multi:true,large:false,dte:3,money:'otm'},
+ {x:.47,p:384.0,side:'C',strike:385,vol:4100,prem:246000,multi:false,large:true,dte:3,money:'otm'},
+ {x:.58,p:383.5,side:'P',strike:383,vol:560,prem:19600,multi:false,large:false,dte:0,money:'atm'},
+ {x:.69,p:382.9,side:'C',strike:382,vol:2250,prem:112500,multi:false,large:true,dte:8,money:'itm'},
+ {x:.79,p:382.1,side:'P',strike:383,vol:860,prem:30100,multi:false,large:false,dte:8,money:'itm'},
+ {x:.91,p:381.6,side:'C',strike:382,vol:6200,prem:372000,multi:false,large:true,dte:35,money:'otm'}
+];
+function val(id){return $(id).value} function checked(id){return $(id).checked}
+function threshold(items,f){const s=items.map(e=>e.metric).sort((a,b)=>a-b);return s[Math.max(0,Math.min(s.length-1,Math.floor((1-f)*s.length)))];}
+function draw(){
+ const W=cv.width,H=cv.height;ctx.clearRect(0,0,W,H);ctx.fillStyle='#0b1320';ctx.fillRect(0,0,W,H);
+ const L=52,R=W-68,T=22,B=H-42,CW=R-L,CH=B-T;
+ ctx.strokeStyle='#223246';ctx.lineWidth=1;for(let i=0;i<=8;i++){let y=T+i*CH/8;ctx.beginPath();ctx.moveTo(L,y);ctx.lineTo(R,y);ctx.stroke();ctx.fillStyle='#8195aa';ctx.font='12px Segoe UI';ctx.textAlign='right';ctx.fillText((385-i*.5).toFixed(2),R+52,y+4)}
+ for(let i=0;i<=10;i++){let x=L+i*CW/10;ctx.beginPath();ctx.moveTo(x,T);ctx.lineTo(x,B);ctx.stroke();ctx.fillStyle='#8195aa';ctx.textAlign='center';ctx.fillText(['09:30','09:55','10:20','10:45','11:10','11:35','12:00','12:25','12:50','13:15','13:40'][i],x,B+23)}
+ // Synthetic candles, deterministic oscillation.
+ let prev=382.8;for(let i=0;i<88;i++){let x=L+(i+.5)*CW/88,base=382.8+Math.sin(i*.17)*1.05+Math.sin(i*.057)*.8+(i/88-.5)*.55,open=prev,close=base+(Math.sin(i*1.7)*.16),high=Math.max(open,close)+.12+(i%4)*.025,low=Math.min(open,close)-.12-(i%3)*.03;let yo=p=>T+(385-p)/4*CH;let up=close>=open;ctx.strokeStyle=up?'#36d7ae':'#e65d77';ctx.fillStyle=ctx.strokeStyle;ctx.beginPath();ctx.moveTo(x,yo(high));ctx.lineTo(x,yo(low));ctx.stroke();let top=yo(Math.max(open,close)),bot=yo(Math.min(open,close));ctx.fillRect(x-3,top,6,Math.max(2,bot-top));prev=close;}
+ const metric=val('metric'),minV=+val('minVol')||0,minP=+val('minPrem')||0;
+ let list=events.filter(e=>(e.side==='C'?checked('calls'):checked('puts'))&&(metric==='volume'?e.vol>=minV:e.prem>=minP));
+ const dte=val('dte'),money=val('money');list=list.filter(e=>(dte==='all'||(dte==='0dte'&&e.dte===0)||(dte==='7d'&&e.dte<=7)||(dte==='7_30d'&&e.dte>7&&e.dte<=30)||(dte==='30d_plus'&&e.dte>30))&&(money==='all'||e.money===money));
+ list=list.map(e=>({...e,metric:metric==='volume'?e.vol:e.prem}));const auto=val('auto'),frac=auto==='strong'?.05:auto==='medium'?.1:auto==='weak'?.2:null;if(frac&&list.length){let t=threshold(list,frac);list=list.filter(e=>e.metric>=t)}
+ if(checked('largest')){let best=list.reduce((a,e)=>{let key=Math.floor(e.x*18);let old=a.get(key);if(!old||old.metric<e.metric)a.set(key,e);return a},new Map());list=[...best.values()]}
+ let ref=val('scale')==='absolute'?(+val('scaleRef')||5000):threshold(list,.05)||1;let minPx=+val('minPx')||0,maxPx=+val('maxPx')||0,factor=+val('factor')||1;
+ const yPrice=p=>T+(385-p)/4*CH;
+ if(checked('zones'))for(const e of list){if(e.metric<(+val('zoneMin')||0))continue;let h=Math.max(2,e.p*(+val('zoneHeight')||.2)/100/4*CH),x=L+e.x*CW,end=Math.min(R,x+(+val('zoneLength')||8)*CW/88);ctx.globalAlpha=.12;ctx.fillStyle=e.side==='C'?'#29c98b':'#ef5c76';ctx.fillRect(x,yPrice(e.p)-h/2,Math.max(3,end-x),h);ctx.globalAlpha=1;}
+ for(const e of list){let x=L+e.x*CW,y=yPrice(e.p),r=(6+17*Math.sqrt(Math.min(1,e.metric/ref)))*factor;if(minPx)r=Math.max(r,minPx/2);if(maxPx)r=Math.min(r,maxPx/2);r=Math.max(4,Math.min(42,r));let color=e.side==='C'?'#29c98b':'#ef5c76';
+  ctx.save();ctx.globalAlpha=+(val('opacity')||.9);ctx.beginPath();let shape=val('shape');if(shape==='rectangle')ctx.rect(x-r,y-r*.72,r*2,r*1.44);else if(shape==='diamond'){ctx.moveTo(x,y-r*1.2);ctx.lineTo(x+r*1.2,y);ctx.lineTo(x,y+r*1.2);ctx.lineTo(x-r*1.2,y);ctx.closePath()}else ctx.arc(x,y,r,0,Math.PI*2);
+  if(val('style')==='glossy'){let g=ctx.createRadialGradient(x-r*.3,y-r*.35,1,x,y,r*1.35);g.addColorStop(0,'#ffffff');g.addColorStop(.23,color);g.addColorStop(1,'#07111d');ctx.fillStyle=g}else ctx.fillStyle=color;ctx.fill();ctx.strokeStyle='#07101b';ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
+  if(checked('rings')){ctx.save();ctx.beginPath();ctx.arc(x,y,r+4,0,Math.PI*2);ctx.lineWidth=e.large?2:1.2;if(e.large){ctx.strokeStyle='#f2f8ff';ctx.setLineDash([])}else if(e.multi){ctx.strokeStyle='#b78cff';ctx.setLineDash([5,4])}else{ctx.strokeStyle='#bdcbd8';ctx.setLineDash([1,4])}ctx.stroke();ctx.restore()}
+  ctx.fillStyle=val('style')==='glossy'?'#07111d':'#07111d';ctx.font='bold 11px Segoe UI';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(val('label')==='cp'?e.side:Math.round(e.vol).toLocaleString(),x,y);
+  ctx.font='11px Segoe UI';ctx.fillStyle=color;ctx.textAlign=x>R-130?'right':'left';let lx=x>R-130?x-r-6:x+r+6;ctx.fillText(e.strike+(e.side==='C'?'C':'P'),lx,y-4);if(checked('premiumLabel')){ctx.font='10px Segoe UI';ctx.fillStyle='#bdcbd8';ctx.fillText('EST $'+e.prem.toLocaleString(),lx,y+10)}
+ }
+ ctx.fillStyle='#8da0b5';ctx.font='11px Segoe UI';ctx.textAlign='left';ctx.fillText(`${list.length} simulated events · ${metric==='volume'?'Volume Delta':'Estimated Premium'}`,L,T-6);
+}
+document.querySelectorAll('select,input').forEach(el=>el.addEventListener('input',draw));$('reset').onclick=()=>{location.reload()};draw();
+</script>
+</body></html>

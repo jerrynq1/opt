@@ -10,9 +10,9 @@ function loadMath(){
   const document = { getElementById: () => null };
   const localStorage = { getItem: () => null, setItem: () => {} };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'js', 'cross-asset-map.js'), 'utf8'),
-    { window, document, localStorage, Number, Math, Date, Intl, String, Object },
+    { window, document, localStorage, Number, Math, Date, Intl, String, Object, agg: [], C: { tf: 60 } },
     { filename: 'cross-asset-map.js' });
-  return window.crossAssetMapMath;
+  return { ...window.crossAssetMapMath, flow: window.crossAssetFlowMath };
 }
 const math = loadMath();
 
@@ -248,7 +248,10 @@ test('Volume Flow bubbles use sub-candle event time, mapped strike and print con
   assert.match(source,/ts\.logicalToCoordinate\(logical\)/);
   assert.match(draw,/event\.volumeDelta|volumeDelta/);
   assert.match(draw,/item\.event\.strike/);
-  assert.match(draw,/strikeLabel.*item\.side.*compact\(item\.delta\)/);
+  assert.match(draw,/labelMode==='volume'/);
+  assert.match(draw,/compact\(item\.delta\)/);
+  assert.match(draw,/centerLabel=labelMode==='volume'\?compact\(item\.delta\):item\.side/);
+  assert.match(draw,/const strikeText=`\$\{isInterval\?'~':''\}\$\{strikeLabel\}`/);
   assert.doesNotMatch(source,/P\.heatmap|P\.heat\b/,'ETF Options Volume Flow has no synthetic limit/stop heatmap layer');
 });
 
@@ -256,13 +259,26 @@ test('Volume Flow bubbles use sub-candle event time, mapped strike and print con
 test('Indicator exposes one Gamma Flip / Zero Gamma toggle and one chart line, without Vol Trigger', () => {
   const defs=fs.readFileSync(path.join(__dirname,'..','js','indicators-custom.js'),'utf8');
   const source=fs.readFileSync(path.join(__dirname,'..','js','cross-asset-map.js'),'utf8');
-  assert.match(defs,/Gamma Flip \/ Zero Gamma \(BSM repricing\)/);
+  assert.match(defs,/\[\"gammaFlip\",\"Gamma Flip \/ Zero Gamma\"/);
   assert.doesNotMatch(defs,/Vol Trigger/i);
   assert.doesNotMatch(defs,/\[\"volTrigger\"/);
   const draw=source.slice(source.indexOf('function drawCrossAssetMap'),source.indexOf('window.drawCrossAssetMap'));
   assert.equal((draw.match(/GAMMA FLIP \/ ZERO GAMMA/g)||[]).length,1);
 });
 
+
+test('ETF Options Volume Flow exposes Volume Delta / C-P bubble label selection and defaults to Volume', () => {
+  const defs=fs.readFileSync(path.join(__dirname,'..','js','indicators-custom.js'),'utf8');
+  const source=fs.readFileSync(path.join(__dirname,'..','js','cross-asset-map.js'),'utf8');
+  assert.ok(defs.includes('["bubbleLabelMode","Nội dung trong bubble","volume","s"'));
+  assert.ok(defs.includes('["volume","Volume Delta"]'));
+  assert.ok(defs.includes('["cp","Call / Put (C/P)"]'));
+  assert.ok(source.includes("bubbleLabelMode:'volume'"));
+  assert.ok(source.includes("p.bubbleLabelMode=p.bubbleLabelMode==='cp'?'cp':'volume'"));
+  const demo=fs.readFileSync(path.join(__dirname,'..','demo','volume-flow-bubble-preview.html'),'utf8');
+  assert.ok(demo.includes('id=\"bubbleMode\"'));
+  assert.ok(demo.includes("renderChart(e.target.value)"));
+});
 
 test('provisional GEX walls and ladder are not mapped to the CFD chart', () => {
   const snapshot = snap();
@@ -272,4 +288,85 @@ test('provisional GEX walls and ladder are not mapped to the CFD chart', () => {
   assert.equal(mapped.gexPutWall, null);
   assert.deepEqual(Array.from(mapped.gexLevels), []);
   assert.ok(mapped.callOIWall, 'OI walls can still map when OI coverage is complete');
+});
+
+test('OptionBubbles DTE and moneyness filters use event-time New York date and fresh underlying snapshot', () => {
+  const flow = math.flow;
+  const observedAt = Date.parse('2026-11-23T15:00:00Z'); // 10:00 New York
+  const base = { observedAt, underlyingSpot: 400, spotTimeMs: observedAt - 2_000, spotAgeMs: 2_000 };
+  assert.equal(flow.eventDteDays({ ...base, expiry: '2026-11-27' }), 4);
+  assert.equal(flow.eventDteDays({ ...base, expiry: '2026-11-23' }), 0);
+  assert.equal(flow.eventMoneyness({ ...base, optionType: 'C', strike: 385 }), 'itm');
+  assert.equal(flow.eventMoneyness({ ...base, optionType: 'P', strike: 415 }), 'itm');
+  assert.equal(flow.eventMoneyness({ ...base, optionType: 'C', strike: 402 }), 'atm');
+  assert.equal(flow.eventMoneyness({ ...base, optionType: 'P', strike: 385 }), 'otm');
+  assert.equal(flow.eventMoneyness({ ...base, optionType: 'C', strike: 385, spotAgeMs: 60_001 }), null);
+  assert.equal(flow.eventMoneyness({ ...base, optionType: 'C', strike: 385, spotAgeMs: null, spotTimeMs: null }), null);
+});
+
+test('OptionBubbles filters Call/Put, DTE, moneyness and minimum Volume independently', () => {
+  const flow = math.flow, t = Date.parse('2026-11-23T15:00:00Z');
+  const make = (id, optionType, strike, expiry, volumeDelta, extra = {}) => ({
+    id, symbol: 'GLD', optionType, strike, expiry, observedAt: t + id * 1_000,
+    volumeDelta, underlyingSpot: 400, spotTimeMs: t + id * 1_000, spotAgeMs: 0, ...extra
+  });
+  const events = [
+    make(1, 'C', 385, '2026-11-27', 100), // ITM Call, 4 DTE
+    make(2, 'P', 415, '2026-11-27', 200), // ITM Put, 4 DTE
+    make(3, 'C', 420, '2026-12-23', 300), // OTM Call, 30 DTE
+    make(4, 'P', 385, '2026-11-23', 400)  // OTM Put, 0 DTE
+  ];
+  const common = { filterBy: 'volume', minVolumeContracts: 0, showCalls: true, showPuts: true, expiryDteFilter: 'all', moneynessFilter: 'all', autoFilter: 'off', biggestPerCandle: false };
+  assert.equal(flow.filterFlowEventData(events, { ...common, showPuts: false }).length, 2);
+  assert.equal(flow.filterFlowEventData(events, { ...common, expiryDteFilter: '0dte' }).length, 1);
+  assert.equal(flow.filterFlowEventData(events, { ...common, expiryDteFilter: '7d' }).length, 3);
+  assert.equal(flow.filterFlowEventData(events, { ...common, expiryDteFilter: '7_30d' }).length, 1);
+  assert.equal(flow.filterFlowEventData(events, { ...common, moneynessFilter: 'itm' }).length, 2);
+  assert.equal(flow.filterFlowEventData(events, { ...common, moneynessFilter: 'otm' }).length, 2);
+  assert.deepEqual(Array.from(flow.filterFlowEventData(events, { ...common, minVolumeContracts: 250 }), row => row.delta), [300, 400]);
+});
+
+test('OptionBubbles Estimated Premium filter never invents values when a fresh quote is absent', () => {
+  const t = Date.parse('2026-11-23T15:00:00Z');
+  const events = [
+    { symbol: 'QQQ', optionType: 'C', strike: 600, expiry: '2026-11-27', observedAt: t, volumeDelta: 100, estimatedPremiumUsd: 25_000 },
+    { symbol: 'QQQ', optionType: 'P', strike: 595, expiry: '2026-11-27', observedAt: t + 1_000, volumeDelta: 200, estimatedPremiumUsd: null }
+  ];
+  const rows = math.flow.filterFlowEventData(events, {
+    filterBy: 'premium', minPremiumUSD: 10_000, showCalls: true, showPuts: true,
+    expiryDteFilter: 'all', moneynessFilter: 'all', autoFilter: 'off'
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].premium, 25_000);
+});
+
+test('OptionBubbles Strong/Medium/Weak filters use session percentiles and biggest-per-candle keeps one event', () => {
+  const t = Date.parse('2026-11-23T15:00:00Z');
+  const events = Array.from({ length: 20 }, (_, i) => ({
+    symbol: 'GLD', optionType: i % 2 ? 'C' : 'P', strike: 380 + i,
+    expiry: '2026-11-27', observedAt: t + i * 5_000, volumeDelta: i + 1
+  }));
+  const common = { filterBy: 'volume', minVolumeContracts: 0, showCalls: true, showPuts: true, expiryDteFilter: 'all', moneynessFilter: 'all', biggestPerCandle: false };
+  assert.equal(math.flow.filterFlowEventData(events, { ...common, autoFilter: 'strong' }).length, 1);
+  assert.equal(math.flow.filterFlowEventData(events, { ...common, autoFilter: 'medium' }).length, 2);
+  assert.equal(math.flow.filterFlowEventData(events, { ...common, autoFilter: 'weak' }).length, 4);
+  const sameCandle = [
+    { ...events[0], observedAt: t + 5_000, volumeDelta: 100 },
+    { ...events[1], observedAt: t + 15_000, volumeDelta: 500 },
+    { ...events[2], observedAt: t + 75_000, volumeDelta: 250 }
+  ];
+  const biggest = math.flow.filterFlowEventData(sameCandle, { ...common, autoFilter: 'off', biggestPerCandle: true }, [], 60);
+  assert.deepEqual(Array.from(biggest, row => row.delta), [500, 250]);
+});
+
+test('OptionBubbles settings expose data-supported filters and avoid unsupported Long/Short, Sweep and Liquidation labels', () => {
+  const defs = fs.readFileSync(path.join(__dirname, '..', 'js', 'indicators-custom.js'), 'utf8');
+  const source = fs.readFileSync(path.join(__dirname, '..', 'js', 'cross-asset-map.js'), 'utf8');
+  for (const text of ['Estimated Premium (USD)', 'Auto filter', 'Strong (top 5%)', 'Medium (top 10%)', 'Weak (top 20%)', 'Draw a zone around bubbles', 'Moneyness (at event time)', 'Expiry (DTE at event time)', 'Possible multi-leg structure', 'Largest event only']) assert.ok(defs.includes(text), `missing OptionBubbles setting: ${text}`);
+  assert.match(defs, /Call\/Put is loại hợp đồng|Call\/Put là loại hợp đồng/);
+  assert.doesNotMatch(defs, /\[\"(?:Long Call|Short Call|Long Put|Short Put|Sweep|Liquidation)\"/);
+  assert.match(source, /function drawActivityZones\(/);
+  assert.match(source, /createRadialGradient/);
+  assert.match(source, /bubbleShape/);
+  assert.match(source, /showLargeEvents/);
 });

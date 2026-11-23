@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gexadecimal — Volume Flow Bubble Preview</title>
+<style>
+:root{color-scheme:dark;--bg:#071019;--panel:#0b1722;--panel2:#0e1d2a;--line:#1c3041;--muted:#8295a8;--text:#e5eef5;--green:#33dfa0;--red:#ff6178;--blue:#68c7e8;--gold:#e8bd73}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 28% -12%,#142c3b 0,transparent 45%),var(--bg);color:var(--text);font:13px Inter,Segoe UI,Arial,sans-serif}
+.shell{width:1540px;margin:0 auto;padding:22px 24px 18px}.top{height:62px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);margin-bottom:18px}
+.brand{display:flex;align-items:center;gap:13px}.logo{width:34px;height:34px;border:1px solid #2b6074;border-radius:10px;display:grid;place-items:center;color:var(--blue);font-weight:900;font-size:15px;background:#0d2330}.brandname{font-weight:800;letter-spacing:.16em;font-size:15px}.subbrand{font-size:10px;color:var(--muted);letter-spacing:.18em;margin-top:4px}.topright{display:flex;gap:10px;align-items:center}.pill{border:1px solid var(--line);background:#0c1a26;border-radius:6px;padding:7px 10px;color:#a9becd;font-size:10px;letter-spacing:.08em}.demo{color:#ffcc7a;border-color:#795a2b;background:#211b12;font-weight:800}
+.titlebar{display:flex;align-items:end;justify-content:space-between;margin:13px 0 16px}.titlebar h1{font-size:20px;margin:0 0 5px;letter-spacing:.01em}.titlebar p{color:var(--muted);margin:0;font-size:11px}.quote-row{display:flex;gap:9px}.quote{background:var(--panel);border:1px solid var(--line);padding:8px 12px;border-radius:7px;min-width:115px}.quote small{display:block;color:var(--muted);font-size:9px;letter-spacing:.11em;margin-bottom:5px}.quote b{font-size:15px;font-variant-numeric:tabular-nums}.layout{display:grid;grid-template-columns:1fr 350px;gap:14px}.card{background:linear-gradient(180deg,#0c1a26,#09151f);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:0 12px 36px #0003}.charthead{height:48px;display:flex;align-items:center;justify-content:space-between;padding:0 16px;border-bottom:1px solid var(--line)}.chartname{font-weight:750;letter-spacing:.06em}.chartname span{color:var(--muted);font-weight:500;margin-left:8px}.charttags{display:flex;gap:7px}.smalltag{border:1px solid #294053;padding:5px 8px;border-radius:5px;color:#9cb2c3;font-size:10px}.mode-label{display:flex;align-items:center;gap:7px}#bubbleMode{background:#0a1722;color:#dce8ef;border:1px solid #365267;border-radius:4px;padding:3px 6px;font:700 10px Segoe UI,Arial;outline:none}.chart-wrap{padding:5px 8px 0}.chart-wrap canvas{display:block;width:100%;height:640px}.legend{display:flex;align-items:center;gap:17px;padding:10px 16px 13px;border-top:1px solid var(--line);color:#9db0bf;font-size:10px}.legend span{display:flex;align-items:center;gap:6px}.dot{width:9px;height:9px;border-radius:50%;display:inline-block}.call{background:var(--green)}.put{background:var(--red)}.ring{width:15px;height:15px;border:1px solid #8ba0af;border-radius:50%;display:inline-block}.sidehead{padding:15px 16px;border-bottom:1px solid var(--line)}.sidehead strong{font-size:12px;letter-spacing:.12em}.sidehead p{font-size:10px;color:var(--muted);margin:5px 0 0}.event-list{padding:7px 11px}.event{display:grid;grid-template-columns:61px 1fr auto;align-items:center;gap:8px;padding:12px 5px;border-bottom:1px solid #172a39}.event:last-child{border-bottom:0}.time{font-size:10px;color:#91a6b7;font-variant-numeric:tabular-nums}.evcontract{font-weight:800;font-size:12px}.evmeta{font-size:10px;color:var(--muted);margin-top:4px}.delta{font-weight:800;font-size:11px;font-variant-numeric:tabular-nums}.delta.c{color:var(--green)}.delta.p{color:var(--red)}.sidefoot{border-top:1px solid var(--line);padding:13px 15px;color:var(--muted);font-size:10px;line-height:1.55}.formula{margin-top:13px;padding:13px 16px;display:flex;align-items:center;justify-content:space-between;gap:18px;background:#0b1722;border:1px solid var(--line);border-radius:8px}.formula strong{font-size:10px;color:#9bb2c3;letter-spacing:.14em;display:block;margin-bottom:5px}.formula code{font:600 12px ui-monospace,Consolas,monospace;color:#d6e5ef}.formula .note{font-size:10px;color:var(--muted);max-width:520px;text-align:right;line-height:1.45}.footer{display:flex;justify-content:space-between;color:#60788a;font-size:9px;margin:12px 2px 0;letter-spacing:.04em}
+</style>
+</head>
+<body>
+<div class="shell">
+  <div class="top">
+    <div class="brand"><div class="logo">G</div><div><div class="brandname">GEXADECIMAL</div><div class="subbrand">OPTIONS INTELLIGENCE TERMINAL</div></div></div>
+    <div class="topright"><span class="pill">LOCAL COLLECTOR PREVIEW</span><span class="pill demo">SIMULATED DATA · NOT LIVE</span></div>
+  </div>
+  <div class="titlebar">
+    <div><h1>ETF Options Volume Flow</h1><p>Timestamped contract activity mapped onto the selected CFD/index chart</p></div>
+    <div class="quote-row"><div class="quote"><small>ETF SOURCE</small><b>QQQ · 600.00</b></div><div class="quote"><small>CHART TARGET</small><b>NAS100 · 21,000</b></div><div class="quote"><small>CAPTURE MODE</small><b style="color:var(--green)">VOLUME DELTA</b></div></div>
+  </div>
+  <div class="layout">
+    <section class="card">
+      <div class="charthead"><div class="chartname">NAS100 <span>· M1 · QQQ → NAS100</span></div><div class="charttags"><span class="smalltag">CALL · GREEN</span><span class="smalltag">PUT · RED</span><label class="smalltag mode-label">BUBBLE LABEL <select id="bubbleMode"><option value="volume" selected>VOLUME</option><option value="cp">C / P</option></select></label></div></div>
+      <div class="chart-wrap"><canvas id="chart" width="1140" height="640"></canvas></div>
+      <div class="legend"><span><i class="dot call"></i> Call contract</span><span><i class="dot put"></i> Put contract</span><span><i class="ring"></i> Bubble size = Volume Delta</span><span>Center label = selected mode</span><span style="margin-left:auto;color:#6e8798">X = time · Y = mapped strike price</span></div>
+    </section>
+    <aside class="card">
+      <div class="sidehead"><strong>RECENT VOLUME PRINTS</strong><p>Example events stored by the background collector</p></div>
+      <div class="event-list" id="events"></div>
+      <div class="sidefoot">A bubble represents the increase in cumulative contract Volume between two observations. Green/red identifies Call/Put, not buyer/seller direction. These are synthetic example values.</div>
+    </aside>
+  </div>
+  <div class="formula"><div><strong>STRIKE → NAS100 PRICE MAPPING</strong><code>Target Spot × (Option Strike ÷ ETF Spot)</code></div><div class="note">Example: 21,000 × (602 ÷ 600) = 21,070 NAS100. Bubble X is the observed timestamp; bubble Y is this mapped strike price. Select VOLUME to print Volume Delta inside the bubble, or C/P to print the option type.</div></div>
+  <div class="footer"><span>GEXADECIMAL · ETF OPTIONS VOLUME FLOW</span><span>PREVIEW ONLY · ALL CANDLES, SPOTS AND EVENTS ARE SYNTHETIC</span></div>
+</div>
+<script>
+const canvas=document.getElementById('chart'),ctx=canvas.getContext('2d');
+// synthetic option events (QQQ spot $600, NAS100 spot 21,000)
+const events=[
+ {time:'09:34:12',minute:9*60+34.2,strike:602,side:'C',delta:125},
+ {time:'09:39:41',minute:9*60+39.68,strike:604,side:'C',delta:640},
+ {time:'09:47:17',minute:9*60+47.28,strike:600,side:'P',delta:320},
+ {time:'09:56:03',minute:9*60+56.05,strike:598,side:'P',delta:850},
+ {time:'10:05:28',minute:10*60+5.47,strike:602,side:'C',delta:1200},
+ {time:'10:12:50',minute:10*60+12.83,strike:604,side:'P',delta:410},
+ {time:'10:24:08',minute:10*60+24.13,strike:600,side:'C',delta:720},
+ {time:'10:37:31',minute:10*60+37.52,strike:606,side:'C',delta:1850},
+ {time:'10:48:22',minute:10*60+48.37,strike:598,side:'P',delta:950},
+ {time:'10:55:46',minute:10*60+55.77,strike:602,side:'C',delta:520}
+];
+const maxDelta=Math.max(...events.map(e=>e.delta));
+const W=canvas.width,H=canvas.height,plot={l:66,r:82,t:32,b:47};
+const xmin=9*60+30,xmax=11*60,ymin=20800,ymax=21300;
+const X=m=>plot.l+(m-xmin)/(xmax-xmin)*(W-plot.l-plot.r);
+const Y=p=>plot.t+(ymax-p)/(ymax-ymin)*(H-plot.t-plot.b);
+const colors={grid:'#172b3a',muted:'#7890a1',green:'#33dfa0',red:'#ff6178',text:'#dce8ef'};
+function renderChart(labelMode='volume'){
+  ctx.clearRect(0,0,W,H);
+ctx.fillStyle='#091621';ctx.fillRect(0,0,W,H);
+// chart grid and axes
+ctx.font='11px Segoe UI,Arial';ctx.lineWidth=1;
+for(let p=20800;p<=21300;p+=50){const y=Y(p);ctx.strokeStyle=colors.grid;ctx.beginPath();ctx.moveTo(plot.l,y);ctx.lineTo(W-plot.r+5,y);ctx.stroke();ctx.fillStyle=colors.muted;ctx.textAlign='left';ctx.fillText(p.toLocaleString('en-US'),W-plot.r+15,y+4)}
+for(let m=xmin;m<=xmax;m+=15){const x=X(m);ctx.strokeStyle='#122533';ctx.beginPath();ctx.moveTo(x,plot.t);ctx.lineTo(x,H-plot.b);ctx.stroke();ctx.fillStyle=colors.muted;ctx.textAlign='center';const h=String(Math.floor(m/60)).padStart(2,'0'),mi=String(m%60).padStart(2,'0');ctx.fillText(`${h}:${mi}`,x,H-16)}
+// deterministic synthetic candles
+const closes=[20940,20958,20942,20975,21010,20992,21026,21044,21018,21065,21084,21060,21042,21077,21108,21091,21120,21142,21110,21148,21130,21158,21176,21148,21124,21156,21138,21168,21192,21160,21134,21152,21184,21166,21198,21218,21188,21162,21196,21228,21206,21235,21212,21250,21222,21208,21242,21260,21234,21255];
+let prev=closes[0]-18;const barW=11;
+for(let i=0;i<closes.length;i++){
+ const close=closes[i],open=prev+(Math.sin(i*1.27)*7),high=Math.max(open,close)+8+(i%4)*2,low=Math.min(open,close)-7-(i%3)*2;
+ const minute=xmin+i*1.7,x=X(minute),up=close>=open,color=up?colors.green:colors.red;
+ ctx.strokeStyle=color;ctx.lineWidth=1.2;ctx.beginPath();ctx.moveTo(x,Y(high));ctx.lineTo(x,Y(low));ctx.stroke();
+ ctx.fillStyle=color;const top=Y(Math.max(open,close)),bottom=Y(Math.min(open,close));ctx.fillRect(x-barW/2,top,barW,Math.max(2,bottom-top));prev=close;
+}
+// current price guide
+const last=closes[closes.length-1],ly=Y(last);ctx.setLineDash([5,5]);ctx.strokeStyle='#6c8ba0';ctx.beginPath();ctx.moveTo(plot.l,ly);ctx.lineTo(W-plot.r,ly);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#193448';ctx.fillRect(W-plot.r+8,ly-10,66,20);ctx.fillStyle='#d9e7f0';ctx.textAlign='center';ctx.font='700 10px Segoe UI';ctx.fillText(last.toLocaleString('en-US'),W-plot.r+41,ly+4);
+
+// Small amount of stagger on labels only; bubble itself remains at exact event time/mapped price.
+const labelCounts=new Map();
+for(const e of events){
+ const mapped=21000*(e.strike/600),x=X(e.minute),y=Y(mapped),r=labelMode==='volume'?Math.max(11,Math.min(23,11+12*Math.sqrt(e.delta/maxDelta))):Math.max(5,Math.min(17,5+11*Math.sqrt(e.delta/maxDelta))),color=e.side==='C'?colors.green:colors.red;
+ ctx.save();ctx.globalAlpha=.18;ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,r+7,0,Math.PI*2);ctx.fill();ctx.restore();
+ ctx.save();ctx.globalAlpha=.94;ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;ctx.lineWidth=1.3;ctx.strokeStyle='#06111a';ctx.stroke();ctx.fillStyle='#07131b';const centerLabel=labelMode==='volume'?e.delta.toLocaleString('en-US',{notation:'compact',maximumFractionDigits:1}):e.side;const centerFont=labelMode==='volume'?(centerLabel.length>=5?7:centerLabel.length>=4?8:9):9;ctx.font=`800 ${centerFont}px Segoe UI`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(centerLabel,x,y+.5);ctx.restore();
+ const groupKey=`${e.strike}${e.side}`,slot=labelCounts.get(groupKey)||0;labelCounts.set(groupKey,slot+1);
+ const onRight=x< W*.70,tx=onRight?x+r+5:x-r-5,align=onRight?'left':'right';
+ const ty=y+(slot%2===0?-2:12);
+ ctx.font='700 11px Segoe UI';const label=String(e.strike);const tw=ctx.measureText(label).width+10;
+ ctx.fillStyle='rgba(4,12,19,.86)';ctx.fillRect(align==='left'?tx-2:tx-tw+2,ty-9,tw,18);
+ ctx.fillStyle=color;ctx.textAlign=align;ctx.textBaseline='middle';ctx.fillText(label,tx,ty);
+}
+// Top-left chart caption
+ctx.textAlign='left';ctx.textBaseline='top';ctx.font='700 10px Segoe UI';ctx.fillStyle='#81a2b6';ctx.fillText(`SYNTHETIC OPTION EVENTS · BUBBLE LABEL: ${labelMode==='volume'?'VOLUME DELTA':'CALL / PUT'}`,plot.l,8);
+}
+renderChart('volume');
+document.getElementById('bubbleMode').addEventListener('change',e=>renderChart(e.target.value));
+// Populate event tape
+const tape=document.getElementById('events');
+[...events].reverse().forEach(e=>{
+ const row=document.createElement('div');row.className='event';
+ row.innerHTML=`<div class="time">${e.time}</div><div><div class="evcontract">${e.strike}${e.side} <span style="color:#7890a1;font-weight:500">· QQQ</span></div><div class="evmeta">${e.side==='C'?'CALL':'PUT'} · Volume increase</div></div><div class="delta ${e.side.toLowerCase()}">+${e.delta.toLocaleString('en-US')}</div>`;
+ tape.appendChild(row);
+});
+</script>
+</body>
+</html>
