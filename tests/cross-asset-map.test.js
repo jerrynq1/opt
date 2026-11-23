@@ -5,14 +5,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-function loadMath(){
+function loadMath(options={}){
   const window = {};
   const document = { getElementById: () => null };
-  const localStorage = { getItem: () => null, setItem: () => {} };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'js', 'cross-asset-map.js'), 'utf8'),
-    { window, document, localStorage, Number, Math, Date, Intl, String, Object, agg: [], C: { tf: 60 } },
+  const storage = options.storage || new Map();
+  const localStorage = { getItem: key => storage.has(key) ? storage.get(key) : null, setItem: (key, value) => storage.set(key, value) };
+  const context = { window, document, localStorage, Number, Math, Date, Intl, String, Object,
+    agg: options.agg || [], rawAgg: options.rawAgg || [], C: { tf: options.tf || 60 } };
+  if(options.u2s)context.u2s=options.u2s;
+  if(options.disp)context.disp=options.disp;
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'js', 'cross-asset-map.js'), 'utf8'), context,
     { filename: 'cross-asset-map.js' });
-  return { ...window.crossAssetMapMath, flow: window.crossAssetFlowMath };
+  return { ...window.crossAssetMapMath, flow: window.crossAssetFlowMath, xmap: window.XMAP, storage };
 }
 const math = loadMath();
 
@@ -370,3 +374,74 @@ test('OptionBubbles settings expose data-supported filters and avoid unsupported
   assert.match(source, /bubbleShape/);
   assert.match(source, /showLargeEvents/);
 });
+
+test('Volume Flow timestamps are converted from collector UTC to the chart selected timezone before logical mapping', () => {
+  const utcStart = 1_800_000_000;
+  const serverOffset = 2 * 3600;
+  const chartOffset = 7 * 3600;
+  const bars = [0, 60, 120].map(offset => ({ st: utcStart + offset + chartOffset, open: 1, close: 1 }));
+  const flow = loadMath({ agg: bars, u2s: value => value + serverOffset, disp: value => value + chartOffset - serverOffset });
+  const location = flow.flow.flowEventLogicalLocation(utcStart + 30, bars, 60);
+  assert.equal(location.candleIndex, 0);
+  assert.equal(location.fraction, 0.5);
+  assert.equal(location.logical, 0.5, 'an event 30 seconds into a 1-minute candle maps halfway to the next candle center');
+  assert.equal(location.chartTime, utcStart + 30 + chartOffset);
+});
+
+test('Volume Flow does not extrapolate old events to the left edge when chart history is not loaded', () => {
+  const bars = [1000, 1060, 1120].map(st => ({ st }));
+  const flow = loadMath({ agg: bars });
+  assert.equal(flow.flow.flowEventLogicalLocation(700, bars, 60), null);
+  assert.equal(flow.flow.flowEventLogicalTime(700), null);
+});
+
+test('event strike mapping uses the CFD candle at event time and the event-time ETF spot snapshot', () => {
+  const utcStart = 1_800_000_000;
+  const rawBars = [0, 60, 120].map(offset => ({ st: utcStart + offset + 2 * 3600, open: 26000 + offset, close: 26060 + offset }));
+  const flow = loadMath({ rawAgg: rawBars, u2s: value => value + 2 * 3600 });
+  const targetAtEvent = flow.flow.flowEventTargetPriceAt(utcStart + 30);
+  assert.equal(targetAtEvent, 26030);
+  const mappedStrike = targetAtEvent * (600 / 600);
+  assert.equal(mappedStrike, 26030);
+});
+
+test('event strike mapping stays fixed after the live CFD candle changes', () => {
+  const utcStart = 1_800_000_000;
+  const rawBars = [0, 60, 120].map(offset => ({ st: utcStart + offset + 2 * 3600, open: 26000 + offset, close: 26060 + offset }));
+  const flow = loadMath({ rawAgg: rawBars, u2s: value => value + 2 * 3600 });
+  const event = {
+    id: 'fixed-map-1', symbol: 'QQQ', optionSymbol: 'QQQ261127C00600000', expiry: '2026-11-27',
+    strike: 600, optionType: 'C', observedAt: (utcStart + 30) * 1000,
+    underlyingSpot: 600, spotTimeMs: (utcStart + 30) * 1000, spotAgeMs: 0
+  };
+  const first = flow.flow.flowEventMapping(event);
+  assert.ok(first && first.mappedPrice > 0);
+  flow.flow.persistBubbleAnchorCache();
+  assert.equal(first.targetPriceAtEvent, 26030);
+  rawBars[0].open = 27000;
+  rawBars[0].close = 27120;
+  const later = flow.flow.flowEventMapping(event);
+  assert.equal(later.mappedPrice, first.mappedPrice, 'the stored event-time mapping must not float with live price ticks');
+  assert.equal(later.ratio, first.ratio);
+  assert.equal(later.cached, true);
+  assert.ok([...flow.storage.keys()].some(key => String(key).includes('tp_xmap_bubble_anchors_v1')));
+
+  // Simulate a browser reload: the persisted event anchor wins over a newer live chart price.
+  const reloaded = loadMath({ rawAgg: [{ st: utcStart + 2 * 3600, open: 28000, close: 28100 }], u2s: value => value + 2 * 3600, storage: flow.storage });
+  const afterReload = reloaded.flow.flowEventMapping(event);
+  assert.equal(afterReload.mappedPrice, first.mappedPrice);
+  assert.equal(afterReload.cached, true);
+});
+
+test('bubble renderer caches filtered/session calculations and no longer linearly searches event array per bubble', () => {
+  const source = fs.readFileSync(path.join(__dirname,'..','js','cross-asset-map.js'),'utf8');
+  assert.match(source,/function prepareFlowRenderData\(P\)/);
+  assert.match(source,/existing\.events===events/);
+  assert.match(source,/sessionScaleByKey/);
+  const draw = source.slice(source.indexOf('function drawFlowBubbles'),source.indexOf('function drawTradePayoffOverlay'));
+  assert.doesNotMatch(draw,/events\.indexOf\(/);
+  assert.match(draw,/visibleFlowItems\(prepared\.filtered/);
+  assert.match(draw,/flowEventMapping\(event\)/);
+  assert.doesNotMatch(draw,/tp\*\(strike\/sp\)/);
+});
+

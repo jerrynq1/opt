@@ -16,38 +16,104 @@
   let flowTimer=null,flowFetchToken=0;
   const DEFAULTS={source:'qqq',bubbles:true,bubbleLabelMode:'volume',bubbleCount:200,filterBy:'volume',minVolumeContracts:0,minPremiumUSD:0,sizeScaling:'auto',absoluteScaleMaxQqq:1000,absoluteScaleMaxGld:1000,sizeFactor:1,minBubblePx:0,maxBubblePx:0,showPremiumOnBubble:false,bubbleStyle:'flat',bubbleShape:'circle',bubbleOpacity:.9,autoFilter:'off',biggestPerCandle:false,horizontalPosition:'time',zones:false,zoneHeightPct:.2,zoneLengthCandles:0,zoneMinSize:0,showCalls:true,showPuts:true,moneynessFilter:'all',expiryDteFilter:'all',showRings:true,showUnlinked:true,showMultiLeg:true,showLargeEvents:true,walls:true,gexWalls:true,gammaFlip:true,maxPain:true,gexCount:10,showSourceTag:true};
   const XMAP=window.XMAP=window.XMAP||{};
-  Object.assign(XMAP,{enabled:false,source:'qqq',settings:{...DEFAULTS},version:0,snapshot:null,locked:null,events:[],flowUpdatedAt:null,error:'',started:false,indicatorId:null,visibleBubbles:[],selectedTrade:null,tradeChainCache:new Map()});
+  Object.assign(XMAP,{enabled:false,source:'qqq',settings:{...DEFAULTS},version:0,snapshot:null,locked:null,events:[],flowUpdatedAt:null,error:'',started:false,indicatorId:null,visibleBubbles:[],selectedTrade:null,tradeChainCache:new Map(),bubbleAnchorCache:new Map(),bubbleAnchorCacheDirty:false,flowPrepared:null});
 
   const num=x=>(x===null||x===undefined||x==='')?null:(Number.isFinite(+x)?+x:null);
   const compact=x=>{const v=+x;if(!Number.isFinite(v))return'—';const a=Math.abs(v);return a>=1e6?(v/1e6).toFixed(1)+'m':a>=1e3?(v/1e3).toFixed(1)+'k':String(Math.round(v));};
   const fmt=(x,d=2)=>Number.isFinite(+x)?(+x).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
   const timestampMs=x=>{const t=num(x);return t===null?null:(t<1e12?t*1000:t)};
   const ageLabel=ms=>ms===null?'—':ms<60000?Math.max(0,Math.round(ms/1000))+'s':ms<3600000?Math.round(ms/60000)+'m':Math.round(ms/3600000)+'h';
-  // Convert an event timestamp (seconds) into a fractional candle logical index.
-  // This lets a 10:32:17 event render inside the 10:32 M1 candle even though
-  // Lightweight Charts only has candle timestamps, not a data point per second.
-  function flowEventLogicalTime(timeSec){
-    const bars=Array.isArray(agg)?agg:[],n=bars.length,tf=Math.max(1,Number(C?.tf)||60);
-    if(!n||!Number.isFinite(timeSec))return null;
-    if(timeSec>=bars[n-1].st)return n-1-.5+(timeSec-bars[n-1].st)/tf;
-    if(timeSec<bars[0].st)return -.5-(bars[0].st-timeSec)/tf;
-    let lo=0,hi=n-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(bars[mid].st<=timeSec)lo=mid;else hi=mid-1;}
-    return lo-.5+Math.max(0,Math.min(1,(timeSec-bars[lo].st)/tf));
+  // Option Flow timestamps are UTC from the Node collector. Chart bars are stored
+  // as broker-server time and then transformed by disp() into the selected chart TZ.
+  // Comparing raw UTC directly with agg[].st shifts every event by the timezone offset
+  // (typically 7 hours in Viet Nam), which pins all bubbles at the far left.
+  function flowEventServerTime(timeSec){
+    if(!Number.isFinite(timeSec))return null;
+    try{return typeof u2s==='function'?u2s(timeSec):timeSec}catch{return timeSec;}
   }
+  function flowEventChartTime(timeSec){
+    const serverTime=flowEventServerTime(timeSec);if(serverTime===null)return null;
+    try{return typeof disp==='function'?disp(serverTime):serverTime}catch{return serverTime;}
+  }
+  function flowEventLogicalLocation(timeSec,bars=Array.isArray(agg)?agg:[],timeframe=Math.max(1,Number(C?.tf)||60)){
+    const rows=Array.isArray(bars)?bars:[],n=rows.length,chartTime=flowEventChartTime(timeSec),tf=Math.max(1,Number(timeframe)||60);
+    if(!n||!Number.isFinite(chartTime))return null;
+    const first=Number(rows[0]?.st),last=Number(rows[n-1]?.st);
+    if(!Number.isFinite(first)||!Number.isFinite(last)||chartTime<first-tf*0.25||chartTime>last+tf*1.5)return null;
+    if(chartTime<first)return null; // old event: wait until the matching chart history is loaded
+    let lo=0,hi=n-1;
+    while(lo<hi){const mid=(lo+hi+1)>>1;if(Number(rows[mid].st)<=chartTime)lo=mid;else hi=mid-1;}
+    const bar=rows[lo],next=rows[lo+1];
+    const step=next&&Number(next.st)>Number(bar.st)?Number(next.st)-Number(bar.st):tf;
+    const fraction=Math.max(0,Math.min(1,(chartTime-Number(bar.st))/Math.max(1,step)));
+    // Lightweight Charts places each candle timestamp at its logical center.
+    // Intrabar events interpolate from logical i to i+1; do not subtract 0.5.
+    const logical=lo+fraction;
+    return {chartTime,logical,candleIndex:lo,fraction,bar,nextBar:next||null,step};
+  }
+  function flowEventLogicalTime(timeSec){return flowEventLogicalLocation(timeSec)?.logical??null;}
   function flowEventCoordinate(timeMs){
     const logical=flowEventLogicalTime(timeMs/1000);
     if(logical===null)return null;
     try{return ts.logicalToCoordinate(logical)}catch{return null;}
   }
   function flowEventCandleIndex(timeSec,bars=Array.isArray(agg)?agg:[],timeframe=Math.max(1,Number(C?.tf)||60)){
-    const rows=Array.isArray(bars)?bars:[],n=rows.length;
-    if(!Number.isFinite(timeSec))return null;
-    if(!n)return Math.floor(timeSec/Math.max(1,timeframe));
-    if(timeSec<=rows[0].st)return 0;
-    if(timeSec>=rows[n-1].st)return n-1;
-    let lo=0,hi=n-1;
-    while(lo<hi){const mid=(lo+hi+1)>>1;if(rows[mid].st<=timeSec)lo=mid;else hi=mid-1;}
-    return lo;
+    const location=flowEventLogicalLocation(timeSec,bars,timeframe);
+    if(location)return location.candleIndex;
+    const chartTime=flowEventChartTime(timeSec);
+    return Number.isFinite(chartTime)?Math.floor(chartTime/Math.max(1,timeframe)):null;
+  }
+  function flowChartTimeAtLogical(logical,bars=Array.isArray(agg)?agg:[],timeframe=Math.max(1,Number(C?.tf)||60)){
+    const rows=Array.isArray(bars)?bars:[],n=rows.length;if(!n||!Number.isFinite(logical))return null;
+    const index=Math.floor(logical),fraction=logical-index;
+    if(index<0){const step=n>1?Number(rows[1].st)-Number(rows[0].st):timeframe;return Number(rows[0].st)+logical*step;}
+    if(index>=n-1){const step=n>1?Number(rows[n-1].st)-Number(rows[n-2].st):timeframe;return Number(rows[n-1].st)+(logical-(n-1))*step;}
+    const left=Number(rows[index].st),right=Number(rows[index+1].st);
+    return Number.isFinite(left)&&Number.isFinite(right)?left+(right-left)*fraction:null;
+  }
+  // The mapped strike is fixed from the CFD candle and ETF spot snapshot at the
+  // event time. We never recompute it from today's live spot ratio on each repaint.
+  function flowEventTargetPriceAt(timeSec,bars=null){
+    const rawRows=typeof rawAgg!=='undefined'&&Array.isArray(rawAgg)&&rawAgg.length?rawAgg:null;
+    const rows=Array.isArray(bars)?bars:(rawRows||(Array.isArray(agg)?agg:[]));
+    const serverTime=flowEventServerTime(timeSec),useServer=!!rawRows&&rows===rawRows;
+    const targetTime=useServer?serverTime:flowEventChartTime(timeSec),n=rows.length,tf=Math.max(1,Number(C?.tf)||60);
+    if(!n||!Number.isFinite(targetTime))return null;
+    if(targetTime<Number(rows[0].st)||targetTime>Number(rows[n-1].st)+tf*1.5)return null;
+    let lo=0,hi=n-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(Number(rows[mid].st)<=targetTime)lo=mid;else hi=mid-1;}
+    const bar=rows[lo],next=rows[lo+1],step=next&&Number(next.st)>Number(bar.st)?Number(next.st)-Number(bar.st):tf;
+    const fraction=Math.max(0,Math.min(1,(targetTime-Number(bar.st))/Math.max(1,step)));
+    const open=num(bar.open),close=num(bar.close);
+    if(open!==null&&close!==null)return open+(close-open)*fraction;
+    return close??open;
+  }
+  function flowEventMapping(event){
+    const strike=num(event?.strike),spot=num(event?.underlyingSpot),observed=timestampMs(event?.observedAt);
+    if(!(strike>0&&spot>0&&observed!==null))return null;
+    const spotTime=timestampMs(event?.spotTimeMs),declaredAge=num(event?.spotAgeMs);
+    const age=declaredAge!==null?declaredAge:(spotTime!==null?Math.abs(observed-spotTime):null);
+    if(age!==null&&age>60_000)return null;
+    ensureBubbleAnchorCache();
+    const key=bubbleEventKey(event),cached=XMAP.bubbleAnchorCache.get(key);
+    if(Number(cached?.ratio)>0)return {ratio:Number(cached.ratio),mappedPrice:strike*Number(cached.ratio),targetPriceAtEvent:Number(cached.targetPriceAtEvent)||null,cached:true};
+    const targetPriceAtEvent=flowEventTargetPriceAt(observed/1000);
+    if(!(targetPriceAtEvent>0))return null;
+    const ratio=targetPriceAtEvent/spot;
+    XMAP.bubbleAnchorCache.set(key,{ratio,targetPriceAtEvent,sourceSpot:spot,observedAt:observed});
+    XMAP.bubbleAnchorCacheDirty=true;
+    while(XMAP.bubbleAnchorCache.size>20000)XMAP.bubbleAnchorCache.delete(XMAP.bubbleAnchorCache.keys().next().value);
+    return {ratio,mappedPrice:strike*ratio,targetPriceAtEvent,cached:false};
+  }
+  let bubbleAnchorStoreKey='';
+  function ensureBubbleAnchorCache(){
+    const key=`tp_xmap_bubble_anchors_v1:${XMAP.source}:${pair()}`;
+    if(bubbleAnchorStoreKey===key&&XMAP.bubbleAnchorCache instanceof Map)return;
+    bubbleAnchorStoreKey=key;XMAP.bubbleAnchorCache=new Map();XMAP.bubbleAnchorCacheDirty=false;
+    try{const rows=JSON.parse(localStorage.getItem(key)||'[]');for(const row of Array.isArray(rows)?rows:[]){if(Array.isArray(row)&&row.length===2&&Number(row[1]?.ratio)>0)XMAP.bubbleAnchorCache.set(String(row[0]),row[1]);}}catch{}
+  }
+  function persistBubbleAnchorCache(){
+    if(!XMAP.bubbleAnchorCacheDirty)return;
+    try{localStorage.setItem(bubbleAnchorStoreKey,JSON.stringify([...XMAP.bubbleAnchorCache.entries()]));XMAP.bubbleAnchorCacheDirty=false}catch{}
   }
   function newYorkDateKey(timestamp){
     const ms=timestampMs(timestamp);if(ms===null)return null;
@@ -100,8 +166,9 @@
       const min=p.filterBy==='premium'?Math.max(0,num(p.minPremiumUSD)||0):Math.max(0,num(p.minVolumeContracts)||0);
       if(metric<min)continue;
       const stamp=timestampMs(event?.observedAt);if(stamp===null)continue;
+      const chartTime=flowEventChartTime(stamp/1000);
       const candleIndex=flowEventCandleIndex(stamp/1000,bars,timeframe);
-      eligible.push({event,side,delta,premium,metric,stamp,candleIndex,sessionKey:newYorkDateKey(stamp)});
+      eligible.push({event,eventKey:bubbleEventKey(event),side,delta,premium,metric,stamp,chartTime,candleIndex,sessionKey:newYorkDateKey(stamp)});
     }
     const bySession=new Map();
     for(const item of eligible){if(!bySession.has(item.sessionKey))bySession.set(item.sessionKey,[]);bySession.get(item.sessionKey).push(item.metric);}
@@ -235,7 +302,7 @@
     return buildMappedMap(snapshot,sourcePrice,targetPrice,null,lockedAt);
   }
   window.crossAssetMapMath=Object.freeze({mapStrike,rankGexLevels,excludedKeyLevelStrikes,buildLockedMap,buildMappedMap,sameLevel});
-  window.crossAssetFlowMath=Object.freeze({eventDteDays,eventMoneyness,percentileThreshold,filterFlowEventData});
+  window.crossAssetFlowMath=Object.freeze({eventDteDays,eventMoneyness,percentileThreshold,filterFlowEventData,flowEventChartTime,flowEventLogicalLocation,flowEventLogicalTime,flowEventCandleIndex,flowChartTimeAtLogical,flowEventTargetPriceAt,flowEventMapping,persistBubbleAnchorCache});
   function activeIndicator(){
     try{return typeof ACT!=='undefined'?ACT.find(a=>a&&a.key==='xmap')||null:null}catch{return null;}
   }
@@ -302,7 +369,7 @@
     const changedAt=m.lastLevelChangeAt?new Date(m.lastLevelChangeAt).toLocaleTimeString('vi-VN'):'—';
     const flip=m.gammaFlip?.target==null?'Gamma Flip / Zero Gamma: unavailable':`Gamma Flip / Zero Gamma ${fmt(m.gammaFlip.target,2)} CFD`;
     const ratio=m.gexRatioState==='call-only'?'GEX Ratio ∞ · chỉ có Call GEX':m.gexRatio==null?'GEX Ratio: —':`GEX Ratio ${m.gexRatio.toFixed(2)}x · ${m.gexRatioBias==='call-dominant'?'Call Gamma trội':m.gexRatioBias==='put-dominant'?'Put Gamma trội':'cân bằng'}`;
-    el.textContent=`VOLUME FLOW · ${SOURCE_NAME[XMAP.source]} → ${pair()} · ${XMAP.events.length} events đã lưu · ${m.mappedCount||0} key levels · chain ${m.expiry||'—'} · last flow update ${XMAP.flowUpdatedAt?new Date(XMAP.flowUpdatedAt).toLocaleTimeString('vi-VN'):'—'}. Bubble đặt theo thời điểm server phát hiện Volume Delta và strike quy đổi; không đại diện limit/stop hoặc từng lệnh riêng lẻ.`;
+    el.textContent=`VOLUME FLOW · ${SOURCE_NAME[XMAP.source]} → ${pair()} · ${XMAP.events.length} events đã lưu · ${m.mappedCount||0} key levels · chain ${m.expiry||'—'} · last flow update ${XMAP.flowUpdatedAt?new Date(XMAP.flowUpdatedAt).toLocaleTimeString('vi-VN'):'—'}. Bubble đặt theo timestamp event đã quy đổi múi giờ chart; mức strike CFD được neo bằng spot ETF và nến CFD tại thời điểm event, không chạy theo spot hiện tại. Không đại diện limit/stop hoặc từng lệnh riêng lẻ.`;
     setState(XMAP.events.length?'Volume history loaded':'Đang chờ Volume events',XMAP.events.length?'ok':'warn');
   }
   function syncExpiryControl(snapshot){
@@ -358,6 +425,7 @@
       if(token!==flowFetchToken||!XMAP.enabled)return;
       if(!response.ok||payload?.ok===false)throw new Error(payload?.error||`Volume Flow API HTTP ${response.status}`);
       XMAP.events=(Array.isArray(payload.events)?payload.events:[]).slice().sort((a,b)=>Number(a.observedAt)-Number(b.observedAt));
+      XMAP.flowPrepared=null;
       XMAP.flowUpdatedAt=Date.now();XMAP.error='';XMAP.version++;
       try{if(typeof dirty!=='undefined')dirty=true}catch{}
       updateMeta();
@@ -605,7 +673,7 @@
   }
   function stop(){
     const wasOn=XMAP.enabled;
-    XMAP.enabled=false;XMAP.started=false;XMAP.snapshot=null;XMAP.locked=null;XMAP.events=[];XMAP.visibleBubbles=[];XMAP.selectedTrade=null;const tradePanel=$('xmapTradePanel');if(tradePanel)tradePanel.hidden=true;stopFlowPolling();XMAP.version++;
+    XMAP.enabled=false;XMAP.started=false;XMAP.snapshot=null;XMAP.locked=null;XMAP.events=[];XMAP.flowPrepared=null;XMAP.visibleBubbles=[];XMAP.selectedTrade=null;const tradePanel=$('xmapTradePanel');if(tradePanel)tradePanel.hidden=true;stopFlowPolling();XMAP.version++;
     if(wasOn){try{window.stockOptionsCrossAssetStop?.()}catch{}}
     updateMeta();
     try{if(typeof dirty!=='undefined')dirty=true}catch{}
@@ -620,7 +688,7 @@
     if(!XMAP.enabled||sourceChanged){if(XMAP.enabled)stop();XMAP.source=next.source;settingsSignature=signature;start();}
     else{
       XMAP.source=next.source;
-      if(settingsChanged){settingsSignature=signature;XMAP.version++;try{if(typeof dirty!=='undefined')dirty=true}catch{};updateMeta()}
+      if(settingsChanged){settingsSignature=signature;XMAP.flowPrepared=null;XMAP.version++;try{if(typeof dirty!=='undefined')dirty=true}catch{};updateMeta()}
     }
   }
   window.crossAssetMapIndicatorSync=syncIndicator;
@@ -664,8 +732,8 @@
     ctx.restore();
   }
   let lastMetaSymbol='';
-  function bubbleEventKey(event,index){
-    return String(event?.id??`${event?.optionSymbol||''}|${event?.observedAt||''}|${event?.volumeDelta||''}|${index}`);
+  function bubbleEventKey(event){
+    return String(event?.id??`${String(event?.symbol||'').toUpperCase()}|${event?.optionSymbol||''}|${event?.observedAt||''}|${event?.volumeDelta||''}`);
   }
   function possibleStructureEventKeys(events){
     const rows=Array.isArray(events)?events:[],buckets=new Map(),keys=rows.map(bubbleEventKey),candidate=new Set();
@@ -694,6 +762,32 @@
     });
     return candidate;
   }
+  function prepareFlowRenderData(P){
+    const events=Array.isArray(XMAP.events)?XMAP.events:[],bars=Array.isArray(agg)?agg:[];
+    const settingsKey=JSON.stringify(P),first=bars[0]?.st??null;
+    const existing=XMAP.flowPrepared;
+    if(existing&&existing.events===events&&existing.settingsKey===settingsKey&&existing.barCount===bars.length&&existing.firstBar===first&&existing.timeframe===C?.tf&&existing.target===pair())return existing;
+    const filtered=filterFlowEventData(events,P,bars,Math.max(1,Number(C?.tf)||60));
+    const multiLegKeys=P.showRings&&P.showMultiLeg?possibleStructureEventKeys(events):new Set();
+    const metricsBySession=new Map();
+    for(const item of filtered){if(!metricsBySession.has(item.sessionKey))metricsBySession.set(item.sessionKey,[]);metricsBySession.get(item.sessionKey).push(item.metric);}
+    const sessionScaleByKey=new Map([...metricsBySession].map(([key,values])=>[key,percentileThreshold(values,.05)||Math.max(1,...values)]));
+    const prepared={events,settingsKey,barCount:bars.length,firstBar:first,timeframe:C?.tf,target:pair(),filtered,multiLegKeys,sessionScaleByKey};
+    XMAP.flowPrepared=prepared;return prepared;
+  }
+  function lowerBoundChartTime(rows,time){let lo=0,hi=rows.length;while(lo<hi){const mid=(lo+hi)>>1;if(Number(rows[mid].chartTime)<time)lo=mid+1;else hi=mid;}return lo;}
+  function visibleFlowItems(rows,timeScale,width,limit,bars){
+    if(!rows.length)return [];
+    let range=null;try{range=timeScale.getVisibleLogicalRange?.()||null}catch{}
+    let start=0,end=rows.length;
+    if(range&&bars.length){
+      const from=flowChartTimeAtLogical(Number(range.from)-1.5,bars),to=flowChartTimeAtLogical(Number(range.to)+1.5,bars);
+      if(Number.isFinite(from)&&Number.isFinite(to)){start=lowerBoundChartTime(rows,from);end=lowerBoundChartTime(rows,to+0.001);}
+    }else start=Math.max(0,rows.length-limit);
+    let visible=rows.slice(start,end);
+    if(visible.length>limit)visible=visible.slice(-limit);
+    return visible;
+  }
   function drawBubblePath(context,x,y,radius,shape){
     context.beginPath();
     if(shape==='rectangle'){
@@ -717,17 +811,24 @@
       let y1=null,y2=null;
       try{y1=cs.priceToCoordinate(high);y2=cs.priceToCoordinate(low)}catch{}
       if(!Number.isFinite(y1)||!Number.isFinite(y2))continue;
-      let endX=w;
-      if(P.zoneLengthCandles>0){
-        try{const logicalEnd=item.candleIndex+P.zoneLengthCandles;const coord=ts.logicalToCoordinate(logicalEnd);if(Number.isFinite(coord))endX=Math.min(w,Math.max(item.x+2,coord));}catch{}
-      }else if(bars.length&&Number.isFinite(item.candleIndex)){
-        for(let index=Math.max(0,item.candleIndex+1);index<bars.length;index++){
-          const bar=bars[index],barHigh=num(bar.high),barLow=num(bar.low);
-          if(barHigh!==null&&barLow!==null&&barHigh>=low&&barLow<=high){
-            try{const coord=ts.logicalToCoordinate(index+.5);if(Number.isFinite(coord))endX=Math.min(w,Math.max(item.x+2,coord));}catch{}
-            break;
+      let endLogical=null;
+      if(P.zoneLengthCandles>0)endLogical=item.candleIndex+P.zoneLengthCandles;
+      else if(bars.length&&Number.isFinite(item.candleIndex)){
+        const zoneCacheKey=`${bars.length}|${P.zoneHeightPct}|${P.zoneLengthCandles}|${item.candleIndex}`;
+        if(item.zoneCacheKey!==zoneCacheKey){
+          item.zoneCacheKey=zoneCacheKey;item.zoneEndLogical=null;
+          // Exclude the still-forming last candle: a new bar triggers one recalculation,
+          // rather than rescanning history on every incoming CFD tick.
+          for(let index=Math.max(0,item.candleIndex+1);index<Math.max(item.candleIndex+1,bars.length-1);index++){
+            const bar=bars[index],barHigh=num(bar.high),barLow=num(bar.low);
+            if(barHigh!==null&&barLow!==null&&barHigh>=low&&barLow<=high){item.zoneEndLogical=index+.5;break;}
           }
         }
+        endLogical=item.zoneEndLogical;
+      }
+      let endX=w;
+      if(Number.isFinite(endLogical)){
+        try{const coord=ts.logicalToCoordinate(endLogical);if(Number.isFinite(coord))endX=Math.min(w,Math.max(item.x+2,coord));}catch{}
       }
       const top=Math.max(-2,Math.min(h,Math.min(y1,y2))),bottom=Math.max(-2,Math.min(h,Math.max(y1,y2)));
       const height=Math.max(2,bottom-top),width=Math.max(2,endX-item.x);
@@ -739,30 +840,28 @@
   }
   function drawFlowBubbles(w,h,indicator){
     const events=Array.isArray(XMAP.events)?XMAP.events:[];
-    const sp=sourceSpot(),tp=targetSpot();
-    if(!events.length||!(sp>0&&tp>0)){XMAP.visibleBubbles=[];return;}
+    if(!events.length){XMAP.visibleBubbles=[];return;}
     let timeScale=null;try{timeScale=chart.timeScale()}catch{XMAP.visibleBubbles=[];return;}
-    const P=XMAP.settings,tf=Math.max(1,Number(C?.tf)||60),bars=Array.isArray(agg)?agg:[];
-    const filtered=filterFlowEventData(events,P,bars,tf);
-    if(!filtered.length){XMAP.visibleBubbles=[];return;}
-    const recent=filtered.slice(-P.bubbleCount);
-    const metricsBySession=new Map();
-    for(const item of filtered){if(!metricsBySession.has(item.sessionKey))metricsBySession.set(item.sessionKey,[]);metricsBySession.get(item.sessionKey).push(item.metric);}
-    const sessionScaleByKey=new Map([...metricsBySession].map(([key,values])=>[key,percentileThreshold(values,.05)||Math.max(1,...values)]));
+    const P=XMAP.settings,bars=Array.isArray(agg)?agg:[],prepared=prepareFlowRenderData(P);
+    const recent=visibleFlowItems(prepared.filtered,timeScale,w,P.bubbleCount,bars);
+    if(!recent.length){XMAP.visibleBubbles=[];return;}
+    const sessionScaleByKey=prepared.sessionScaleByKey;
     const absoluteScale=Math.max(1,num(P.source==='gld'?P.absoluteScaleMaxGld:P.absoluteScaleMaxQqq)||1000);
     const labelMode=P.bubbleLabelMode==='cp'?'cp':'volume';
     const shape=P.bubbleShape||'circle',glossy=P.bubbleStyle==='glossy';
     const callColor=indicator?.c?.[2]||'#35e59a',putColor=indicator?.c?.[3]||'#ff536b';
-    const multiLegKeys=P.showRings&&P.showMultiLeg?possibleStructureEventKeys(events):new Set();
     const visible=[];
     for(const item of recent){
-      const event=item.event,stamp=item.stamp,strike=num(event.strike);
+      const event=item.event,strike=num(event.strike);
       if(!(strike>0))continue;
-      const logicalTime=flowEventLogicalTime(stamp/1000),candleIndex=item.candleIndex;
-      const logical=P.horizontalPosition==='candle'?candleIndex:logicalTime;
-      if(logical===null||!Number.isFinite(logical))continue;
-      let x=null,y=null,mappedPrice=null;
-      try{mappedPrice=tp*(strike/sp);x=ts.logicalToCoordinate(logical);y=cs.priceToCoordinate(mappedPrice)}catch{continue;}
+      const location=flowEventLogicalLocation(item.stamp/1000,bars,Math.max(1,Number(C?.tf)||60));
+      if(!location)continue;
+      const logical=P.horizontalPosition==='candle'?location.candleIndex:location.logical;
+      const mapping=flowEventMapping(event);
+      if(!mapping)continue;
+      const mappedPrice=mapping.mappedPrice;
+      let x=null,y=null;
+      try{x=ts.logicalToCoordinate(logical);y=cs.priceToCoordinate(mappedPrice)}catch{continue;}
       if(!Number.isFinite(x)||!Number.isFinite(y)||x<-60||x>w+60||y<-60||y>h+60)continue;
       const scaleBase=P.sizeScaling==='absolute'?absoluteScale:(sessionScaleByKey.get(item.sessionKey)||absoluteScale);
       const norm=Math.max(0,Math.min(1,item.metric/scaleBase));
@@ -774,12 +873,13 @@
       if(biggest>0)diameter=Math.min(diameter,biggest);
       if(smallest>0&&biggest>0&&biggest<smallest)diameter=biggest;
       const radius=Math.max(4,Math.min(50,diameter/2));
-      const key=bubbleEventKey(event,events.indexOf(event)),isMulti=multiLegKeys.has(key);
+      const isMulti=prepared.multiLegKeys.has(item.eventKey);
       const large=item.largeThreshold!==null&&item.largeThreshold!==undefined&&item.metric>=item.largeThreshold;
       if(P.showRings&&isMulti&&!P.showMultiLeg)continue;
       if(P.showRings&&!isMulti&&!large&&!P.showUnlinked)continue;
-      visible.push({...item,event,x,y,mappedPrice,logical,radius,side:item.side,color:item.side==='C'?callColor:putColor,isMulti,large,isUnlinked:!isMulti});
+      visible.push({...item,event,x,y,mappedPrice,mappingRatio:mapping.ratio,logical,radius,side:item.side,color:item.side==='C'?callColor:putColor,isMulti,large,isUnlinked:!isMulti,candleIndex:location.candleIndex});
     }
+    persistBubbleAnchorCache();
     if(!visible.length){XMAP.visibleBubbles=[];return;}
     drawActivityZones(visible,w,h,P);
     ctx.save();ctx.textBaseline='middle';
@@ -811,9 +911,7 @@
       const strikeText=`${isInterval?'~':''}${strikeLabel}`;
       const labelX=item.x>w-142?item.x-item.radius-5:item.x+item.radius+5;
       ctx.save();ctx.font='700 10px "Space Grotesk",sans-serif';ctx.textAlign=item.x>w-142?'right':'left';ctx.textBaseline='middle';ctx.fillStyle=item.color;ctx.fillText(strikeText,labelX,item.y-4);
-      if(P.showPremiumOnBubble&&item.premium>0){
-        const premiumText=`EST $${compact(item.premium)}`;ctx.font='600 8px "Space Grotesk",sans-serif';ctx.fillStyle='#d5e1eb';ctx.fillText(premiumText,labelX,item.y+8);
-      }
+      if(P.showPremiumOnBubble&&item.premium>0){const premiumText=`EST $${compact(item.premium)}`;ctx.font='600 8px "Space Grotesk",sans-serif';ctx.fillStyle='#d5e1eb';ctx.fillText(premiumText,labelX,item.y+8);}
       ctx.restore();
     }
     XMAP.visibleBubbles=visible;
@@ -823,19 +921,20 @@
   function drawTradePayoffOverlay(w,h){
     const trade=XMAP.selectedTrade,payoff=trade?.payoff,math=tradeMath();
     if(!payoff||!math||!Array.isArray(trade.legs)||!trade.legs.length)return;
-    const sp=sourceSpot(),tp=targetSpot();if(!(sp>0&&tp>0))return;
-    const stamp=timestampMs(trade.event?.observedAt),logical=stamp?flowEventLogicalTime(stamp/1000):null;
-    let startX=logical===null?0:ts.logicalToCoordinate(logical);if(!Number.isFinite(startX))startX=0;startX=Math.max(0,Math.min(w-4,startX));
+    const stamp=timestampMs(trade.event?.observedAt),location=stamp?flowEventLogicalLocation(stamp/1000):null;
+    const mapping=flowEventMapping(trade.event);if(!location||!mapping||!(mapping.ratio>0))return;
+    const logical=location.logical;
+    let startX=ts.logicalToCoordinate(logical);if(!Number.isFinite(startX))return;startX=Math.max(0,Math.min(w-4,startX));
     ctx.save();ctx.beginPath();ctx.rect(0,0,w,h);ctx.clip();
     // Paint expiry P/L bands along the price axis, projected to the right of the selected flow event.
     const step=4;for(let y=0;y<h;y+=step){let targetPrice=null;try{targetPrice=cs.coordinateToPrice(y+step/2)}catch{}if(!(targetPrice>0))continue;
-      const etfPrice=sp*(targetPrice/tp),pnl=math.payoffAt(trade.legs,etfPrice);if(!Number.isFinite(pnl)||Math.abs(pnl)<0.01)continue;
+      const etfPrice=targetPrice/mapping.ratio,pnl=math.payoffAt(trade.legs,etfPrice);if(!Number.isFinite(pnl)||Math.abs(pnl)<0.01)continue;
       ctx.fillStyle=pnl>0?'rgba(32,190,130,.115)':'rgba(236,75,105,.12)';ctx.fillRect(startX,y,w-startX,step+1);
     }
     // Anchor line at the event time.
     ctx.strokeStyle='rgba(231,241,250,.68)';ctx.lineWidth=1;ctx.setLineDash([3,4]);ctx.beginPath();ctx.moveTo(startX,0);ctx.lineTo(startX,h);ctx.stroke();ctx.setLineDash([]);
     const drawPayoffLine=(sourcePrice,label,color,dash=[7,4])=>{
-      const targetPrice=mapStrike(sourcePrice,sp,tp),y=cs.priceToCoordinate(targetPrice);if(!Number.isFinite(y)||y<-20||y>h+20)return;
+      const targetPrice=sourcePrice*mapping.ratio,y=cs.priceToCoordinate(targetPrice);if(!Number.isFinite(y)||y<-20||y>h+20)return;
       ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.setLineDash(dash);ctx.beginPath();ctx.moveTo(startX,y);ctx.lineTo(w,y);ctx.stroke();ctx.setLineDash([]);
       ctx.font='700 9px "Space Grotesk",sans-serif';const text=`${label} ${fmt(targetPrice,2)}`,width=ctx.measureText(text).width+10,x=Math.max(startX+3,w-width-5);
       ctx.fillStyle='rgba(5,12,20,.86)';ctx.fillRect(x,y-9,width,17);ctx.fillStyle=color;ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(text,x+5,y);
@@ -843,7 +942,7 @@
     (payoff.breakevens||[]).forEach((value,index)=>drawPayoffLine(value,`BREAKEVEN ${index+1}`,'#65dff0',[5,3]));
     for(const leg of trade.legs)drawPayoffLine(leg.strike,`${leg.side==='buy'?'BUY':'SELL'} ${leg.type}${fmt(leg.strike,2).replace(/\.00$/,'')}`,'rgba(185,205,224,.72)',[2,5]);
     // Compact chart-native summary tags, similar to the reference experience.
-    const firstBE=payoff.breakevens?.[0],mappedBE=firstBE!==undefined?mapStrike(firstBE,sp,tp):null;
+    const firstBE=payoff.breakevens?.[0],mappedBE=firstBE!==undefined?firstBE*mapping.ratio:null;
     const metrics=[
       ...(mappedBE!==null?[{text:`Breakeven ${fmt(mappedBE,2)}`,color:'#66dff0'}]:[]),
       {text:`Max profit ${payoff.unlimitedProfit?'Unlimited':'+'+tradeMoney(payoff.maxProfit)}`,color:'#55dca6'},

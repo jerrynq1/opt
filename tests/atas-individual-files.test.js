@@ -166,7 +166,7 @@ test('Service Worker precaches every remaining indicator module with updated cac
   assert.doesNotMatch(sw, /multimarketpower\.js/);
   assert.match(sw, /const batchSize = 24/);
   assert.match(sw, /cache\.addAll\(SHELL\.slice\(i, i \+ batchSize\)\)/);
-  assert.match(sw, /ict-quantlab-shell-v65/);
+  assert.match(sw, /ict-quantlab-shell-v66/);
   assert.match(sw, /\.\/indicators\/atas-session-runtime\.js/);
 });
 
