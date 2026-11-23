@@ -1,28 +1,18 @@
 /* ================= BINANCE STOCK OPTIONS: QQQ + GLD =================
-   Uses a narrowly allow-listed Cloudflare Worker proxy for Binance Stock
-   Options REST endpoints (the quote endpoint is origin-restricted by Binance).
-   Spot is read from the home's Node gateway through the Named Tunnel; a
-   direct browser Binance socket remains only as a fallback.
-   Public stock Kline stream is live-only: historical bars are not fabricated.
+   Expiry inventory, full option chains, quotes and Volume are read-only from
+   the Node Gateway's persistent SQLite cache. The browser never requests
+   Binance Option REST endpoints and never opens an Option Chain WebSocket.
+   Spot uses the Node Gateway; a direct Binance price socket is only a fallback
+   if the Gateway is unavailable. Public stock Kline history is not fabricated.
 */
 (function(){
   'use strict';
 
-  const API_BASE = String(window.BINANCE_STOCK_PROXY || '').replace(/\/+$/, '');
-  const API_PREFIX = API_BASE + '/api/binance-stock-proxy';
-  // Binance HAR confirms chain-symbols replies with Access-Control-Allow-Origin: *.
-  // Try this public GET directly from GitHub Pages; only quote POST stays on Worker
-  // because Binance restricts that endpoint's CORS origin to www.binance.com.
-  const BINANCE_PUBLIC_BASE = 'https://www.binance.com';
-  const DIRECT_PUBLIC_PATHS = ['/bapi/equity/v1/public/equity/option/chain-symbols', '/bapi/equity/v1/public/equity/option/get-config', '/bapi/equity/v1/public/equity/option/get-exchange-info'];
-  function ensureProxyConfigured(){
-    if(!API_BASE) throw new Error('Chưa cấu hình Cloudflare Worker. Hãy deploy worker/ rồi dán URL workers.dev vào js/stock-options-config.js.');
-  }
-  const WS_URL = 'wss://nbstream.binance.com/equity/stream';
   // Use Binance's documented raw price endpoint on its own socket. This
   // prevents an invalid/delayed option-chain subscription from rejecting Spot.
   const PRICE_WS_DIRECT_URL = 'wss://nbstream.binance.com/equity/ws/price';
   const SPOT_SERVER_BASE = String(window.BINANCE_STOCK_SPOT_API || '').replace(/\/+$/, '');
+  const CACHE_API_BASE = String(window.BINANCE_STOCK_CACHE_API || SPOT_SERVER_BASE || '').replace(/\/+$/, '');
   const CONFIG = {
     qqq: {key:'qqq', symbol:'QQQ', assetCode:'EQ_QQQ', name:'Invesco QQQ Trust', root:'QQQ'},
     gld: {key:'gld', symbol:'GLD', assetCode:'EQ_GLD', name:'SPDR Gold Trust', root:'GLD'}
@@ -251,7 +241,7 @@
           <span class="opt-meta-item"><small>NULL OI / VOLUME</small><b>Giả định 0 cho analytics · tự cập nhật khi có dữ liệu</b></span>
         </div>
         <div class="opt-method" id="${p}-method" hidden>
-          <p><strong>Nguồn Option Chain:</strong> Binance Stock Options <code>option/chain-symbols</code> liệt kê OCC symbols theo ngày đáo hạn; <code>get-option-quote</code> trả Bid/Ask/Mid, volume, OI, multiplier, IV và Greeks.</p>
+          <p><strong>Nguồn Option Chain:</strong> Node.js collector đồng bộ expiry và toàn bộ contract/quote từ Binance rồi lưu vào SQLite. Trình duyệt chỉ đọc snapshot đã lưu qua API nội bộ; mọi cập nhật Binance được xử lý ở server.</p>
           <p><strong>Contract size:</strong> multiplier được đọc từ quote hoặc contract metadata. Với OCC root QQQ/GLD chuẩn, nếu cả hai nguồn không gửi multiplier, QuantLab ghi rõ giả định chuẩn 100 shares; adjusted OCC roots không dùng giả định này. OI hoặc Volume trả <code>null</code> được giả định bằng 0 cho analytics khi OCC quote đã nhận đầy đủ; giá trị thô vẫn giữ null và được đánh dấu assumed-zero cho tới khi Binance gửi số liệu thực.</p>
           <p><strong>GEX:</strong> Σ(Gamma × OI × multiplier × Spot² × 0.01), Call dương và Put âm. Nếu Binance không trả Gamma cho contract, QuantLab tự tính Gamma bằng Black–Scholes từ IV, strike, Spot và DTE (r = 0%; q theo underlying: QQQ 0.45%, GLD 0%); chỉ khi thiếu cả Gamma provider lẫn IV hợp lệ thì contract đó mới bị tính là thiếu GEX. <strong>DEX:</strong> Σ(Delta × OI × multiplier × Spot). Vega và Theta tổng hợp từ Greek × OI × multiplier. <strong>Vanna Exposure:</strong> BSM ∂Delta/∂σ × OI × multiplier × Spot × 0.01, đơn vị USD delta-notional thay đổi trên mỗi +1 vol point. <strong>Charm Exposure:</strong> BSM ∂Delta/∂calendar-time × OI × multiplier × Spot / 365.25, đơn vị USD delta-notional thay đổi mỗi ngày lịch. Vanna/Charm không áp quy tắc Call+/Put−; số tổng hợp là OI-weighted model sensitivity, không phải net dealer positioning vì OI không xác định holder Long/Short.</p>
           <p><strong>Key Levels:</strong> Call/Put OI Wall được tính riêng từ OI lớn nhất của từng phía. CW là strike có Net GEX dương lớn nhất; PW là strike có Net GEX âm lớn nhất theo trị tuyệt đối. Net GEX theo strike được tự tính từ Gamma provider hoặc Gamma BSM suy ra từ IV nếu provider bỏ trống. GEX 1–10 xếp các strike còn lại theo |Net GEX| sau khi loại CW, PW, Call/Put OI Wall, Max Pain và Gamma Flip nếu trùng strike. GEX Ratio = tổng Call GEX / |tổng Put GEX|. Ratio > 1: Call Gamma trội, thiên hướng ổn định và biên độ hẹp; ratio < 1: Put Gamma trội, rủi ro biến động mạnh và trượt giá cao. Đây là heuristic theo quy ước Call+/Put−, không xác nhận dealer positioning.</p>
@@ -293,7 +283,7 @@
   }
 
   // ---- Network resilience: each fetch is bounded, and the complete logical request has one deadline. ----
-  const REQUEST_TIMEOUT_MS=12000, REQUEST_TOTAL_TIMEOUT_MS=30000, REQUEST_RETRY_BASE_MS=800;
+  const REQUEST_TIMEOUT_MS=12000;
   function transientError(message,extra){const e=new Error(message);e.retryable=true;if(extra)Object.assign(e,extra);return e;}
   function cancelledError(){const e=new Error('Request cancelled because its session is no longer active');e.name='AbortError';e.cancelled=true;return e;}
   function deadlineError(){return transientError('Logical request exceeded its total time budget',{timeout:true,totalTimeout:true});}
@@ -335,92 +325,20 @@
       externalSignal?.removeEventListener?.('abort',onExternalAbort);
     }
   }
-  async function request(path,method='GET',body,requestOptions={}){
-    const retries=method==='GET'?2:1;
-    const timeoutMs=Math.max(1,Number(requestOptions.timeoutMs)||REQUEST_TOTAL_TIMEOUT_MS);
-    const deadlineAt=Date.now()+timeoutMs;
-    const signal=requestOptions.signal;
-    let lastError;
-    for(let attempt=0;attempt<=retries;attempt++){
-      if(signal?.aborted)throw cancelledError();
-      if(Date.now()>=deadlineAt)throw deadlineError();
-      try{return await requestOnce(path,method,body,{...requestOptions,deadlineAt});}
-      catch(e){
-        if(signal?.aborted||e?.cancelled)throw cancelledError();
-        if(Date.now()>=deadlineAt)throw deadlineError();
-        lastError=e;
-        if(!e?.retryable||attempt===retries)throw e;
-        const wait=Math.min(REQUEST_RETRY_BASE_MS*Math.pow(2,attempt)+Math.floor(Math.random()*250),Math.max(0,deadlineAt-Date.now()));
-        if(wait<=0)throw deadlineError();
-        await new Promise((resolve,reject)=>{
-          const timer=setTimeout(done,wait);
-          function done(){signal?.removeEventListener?.('abort',onAbort);resolve();}
-          function onAbort(){clearTimeout(timer);signal?.removeEventListener?.('abort',onAbort);reject(cancelledError());}
-          signal?.addEventListener?.('abort',onAbort,{once:true});
-        });
-      }
+  async function cacheRequest(path, requestOptions={}) {
+    if (!CACHE_API_BASE) throw new Error('Chưa cấu hình BINANCE_STOCK_CACHE_API / Node Gateway trong js/stock-options-config.js.');
+    const timeoutMs = Math.max(1, Number(requestOptions.timeoutMs) || 20_000);
+    const deadlineAt = Date.now() + timeoutMs;
+    const response = await fetchWithTimeout(CACHE_API_BASE + path, {
+      method: 'GET', headers: { Accept: 'application/json' }, signal: requestOptions.signal
+    }, REQUEST_TIMEOUT_MS, deadlineAt);
+    const text = await response.text();
+    let payload;
+    try { payload = JSON.parse(text); } catch { throw new Error('Node Options Cache trả dữ liệu không phải JSON: ' + text.slice(0, 120)); }
+    if (!response.ok || payload?.ok === false) {
+      throw Object.assign(new Error(payload?.error || `Node Options Cache HTTP ${response.status}`), { status: response.status, retryable: response.status >= 500 });
     }
-    throw lastError||deadlineError();
-  }
-  async function requestOnce(path,method='GET',body,requestOptions={}){
-    const isDirectPublic=method==='GET'&&DIRECT_PUBLIC_PATHS.some(prefix=>path.startsWith(prefix));
-    const options={method,headers:{'Accept':'application/json'},signal:requestOptions.signal};
-    if(body!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(body);}
-    const proxyUrl=API_BASE?(API_PREFIX+path):'';
-    const deadlineAt=requestOptions.deadlineAt??(Date.now()+REQUEST_TOTAL_TIMEOUT_MS);
-    let response=null,directProblem='';
-
-    if(isDirectPublic){
-      // Public metadata is attempted directly first, then through the narrow Worker fallback.
-      try{
-        const direct=await fetchWithTimeout(BINANCE_PUBLIC_BASE+path,options,REQUEST_TIMEOUT_MS,deadlineAt);
-        if(direct.ok)response=direct;
-        else directProblem=`HTTP ${direct.status}: ${(await direct.text()).slice(0,160)}`;
-      }catch(e){
-        if(e?.cancelled||e?.totalTimeout||requestOptions.signal?.aborted)throw e;
-        directProblem=e.message||String(e);
-      }
-      if(!response){
-        if(!proxyUrl)throw new Error(`Không gọi được Binance trực tiếp (${directProblem||'network/CORS'}). Chưa cấu hình Cloudflare Worker fallback trong js/stock-options-config.js.`);
-        try{response=await fetchWithTimeout(proxyUrl,options,REQUEST_TIMEOUT_MS,deadlineAt);}
-        catch(e){
-          if(e?.cancelled||e?.totalTimeout||requestOptions.signal?.aborted)throw e;
-          throw transientError(`Binance direct không khả dụng (${directProblem||'network/CORS'}); Worker fallback cũng lỗi (${e.message||e}). Kiểm tra mạng và URL Worker trong js/stock-options-config.js.`,{timeout:!!e?.timeout});
-        }
-      }
-    }else{
-      ensureProxyConfigured();
-      try{response=await fetchWithTimeout(proxyUrl,options,REQUEST_TIMEOUT_MS,deadlineAt);}
-      catch(e){
-        if(e?.cancelled||e?.totalTimeout||requestOptions.signal?.aborted)throw e;
-        throw transientError('Không gọi được Binance proxy. Kiểm tra URL Cloudflare Worker trong js/stock-options-config.js. Chi tiết: '+(e.message||e),{timeout:!!e?.timeout});
-      }
-    }
-
-    const text=await response.text();
-    if(!response.ok){
-      const message=`HTTP ${response.status}: ${text.slice(0,180)}`;
-      const retryable=response.status>=500||response.status===429||response.status===408;
-      if(isDirectPublic)throw Object.assign(new Error(`Binance direct không khả dụng (${directProblem||'network/CORS'}); Worker fallback trả ${message}. Kiểm tra Worker và Binance upstream.`),{retryable,status:response.status});
-      throw Object.assign(new Error(`Binance Worker ${message}`),{retryable,status:response.status});
-    }
-    let json;
-    try{json=JSON.parse(text)}catch{throw new Error('Binance trả response không phải JSON: '+text.slice(0,120));}
-    if(json&&json.code&&json.code!=='000000'&&json.code!=='0')throw new Error(json.message||json.msg||`Binance error ${json.code}`);
-    if(json&&json.success===false)throw new Error(json.message||'Binance API request failed');
-    return json;
-  }
-  // The Options product page contains the exchange's currently listed expiries,
-  // including long-dated contracts. Use the already allow-listed Worker route
-  // when the metadata API does not expose an expiry inventory.
-  async function requestText(path,requestOptions={}){
-    ensureProxyConfigured();
-    const timeoutMs=Math.max(1,Number(requestOptions.timeoutMs)||REQUEST_TOTAL_TIMEOUT_MS);
-    const deadlineAt=Date.now()+timeoutMs;
-    const response=await fetchWithTimeout(API_PREFIX+path,{method:'GET',headers:{'Accept':'text/html'},signal:requestOptions.signal},REQUEST_TIMEOUT_MS,deadlineAt);
-    const body=await response.text();
-    if(!response.ok)throw Object.assign(new Error(`Binance page HTTP ${response.status}: ${body.slice(0,160)}`),{status:response.status,retryable:response.status>=500||response.status===429});
-    return body;
+    return payload;
   }
 
   function setStatus(s,text,kind=''){
@@ -430,131 +348,23 @@
   function showError(s,msg){
     const el=$(`so-${s.cfg.key}-error`);if(!el)return;
     const detail=String(msg??'Unknown error');
-    el.innerHTML=`<div class="opt-error-copy"><strong>Không tải được Option Chain</strong><span>Kiểm tra kết nối internet và URL Cloudflare Worker trong <code>js/stock-options-config.js</code>.</span></div><details class="opt-error-details"><summary>Chi tiết kỹ thuật</summary><p>${esc(detail)}</p></details>`;
+    el.innerHTML=`<div class="opt-error-copy"><strong>Không tải được Option Chain</strong><span>Kiểm tra Node Gateway, /api/options-cache/status và trạng thái đồng bộ của collector.</span></div><details class="opt-error-details"><summary>Chi tiết kỹ thuật</summary><p>${esc(detail)}</p></details>`;
     el.hidden=false;
   }
   function clearError(s){const el=$(`so-${s.cfg.key}-error`);if(el){el.hidden=true;el.innerHTML='';}}
 
 
-  const EXPIRY_DISCOVERY_DAYS=90, EXPIRY_DISCOVERY_LIMIT=64, EXPIRY_DISCOVERY_CONCURRENCY=4;
-  function candidateDates(limit=EXPIRY_DISCOVERY_LIMIT){
-    const out=[],base=new Date(isoTodayNY()+'T12:00:00Z');
-    for(let i=0;i<EXPIRY_DISCOVERY_DAYS&&out.length<limit;i++){
-      const d=new Date(base.getTime()+i*86400000),day=d.getUTCDay();
-      if(day===0||day===6)continue;
-      out.push(d.toISOString().slice(0,10));
-    }
-    return out;
-  }
-  function validExpiryDate(year,month,day){
-    const d=`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-    const parsed=new Date(d+'T12:00:00Z');return Number.isFinite(parsed.getTime())&&parsed.toISOString().slice(0,10)===d?d:null;
-  }
-  function parseExpiryValue(value){
-    if(value===null||value===undefined||value==='')return null;
-    const valueText=String(value).trim();
-    if(/^\d{8}$/.test(valueText)){const m=valueText.match(/^(\d{4})(\d{2})(\d{2})$/);return validExpiryDate(m[1],m[2],m[3]);}
-    if(typeof value==='number'||/^\d{10,13}$/.test(valueText)){
-      const n=Number(value),ms=n<1e11?n*1000:n;
-      if(!Number.isFinite(ms)||ms<0)return null;
-      const d=new Date(ms);if(!Number.isFinite(d.getTime()))return null;
-      return d.toISOString().slice(0,10);
-    }
-    const raw=String(value).trim();
-    let m=raw.match(/^(\d{4})[-/](\d{2})[-/](\d{2})(?:T.*)?$/);
-    if(m)return validExpiryDate(m[1],m[2],m[3]);
-    m=raw.match(/^(\d{4})(\d{2})(\d{2})$/);
-    if(m)return validExpiryDate(m[1],m[2],m[3]);
-    m=raw.match(/^(\d{2})(\d{2})(\d{2})$/);
-    if(m)return validExpiryDate(`20${m[1]}`,m[2],m[3]);
-    return null;
-  }
-  function extractExpiryDates(payload,cfg){
-    const dates=new Set(),root=String(cfg?.root||cfg?.symbol||'').toUpperCase(),symbolRe=root?new RegExp('^'+root+'[A-Z0-9]{0,3}(\\d{6})[CP]\\d{8}$','i'):null;
-    const dateKeys=new Set(['expirationdate','expirydate','expiration','expiry','expirationday','expirydays']);
-    const symbolKeys=new Set(['os','optionsymbol','symbol','contractsymbol']);
-    const arrayDateKeys=new Set(['expirationdates','expirydates','expirations','expirylist','expirationdatelist','expirydatelist']);
-    const add=v=>{const d=parseExpiryValue(v);if(d)dates.add(d);};
-    function visit(node,depth=0){
-      if(!node||typeof node!=='object'||depth>12)return;
-      if(Array.isArray(node)){for(const child of node)visit(child,depth+1);return;}
-      const entries=Object.entries(node),get=(keys)=>entries.find(([k])=>keys.has(k.toLowerCase()))?.[1];
-      const sym=get(symbolKeys),underlying=get(new Set(['underlying','underlyingasset','root','rootsymbol','baseasset']));
-      let belongs=true;
-      if(typeof sym==='string'&&symbolRe){
-        const m=sym.toUpperCase().match(symbolRe);
-        if(m){const v=m[1];add(`20${v.slice(0,2)}-${v.slice(2,4)}-${v.slice(4,6)}`);}
-        else if(!sym.toUpperCase().startsWith(root))belongs=false;
-      }
-      if(typeof underlying==='string'&&root&&!['QQQ','GLD',`EQ_${root}`].includes(underlying.toUpperCase()))belongs=false;
-      if(belongs){
-        for(const [key,value] of entries){
-          const lower=key.toLowerCase();
-          if(dateKeys.has(lower)||(/expir|maturit/i.test(lower)&&!Array.isArray(value)))add(value);
-          else if((arrayDateKeys.has(lower)||(/expir|maturit/i.test(lower)&&Array.isArray(value)))&&Array.isArray(value))for(const item of value){
-            if(typeof item==='string'||typeof item==='number')add(item);
-            else visit(item,depth+1);
-          }
-        }
-      }
-      for(const [,value] of entries)if(value&&typeof value==='object')visit(value,depth+1);
-    }
-    visit(payload);
-    return [...dates].sort();
-  }
-  function extractExpiryDatesFromHtml(html,cfg,today=isoTodayNY()){
-    const text=String(html||''),dates=new Set(),year=Number(today.slice(0,4));
-    const explicit=/(?:^|[^0-9])(20\d{2})[-/](\d{2})[-/](\d{2})(?![0-9])/g;
-    for(const m of text.matchAll(explicit)){const d=validExpiryDate(m[1],m[2],m[3]);if(d&&d>=today)dates.add(d);}
-    const short=/(?:^|[^0-9-])(\d{2})-(\d{2})(?![0-9])/g;
-    for(const m of text.matchAll(short)){
-      const month=Number(m[1]),day=Number(m[2]);if(month<1||month>12||day<1||day>31)continue;
-      let d=validExpiryDate(year,month,day);if(!d)continue;
-      if(d<today)d=validExpiryDate(year+1,month,day);
-      if(d)dates.add(d);
-    }
-    return [...dates].sort();
-  }
   async function loadExpirations(s,requestOptions={}){
-    const cfg=s.cfg;
-    setStatus(s,'Đang lấy expiry từ Binance…','loading');
-    const found=new Map();let metadataError='',pageError='',scanError='',metadataSource='';
-    // Prefer the exchange inventory where available.
-    try{
-      const info=await request(`/bapi/equity/v1/public/equity/option/get-exchange-info?${new URLSearchParams({symbol:cfg.symbol,rootSymbol:cfg.root})}`,'GET',undefined,requestOptions);
-      for(const date of extractExpiryDates(info,cfg))if(date>=isoTodayNY())found.set(date,{date,root:cfg.root});
-      if(found.size)metadataSource='exchange-info';
-    }catch(e){if(requestOptions.signal?.aborted)throw e;metadataError=e.message||String(e);}
-
-    // The official product page lists near- and long-dated expiry dates. Its route
-    // is already allow-listed in the Worker and is a better fallback than probing
-    // hundreds of calendar days one by one.
-    if(!found.size){
-      try{
-        const html=await requestText(`/en/stocks/options/${cfg.assetCode}`,requestOptions);
-        for(const date of extractExpiryDatesFromHtml(html,cfg))if(date>=isoTodayNY())found.set(date,{date,root:cfg.root});
-        if(found.size)metadataSource='options-page';
-      }catch(e){if(requestOptions.signal?.aborted)throw e;pageError=e.message||String(e);}
-    }
-
-    // Last-resort bounded discovery for an unavailable/changed page or metadata response.
-    let checked=0;
-    const metadataStatus=Number((metadataError+' '+pageError).match(/HTTP (\d{3})/)?.[1]||0);
-    const metadataAllowsScan=!metadataError&&!pageError||metadataStatus===400||metadataStatus===404||metadataStatus===405;
-    if(!found.size&&metadataAllowsScan){
-      const dates=candidateDates();checked=dates.length;let next=0;
-      async function worker(){while(next<dates.length){if(requestOptions.signal?.aborted)return;const d=dates[next++];try{
-        const data=await request(`/bapi/equity/v1/public/equity/option/chain-symbols?${new URLSearchParams({symbol:cfg.symbol,rootSymbol:cfg.root,expirationDate:d})}`,'GET',undefined,requestOptions);
-        const list=data.data?.l||[];if(list.length)found.set(d,{date:d,root:cfg.root});
-      }catch(e){if(requestOptions.signal?.aborted)return;if(!scanError)scanError=e.message||String(e);}}}
-      await Promise.all(Array.from({length:Math.min(EXPIRY_DISCOVERY_CONCURRENCY,dates.length)},worker));
-    }
-    if(requestOptions.signal?.aborted)return [];
-    const result=[...found.values()].sort((a,b)=>a.date.localeCompare(b.date));
-    s.expirations=result;
-    s.expiryDiscovery={source:result.length&&!checked?metadataSource:checked?'90-day-scan':'unavailable',exact:!checked&&result.length>0,checked,calendarDays:EXPIRY_DISCOVERY_DAYS,
-      from:isoTodayNY(),through:new Date(new Date(isoTodayNY()+'T12:00:00Z').getTime()+(EXPIRY_DISCOVERY_DAYS-1)*86400000).toISOString().slice(0,10),metadataError,pageError,scanError};
-    if(!result.length)throw new Error(`Không tìm thấy expiry ${cfg.symbol}. Exchange info: ${metadataError||'không có ngày expiry'}; Options page: ${pageError||'không có ngày expiry'}; ${metadataAllowsScan?'date scan: '+(scanError||'không có contract trong phạm vi 90 ngày.'):'không scan tiếp vì Binance upstream đang lỗi.'}`);
+    setStatus(s,'Đang đọc expiry từ database server…','loading');
+    const payload = await cacheRequest(`/api/options-cache/expiries?symbol=${encodeURIComponent(s.cfg.symbol)}`, requestOptions);
+    const result = (payload.expiries || []).map(item => ({
+      date: String(item.expiry || item.date || '').slice(0,10), root: s.cfg.root,
+      contractCount: Number(item.contractCount || 0), quoteCount: Number(item.quoteCount || 0), storedContracts: Number(item.storedContracts || 0), ready: item.ready === true, updatedAt: item.updatedAt || null
+    })).filter(item => /^\d{4}-\d{2}-\d{2}$/.test(item.date)).sort((a,b)=>a.date.localeCompare(b.date));
+    if (!result.length) throw new Error(`Server chưa lưu expiry ${s.cfg.symbol}. Hãy kiểm tra /api/options-cache/status và để Collector đồng bộ full chain trước khi mở website.`);
+    s.expirations = result;
+    s.expiryDiscovery = { source: 'server-sqlite', exact: true, checked: result.length, calendarDays: null,
+      from: result[0].date, through: result.at(-1).date, updatedAt: payload.updated_at || null };
     return result;
   }
 
@@ -628,6 +438,7 @@
     }
     return [];
   }
+
   function mergeQuoteSnapshot(previous,incoming){
     if(!previous)return incoming;
     const merged={...previous,...incoming};
@@ -675,43 +486,20 @@
   }
   async function fetchQuoteBatches(s,symbols,token,expiry,concurrency=2,requestOptions={}){
     const requested=[...new Set((symbols||[]).filter(Boolean))];
-    let pending=requested.slice(),receivedCount=0,lastError='';
-    for(let attempt=0;attempt<3&&pending.length;attempt++){
-      const batchSize=attempt===0?100:Math.min(50,Math.max(1,pending.length));
-      const batches=[];for(let i=0;i<pending.length;i+=batchSize)batches.push(pending.slice(i,i+batchSize));
-      let next=0;const returnedThisRound=new Set();
-      async function worker(){
-        while(next<batches.length){
-          const batch=batches[next++];
-          try{
-            const reply=await request('/bapi/equity/v1/friendly/equity/option/get-option-quote','POST',{occSymbols:batch},requestOptions);
-            if(token!==s.chainLoadToken||expiry!==s.expiry)return;
-            const received=quoteRowsFromReply(reply).map(normaliseQuote).filter(q=>q.optionSymbol);
-            for(const q of received){
-              if(!s.contractSymbols?.has(q.optionSymbol)||!batch.includes(q.optionSymbol))continue;
-              returnedThisRound.add(q.optionSymbol);
-              const meta=s.contractMeta?.get(q.optionSymbol);
-              const enriched=meta?mergeQuoteSnapshot(meta,q):q;
-              const old=s.quotes.get(q.optionSymbol);
-              s.quotes.set(q.optionSymbol,mergeQuoteSnapshot(old,enriched));
-            }
-            s.hydrateProgress=Math.min(requested.length,s.hydrateProgress+batch.length);
-            s.oiLastUpdate=Date.now();
-            if(s.hydrating)updateChainMeta(s);
-          }catch(error){if(requestOptions.signal?.aborted)throw cancelledError();lastError=error?.message||String(error);}
-        }
-      }
-      await Promise.all(Array.from({length:Math.min(Math.max(1,concurrency),batches.length||1)},worker));
-      if(token!==s.chainLoadToken||expiry!==s.expiry)return {requested:requested.length,received:receivedCount,missing:pending.slice(),error:lastError};
-      receivedCount+=returnedThisRound.size;
-      pending=pending.filter(symbol=>quoteNeedsAnalyticsRetry(s,symbol));
-      // Retry contracts whose quote exists but whose full-expiry analytics
-      // fields are still absent: OI, multiplier for positive OI, or IV for
-      // Zero Gamma repricing. GEX itself can use provider Gamma or BSM from IV.
-      if(pending.length&&attempt<2)await new Promise(resolve=>setTimeout(resolve,350*(attempt+1)));
+    const payload=await cacheRequest(`/api/options-cache/chain?symbol=${encodeURIComponent(s.cfg.symbol)}&expiry=${encodeURIComponent(expiry)}`,requestOptions);
+    if(token!==s.chainLoadToken||expiry!==s.expiry)return {requested:requested.length,received:0,missing:requested,error:'superseded'};
+    const bySymbol=new Map((payload.contracts||[]).map(item=>[String(item.optionSymbol||item.os||''),item]));
+    let received=0;
+    for(const optionSymbol of requested){
+      const item=bySymbol.get(optionSymbol);if(!item)continue;
+      const q=normaliseQuote(item),meta=s.contractMeta?.get(optionSymbol);
+      s.quotes.set(optionSymbol,mergeQuoteSnapshot(s.quotes.get(optionSymbol),meta?mergeQuoteSnapshot(meta,q):q));
+      received++;
     }
-    return {requested:requested.length,received:requested.length-pending.length,missing:pending,error:lastError};
+    s.oiLastUpdate=payload.updated_at?Date.parse(payload.updated_at):Date.now();
+    return {requested:requested.length,received,missing:requested.filter(x=>!bySymbol.has(x)),error:payload.quote_error||''};
   }
+
   async function hydrateRemainingQuotes(s,symbols,token,expiry,requestOptions={}){
     const expected=s.contractSymbols?.size||s.contracts.length||0;
     if(!symbols.length){
@@ -774,11 +562,11 @@
     const previousQuotes=sameExpiry?new Map(s.quotes):new Map();
     const keepCompleteSnapshot=!!(refreshAll&&sameExpiry);
     s.hydrating=keepCompleteSnapshot;s.chainComplete=keepCompleteSnapshot;s.hydrateProgress=0;
-    setStatus(s,'Đang lấy Option Chain…','loading');
+    setStatus(s,'Đang đọc Option Chain từ server cache…','loading');
     if(!s.quotes.size)$(`so-${cfg.key}-chain`).innerHTML='<tr><td colspan="19" class="opt-empty">Đang lấy danh sách OCC contracts…</td></tr>';
-    const chain=await request(`/bapi/equity/v1/public/equity/option/chain-symbols?${new URLSearchParams({symbol:cfg.symbol,rootSymbol:root,expirationDate:expiry})}`,'GET',undefined,requestOptions);
+    const chain=await cacheRequest(`/api/options-cache/chain?symbol=${encodeURIComponent(cfg.symbol)}&expiry=${encodeURIComponent(expiry)}`,requestOptions);
     if(token!==s.chainLoadToken||expiry!==s.expiry)return;
-    const list=chain.data?.l||[];
+    const list=(chain.contracts||[]).map(item=>({...item,os:String(item.optionSymbol||item.os||'')}));
     if(!list.length)throw new Error(`Binance không trả contract cho ${cfg.symbol} expiry ${expiry}.`);
     const byOcc=new Map();let invalidRows=0,duplicateRows=0;
     for(const item of list){
@@ -797,43 +585,42 @@
     s.quotesExpiry=expiry;s.liveBlocked=false;
     // A same-expiry refresh may see a changed listed-strike set; discard quotes no longer in that chain.
     s.quotes=new Map([...previousQuotes].filter(([symbol])=>s.contractSymbols.has(symbol)));
-    // A periodic refresh re-quotes the whole expiry in the background while preserving the last complete snapshot.
+    // Hydrate the browser exclusively from the persistent Node/SQLite cache.
+    // All expiry/contract/quote collection belongs to the background server.
+    for(const item of canonical){
+      const q=normaliseQuote(item),meta=s.contractMeta.get(item.os);
+      s.quotes.set(item.os,mergeQuoteSnapshot(meta,q));
+    }
+    s.oiLastUpdate=chain.updated_at?Date.parse(chain.updated_at):Date.now();
+    if(token!==s.chainLoadToken||expiry!==s.expiry)return;
     if(refreshAll&&sameExpiry){
-      s.hydrateProgress=0;s.hydrating=true;
+      // Refresh is a read of the server's already-updated SQLite snapshot.
+      // No browser quote batches or Binance option stream are opened here.
+      s.hydrateProgress=symbols.length;s.hydrating=false;
       s.chainComplete=Array.from(s.contractSymbols).every(symbol=>s.quotes.has(symbol));
-      s.oiLastUpdate=Date.now();s.crossAssetError='';
-      renderAll(s);updateChainMeta(s);syncOptionStream(s);
-      setStatus(s,`Đang làm mới toàn bộ ${symbols.length} contracts · vẫn giữ dữ liệu gần nhất trên chart`,'loading');
-      hydrateRemainingQuotes(s,symbols,token,expiry,requestOptions);
+      s.oiLastUpdate=chain.updated_at?Date.parse(chain.updated_at):Date.now();s.crossAssetError='';
+      renderAll(s);updateChainMeta(s);
+      setStatus(s,`Server cache refreshed · ${s.quotes.size}/${symbols.length} contracts`,'ok');
+      try{window.crossAssetMapDataUpdated?.(s.cfg.key)}catch{}
       return;
     }
-    const visibleSymbols=strikeSymbols(list,s);
-    const already=new Set(s.quotes.keys());
-    const priority=visibleSymbols.filter(x=>!already.has(x)||quoteNeedsAnalyticsRetry(s,x));
-    if(priority.length){
-      await fetchQuoteBatches(s,priority,token,expiry,2,requestOptions);
-      if(token!==s.chainLoadToken||expiry!==s.expiry)return;
-    }
-    if(!s.quotes.size&&priority.length<symbols.length){
-      // Fallback only when Binance returned no visible ATM quote at all.
-      await fetchQuoteBatches(s,symbols,token,expiry,2,requestOptions);
-      if(token!==s.chainLoadToken||expiry!==s.expiry)return;
-    }
-    if(!s.quotes.size)throw new Error('Binance trả danh sách contract nhưng không có quote.');
-    s.oiLastUpdate=Date.now();s.crossAssetError='';
-    const missing=symbols.filter(x=>!s.quotes.has(x));
-    const incomplete=symbols.filter(x=>quoteNeedsAnalyticsRetry(s,x));
+    const missing=symbols.filter(symbol=>!s.quotes.has(symbol));
+    const allStored=missing.length===0 && symbols.length>=Math.min(Number(chain.total_contracts)||symbols.length,symbols.length);
+    const incomplete=symbols.filter(symbol=>quoteNeedsAnalyticsRetry(s,symbol));
     s.hydrateProgress=symbols.length-missing.length;
-    s.hydrating=missing.length>0||incomplete.length>0;
-    s.chainComplete=missing.length===0;s.chainLoadState=s.hydrating?'loading':'complete';
-    renderAll(s);updateChainMeta(s);syncOptionStream(s);
-    if(missing.length||incomplete.length){
-      setStatus(s,`Đã hiển thị ${s.displayStrikes==='all'?'tất cả':s.displayStrikes} strikes · đang hoàn thiện dữ liệu (${s.quotes.size}/${symbols.length} quotes, ${incomplete.length} contract OI > 0 thiếu multiplier/IV)`,'loading');
-      // Full-chain analytics are hydrated in the background; first paint only requests visible ATM strikes.
-      hydrateRemainingQuotes(s,[...new Set([...missing,...incomplete])],token,expiry,requestOptions);
-    }else{
-      s.loadedExpiry=expiry;s.lastHydrationMissingSymbols=[];s.chainLoadState='complete';s.chainLoadError='';setStatus(s,`Loaded · ${s.quotes.size}/${symbols.length} option quotes`,'ok');
-    }
+    s.hydrating=false;
+    s.chainComplete=allStored;
+    s.loadedExpiry=allStored?expiry:null;
+    s.chainLoadState=allStored?(incomplete.length?'partial':'complete'):'partial';
+    s.lastHydrationMissingSymbols=missing.slice();
+    s.lastHydrationIncompleteSymbols=incomplete.slice();
+    s.crossAssetError='';
+    renderAll(s);updateChainMeta(s);
+    const age=chain.updated_at?Math.max(0,Date.now()-Date.parse(chain.updated_at)):null;
+    const statusText=`Server cache · ${s.quotes.size}/${symbols.length} contracts · ${age===null?'age unknown':Math.round(age/1000)+'s old'}`;
+    setStatus(s,statusText,allStored&&!incomplete.length?'ok':'warn');
+    try{window.crossAssetMapDataUpdated?.(s.cfg.key)}catch{}
+
   }
 
   function mergeLiveQuote(s, raw){
@@ -858,6 +645,7 @@
     }
     if(changed){s.oiLastUpdate=Date.now();renderAll(s);}
   }
+
 
   function getRows(s){return [...s.quotes.values()].sort((a,b)=>a.strike-b.strike||(a.side==='C'?-1:1));}
   function pairedRows(s){
@@ -1211,30 +999,21 @@
   }
   // Loads one extra expiry's full chain into its own snapshot (never touches the selected-expiry state).
   async function loadScopeExpiry(s,sub,requestOptions={}){
-    const token=++sub.chainLoadToken,expiry=sub.expiry,meta=s.expirations.find(x=>x.date===expiry),root=meta?.root||s.cfg.root;
+    const token=++sub.chainLoadToken,expiry=sub.expiry;
     sub.loadState='loading';sub.hydrating=true;sub.error='';sub.loadMessage='';
-    const chain=await request(`/bapi/equity/v1/public/equity/option/chain-symbols?${new URLSearchParams({symbol:s.cfg.symbol,rootSymbol:root,expirationDate:expiry})}`,'GET',undefined,requestOptions);
+    const snapshot=await cacheRequest(`/api/options-cache/chain?symbol=${encodeURIComponent(s.cfg.symbol)}&expiry=${encodeURIComponent(expiry)}`,requestOptions);
     if(token!==sub.chainLoadToken)return;
-    const list=chain.data?.l||[];
-    if(!list.length)throw new Error(`Binance không trả contract cho ${s.cfg.symbol} expiry ${expiry}.`);
-    const byOcc=new Map();let invalid=0,dup=0;
-    for(const item of list){const symbol=String(item?.os??item?.optionSymbol??'').trim();if(!symbol){invalid++;continue;}if(byOcc.has(symbol)){dup++;continue;}byOcc.set(symbol,{...item,os:symbol});}
-    const canonical=[...byOcc.values()],symbols=canonical.map(x=>x.os);
-    if(!symbols.length)throw new Error(`Binance trả ${list.length} dòng nhưng không có OCC symbol hợp lệ cho ${s.cfg.symbol} ${expiry}.`);
-    sub.chainListInvalidCount=invalid;sub.chainListDuplicateCount=dup;
-    sub.contractMeta=new Map(canonical.map(item=>[item.os,normaliseQuote(item)]));
+    const canonical=(snapshot.contracts||[]).map(item=>({...item,os:String(item.optionSymbol||item.os||'')})).filter(item=>item.os);
+    if(!canonical.length)throw new Error(`Server cache chưa có contract cho ${s.cfg.symbol} ${expiry}.`);
+    const symbols=canonical.map(item=>item.os);
     sub.contracts=canonical;sub.contractSymbols=new Set(symbols);
-    sub.quotes=new Map([...sub.quotes].filter(([sym])=>sub.contractSymbols.has(sym)));
-    sub.chainComplete=false;sub.hydrateProgress=0;
-    const result=await fetchQuoteBatches(sub,symbols,token,expiry,2,requestOptions);
-    if(token!==sub.chainLoadToken)return;
-    const missing=symbols.filter(sym=>!sub.quotes.has(sym));
-    sub.chainComplete=missing.length===0;sub.hydrating=false;
-    sub.loadedAt=Date.now();sub.oiLastUpdate=Date.now();
-    sub.loadState=sub.chainComplete?'loaded':(result.error?'error':'partial');
-    sub.error=!sub.chainComplete&&result.error?result.error:'';
-    sub.loadMessage=missing.length?`Thiếu ${missing.length} quote`:'';
+    sub.contractMeta=new Map(canonical.map(item=>[item.os,normaliseQuote(item)]));
+    sub.quotes=new Map(canonical.map(item=>[item.os,normaliseQuote(item)]));
+    sub.chainComplete=symbols.length>=Math.min(Number(snapshot.total_contracts)||symbols.length,symbols.length);
+    sub.hydrating=false;sub.loadedAt=Date.now();sub.oiLastUpdate=snapshot.updated_at?Date.parse(snapshot.updated_at):Date.now();
+    sub.loadState=sub.chainComplete?'loaded':'partial';sub.error='';
   }
+
   // Loads (or refreshes) every expiry of the active scope other than the selected one, nearest first.
   async function loadScope(s,force=false,requestOptions={}){
     if((s.scope||'selected')==='selected'||!s.expirations.length){renderScopeViews(s);return;}
@@ -1981,7 +1760,7 @@
     const meta=$(`so-${s.cfg.key}-meta`);if(meta){
       const items=[
         ['OPTIONS FEED','Binance Stock Options · delayed / access-dependent'],
-        ['REST SOURCE','chain-symbols + get-option-quote'],
+        ['OPTION DATA SOURCE','Node SQLite cache · server-side chain collector'],
         ['CONTRACT MULTIPLIER',`${c.multiplierKnown} contract OI>0 có multiplier · ${c.multiplierAssumed} suy ra 100 shares cho OCC QQQ/GLD chuẩn`],
         ['QUOTE COVERAGE',`${s.quotes.size}/${c.totalContracts} OCC contracts`],
         ['OI OBSERVED / ZERO-FILL',`${c.oiKnown} observed · ${c.oiAssumedZero} null → 0 assumed · analytics coverage ${(c.oiAnalyticsCoverage*100).toFixed(1)}%${missingOISample}`],
@@ -2045,15 +1824,20 @@
     return true;
   }
 
-  function nextWsRequestId(s){
-    s.requestId=(Number(s.requestId)||0)+1;
-    return `eq-${Date.now().toString(36)}-${s.requestId.toString(36)}`.slice(0,36);
+  function closeSocket(s){
+    // Browser sockets are Spot-only. The Node collector owns all option-chain streams.
+    const ws=s.priceSocket;
+    if(ws){try{ws.onclose=null;ws.close(1000,'stock-options inactive')}catch{}s.priceSocket=null;}
+    for(const key of ['priceReconnectTimer','priceSnapshotTimer']){if(s[key]){clearTimeout(s[key]);s[key]=null;}}
+    if(s.priceHttpTimer){clearInterval(s.priceHttpTimer);s.priceHttpTimer=null;}
+    if(s.priceHttpController){try{s.priceHttpController.abort()}catch{}s.priceHttpController=null;}
   }
   function subscribe(s){
     if(!s.active)return;
+    // This fallback only concerns the ETF underlying Spot price. Option Chain
+    // expiry/contract/quote data is always loaded from the Node SQLite cache.
     closeSocket(s);
     subscribePrice(s,0);
-    subscribeOptionChain(s);
   }
   function priceFeedEndpoints(){
     // Binance blocks the Cloudflare Worker egress for this WebSocket (HTTP 403).
@@ -2199,73 +1983,11 @@
       updateChainMeta(s);schedulePriceReconnect(s);
     };
   }
-  function subscribeOptionChain(s){
-    if(!s.active)return;
-    let ws;
-    try{ws=new WebSocket(WS_URL);}catch(e){s.optionFeedState='error';s.optionFeedError=`Không mở được Option WebSocket: ${e.message||e}`;updateChainMeta(s);scheduleReconnect(s);return;}
-    s.socket=ws;s.optionFeedState='connecting';s.optionFeedError='';s.streamNames=[];
-    ws.onopen=()=>{
-      if(!s.active||s.socket!==ws)return;
-      s.reconnectDelay=1000;
-      if(s.expiry){
-        const root=s.expirations.find(x=>x.date===s.expiry)?.root||s.cfg.root;
-        const d=s.expiry.replace(/-/g,'');
-        const name=`${s.cfg.symbol}_${d}_${root}@optionChainQuoteDelayed`;
-        s.streamNames=[name];s.optionFeedState='pending';
-        ws.send(JSON.stringify({method:'SUBSCRIBE',params:[name],id:nextWsRequestId(s)}));
-      }else{s.optionFeedState='idle';}
-      updateChainMeta(s);
-    };
-    ws.onmessage=ev=>{
-      if(!s.active||s.socket!==ws)return;
-      let msg;try{msg=JSON.parse(ev.data)}catch{return;}
-      // Do not silently treat a rejected RPC subscription as a connected feed.
-      if(msg&&Object.prototype.hasOwnProperty.call(msg,'id')&&(Object.prototype.hasOwnProperty.call(msg,'result')||msg.code!==undefined)){
-        if(msg.code!==undefined&&msg.code!==null){
-          s.optionFeedState='error';s.optionFeedError=`Binance ${msg.code}: ${msg.msg||'subscription rejected'}`;
-        }else{s.optionFeedState='subscribed';s.optionFeedError='';}
-        updateChainMeta(s);return;
-      }
-      const stream=String(msg.stream||''),data=msg.data??msg;
-      if(stream.includes('@optionChainQuote')||String(data.e||'').toLowerCase().includes('optionchainquote')){
-        const items=[data.q,data.t,data.g,data.v].find(Array.isArray)||data.data||data.quotes||data.list||data;
-        mergeLiveQuote(s,items);
-      }
-    };
-    ws.onerror=()=>{if(s.active&&s.socket===ws){s.optionFeedState='error';s.optionFeedError='Option WebSocket network error';updateChainMeta(s);}};
-    ws.onclose=()=>{
-      if(s.socket===ws)s.socket=null;
-      if(s.active){s.optionFeedState='connecting';s.optionFeedError='Option WebSocket closed · reconnecting';updateChainMeta(s);scheduleReconnect(s);}
-    };
-  }
-  function closeSocket(s){
-    for(const key of ['socket','priceSocket']){
-      const ws=s[key];if(ws){try{ws.onclose=null;ws.close(1000,'stock-options inactive')}catch{}s[key]=null;}
-    }
-    for(const key of ['reconnectTimer','priceReconnectTimer','priceSnapshotTimer']){if(s[key]){clearTimeout(s[key]);s[key]=null;}}
-    if(s.priceHttpTimer){clearInterval(s.priceHttpTimer);s.priceHttpTimer=null;}
-    if(s.priceHttpController){try{s.priceHttpController.abort();}catch{}s.priceHttpController=null;}
-  }
-  function scheduleReconnect(s){
-    if(!s.active||s.reconnectTimer)return;
-    const wait=s.reconnectDelay||1000;s.reconnectDelay=Math.min(30000,wait*2);
-    s.reconnectTimer=setTimeout(()=>{s.reconnectTimer=null;if(s.active)subscribeOptionChain(s);},wait);
-  }
   function schedulePriceReconnect(s){
     if(!s.active||s.priceReconnectTimer)return;
     const wait=s.priceReconnectDelay||1000;s.priceReconnectDelay=Math.min(30000,wait*2);
     s.priceReconnectTimer=setTimeout(()=>{s.priceReconnectTimer=null;if(s.active)subscribePrice(s,0);},wait);
   }
-  function syncOptionStream(s){
-    if(!s.active||!s.socket||s.socket.readyState!==WebSocket.OPEN)return;
-    const old=s.streamNames.filter(x=>x.includes('@optionChainQuote'));
-    if(old.length)s.socket.send(JSON.stringify({method:'UNSUBSCRIBE',params:old,id:nextWsRequestId(s)}));
-    if(!s.expiry){s.streamNames=[];s.optionFeedState='idle';updateChainMeta(s);return;}
-    const root=s.expirations.find(x=>x.date===s.expiry)?.root||s.cfg.root,d=s.expiry.replace(/-/g,'');
-    const name=`${s.cfg.symbol}_${d}_${root}@optionChainQuoteDelayed`;
-    s.socket.send(JSON.stringify({method:'SUBSCRIBE',params:[name],id:nextWsRequestId(s)}));s.streamNames=[name];s.optionFeedState='pending';s.optionFeedError='';updateChainMeta(s);
-  }
-
   async function refreshQuotes(s){
     if(!s.active||!s.expiry||s.quoteLoading||s.hydrating)return;
     s.quoteLoading=true;
@@ -2274,7 +1996,7 @@
   }
   function startPolling(s,activationToken=s.activationToken){
     if(s.pollTimer)clearInterval(s.pollTimer);
-    s.pollTimer=setInterval(()=>{if(s.active&&s.activationToken===activationToken)refreshQuotes(s);},60000);
+    s.pollTimer=setInterval(()=>{if(s.active&&s.activationToken===activationToken)refreshQuotes(s);},5000);
   }
 
   async function activate(s){
@@ -2287,7 +2009,7 @@
     const requestOptions=controller?{signal:controller.signal}:{};
     const isCurrent=()=>s.active&&s.activationToken===activationToken;
     clearError(s);
-    setStatus(s,'Đang kết nối Binance…','loading');
+    setStatus(s,'Đang đọc Option Chain từ server cache…','loading');
     // Spot is independent of expiry discovery and option-chain hydration.
     // Start it immediately so slow metadata/expiry scans cannot delay the underlying price.
     s.priceActivationAt=Date.now();
@@ -2299,11 +2021,11 @@
       if(!isCurrent())return;
       if(!exps.length)throw new Error('Activation đã bị hủy trước khi expiry được tải xong.');
       const select=$(`so-${s.cfg.key}-expiry`);
-      if(select){select.innerHTML=exps.map(x=>`<option value="${esc(x.date)}">${esc(dateLabel(x.date))} · ${esc(x.root)}</option>`).join('');
-        const today=isoTodayNY(),preferred=exps.find(x=>x.date>=today)||exps[0];s.expiry=preferred.date;select.value=s.expiry;}
+      if(select){select.innerHTML=exps.map(x=>`<option value="${esc(x.date)}"${x.ready?'': ' disabled'}>${esc(dateLabel(x.date))} · ${esc(x.root)}${x.ready?'': ' · syncing'}</option>`).join('');
+        const today=isoTodayNY(),ready=exps.filter(x=>x.ready),preferred=ready.find(x=>x.date>=today)||ready[0]||exps.find(x=>x.date>=today)||exps[0];s.expiry=preferred.date;select.value=s.expiry;}
       if(!isCurrent())return;
-      // The Spot socket is already running; only the expiry-dependent option socket starts here.
-      subscribeOptionChain(s);
+      // Option chain is read-only from the server's persistent SQLite cache.
+      s.optionFeedState='server-cache';s.optionFeedError='Binance collection runs on Node Gateway';
       await loadChain(s,false,requestOptions);
       if(!isCurrent())return;
       startPolling(s,activationToken);startScopeTimer(s,activationToken);

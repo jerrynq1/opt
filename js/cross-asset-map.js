@@ -1,4 +1,4 @@
-/* ================= ETF OPTIONS LIQUIDITY MAP INDICATOR =================
+/* ================= ETF OPTIONS VOLUME FLOW OVERLAY =================
    QQQ -> NAS100 and GLD -> XAUUSD. Every source level is mapped independently
    and persisted. Live ETF/CFD ticks never move an existing level; only a change
    to that source level causes its individual CFD mapping to be recalculated.
@@ -12,15 +12,33 @@
   const $=id=>document.getElementById(id);
   const TARGET={qqq:'NAS100',gld:'XAUUSD'};
   const SOURCE_NAME={qqq:'QQQ',gld:'GLD'};
-  const DEFAULTS={source:'qqq',metric:'gex',heat:true,opacity:.48,bubbles:true,bubbleCount:36,walls:true,gexWalls:true,gammaFlip:true,maxPain:true,gexCount:10,showSourceTag:true};
+  const CACHE_API_BASE=String(window.BINANCE_STOCK_CACHE_API||window.BINANCE_STOCK_SPOT_API||'').replace(/\/+$/,'');
+  let flowTimer=null,flowFetchToken=0;
+  const DEFAULTS={source:'qqq',bubbles:true,bubbleCount:100,walls:true,gexWalls:true,gammaFlip:true,maxPain:true,gexCount:10,showSourceTag:true};
   const XMAP=window.XMAP=window.XMAP||{};
-  Object.assign(XMAP,{enabled:false,source:'qqq',settings:{...DEFAULTS},version:0,snapshot:null,locked:null,error:'',started:false,indicatorId:null});
+  Object.assign(XMAP,{enabled:false,source:'qqq',settings:{...DEFAULTS},version:0,snapshot:null,locked:null,events:[],flowUpdatedAt:null,error:'',started:false,indicatorId:null});
 
   const num=x=>(x===null||x===undefined||x==='')?null:(Number.isFinite(+x)?+x:null);
   const compact=x=>{const v=+x;if(!Number.isFinite(v))return'—';const a=Math.abs(v);return a>=1e6?(v/1e6).toFixed(1)+'m':a>=1e3?(v/1e3).toFixed(1)+'k':String(Math.round(v));};
   const fmt=(x,d=2)=>Number.isFinite(+x)?(+x).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
   const timestampMs=x=>{const t=num(x);return t===null?null:(t<1e12?t*1000:t)};
   const ageLabel=ms=>ms===null?'—':ms<60000?Math.max(0,Math.round(ms/1000))+'s':ms<3600000?Math.round(ms/60000)+'m':Math.round(ms/3600000)+'h';
+  // Convert an event timestamp (seconds) into a fractional candle logical index.
+  // This lets a 10:32:17 event render inside the 10:32 M1 candle even though
+  // Lightweight Charts only has candle timestamps, not a data point per second.
+  function flowEventLogicalTime(timeSec){
+    const bars=Array.isArray(agg)?agg:[],n=bars.length,tf=Math.max(1,Number(C?.tf)||60);
+    if(!n||!Number.isFinite(timeSec))return null;
+    if(timeSec>=bars[n-1].st)return n-1-.5+(timeSec-bars[n-1].st)/tf;
+    if(timeSec<bars[0].st)return -.5-(bars[0].st-timeSec)/tf;
+    let lo=0,hi=n-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(bars[mid].st<=timeSec)lo=mid;else hi=mid-1;}
+    return lo-.5+Math.max(0,Math.min(1,(timeSec-bars[lo].st)/tf));
+  }
+  function flowEventCoordinate(timeMs){
+    const logical=flowEventLogicalTime(timeMs/1000);
+    if(logical===null)return null;
+    try{return ts.logicalToCoordinate(logical)}catch{return null;}
+  }
   const pair=()=>TARGET[XMAP.source]||'NAS100';
   const currentMatchesTarget=()=>String(C?.sym||'').toUpperCase()===pair();
   const sourceSpot=()=>num(XMAP.snapshot?.price);
@@ -144,9 +162,7 @@
     const p={...DEFAULTS,...(a?.p||{})};
     if(a?.p&&Object.prototype.hasOwnProperty.call(a.p,'flip')&&!Object.prototype.hasOwnProperty.call(a.p,'gammaFlip'))p.gammaFlip=!!a.p.flip;
     p.source=p.source==='gld'?'gld':'qqq';
-    p.metric=['oi','vol'].includes(p.metric)?p.metric:'gex';
-    p.opacity=Math.max(.1,Math.min(.9,Number.isFinite(+p.opacity)?+p.opacity:.48));
-    p.bubbleCount=Math.max(5,Math.min(100,Math.round(+p.bubbleCount||36)));
+    p.bubbleCount=Math.max(5,Math.min(500,Math.round(+p.bubbleCount||100)));
     p.gexCount=Math.max(0,Math.min(10,Math.round(+p.gexCount||0)));
     return p;
   }
@@ -162,7 +178,7 @@
   function updateMeta(){
     const el=$('xmapMeta');if(!el)return;
     updateTargetButton();
-    if(!XMAP.enabled){el.textContent='Thêm “ETF Options Liquidity Map” trong Kho Indicator → Orderflow, sau đó bật bằng nút mắt. Dùng bánh răng để chọn QQQ/GLD và các lớp hiển thị.';setState('Indicator inactive');return;}
+    if(!XMAP.enabled){el.textContent='Thêm “ETF Options Volume Flow” trong Kho Indicator → Orderflow, sau đó bật bằng nút mắt. Bubble được dựng từ Volume Delta đã lưu trên server, theo timestamp và strike.';setState('Indicator inactive');return;}
     if(!currentMatchesTarget()){
       el.textContent=`Đang chọn ${SOURCE_NAME[XMAP.source]} → ${pair()}. Chart hiện tại là ${C.sym}; mở chart ${pair()} để đặt các level lên đúng trục giá.`;
       setState('Chờ chart đích','warn');return;
@@ -170,7 +186,7 @@
     const s=XMAP.snapshot,m=XMAP.locked;
     syncExpiryControl(s);
     if(s?.error){el.textContent=`Binance ${SOURCE_NAME[XMAP.source]}: ${s.error}`;setState('Lỗi nguồn dữ liệu','warn');return;}
-    if(!s||!sourceSpot()){el.textContent=`Đang chờ giá underlying ${SOURCE_NAME[XMAP.source]} và Option Chain từ Binance…`;setState('Đang tải','loading');return;}
+    if(!s||!sourceSpot()){el.textContent=`Đang chờ Spot ${SOURCE_NAME[XMAP.source]} từ server cache…`;setState('Đang tải','loading');return;}
     if(!m){
       if(!s.complete){el.textContent=`Đang nhận full Option Chain ${SOURCE_NAME[XMAP.source]} (${s.oiKnown||0}/${s.totalContracts||0} OI). Các level sẽ được ánh xạ khi source sẵn sàng.`;setState('Chờ full chain','loading');return;}
       el.textContent=`Đã có levels từ ${SOURCE_NAME[XMAP.source]}, đang chờ giá chart ${pair()} để quy đổi.`;setState('Chờ giá CFD','warn');return;
@@ -181,8 +197,8 @@
     const changedAt=m.lastLevelChangeAt?new Date(m.lastLevelChangeAt).toLocaleTimeString('vi-VN'):'—';
     const flip=m.gammaFlip?.target==null?'Gamma Flip / Zero Gamma: unavailable':`Gamma Flip / Zero Gamma ${fmt(m.gammaFlip.target,2)} CFD`;
     const ratio=m.gexRatioState==='call-only'?'GEX Ratio ∞ · chỉ có Call GEX':m.gexRatio==null?'GEX Ratio: —':`GEX Ratio ${m.gexRatio.toFixed(2)}x · ${m.gexRatioBias==='call-dominant'?'Call Gamma trội':m.gexRatioBias==='put-dominant'?'Put Gamma trội':'cân bằng'}`;
-    el.textContent=`THEO DÕI LEVEL TỰ ĐỘNG · ${SOURCE_NAME[XMAP.source]} → ${pair()} · ${m.expiry||'—'} · ${m.mappedCount||0} mức đang theo dõi · OI ${coverage} · GEX ${gexCoverage} · ${flip} · ${ratio} · level gần nhất thay đổi lúc ${changedAt} · feed ${updated}. Giá ETF/CFD tick không làm level dịch chuyển; chỉ khi giá trị level nguồn đổi thì riêng level đó được quy đổi lại.`;
-    setState(s.complete&&s.gexComplete?'Auto-level mapping':s.complete?'OI ready · GEX coverage incomplete':'Giữ level cũ · chờ full chain',s.complete&&s.gexComplete?'ok':'warn');
+    el.textContent=`VOLUME FLOW · ${SOURCE_NAME[XMAP.source]} → ${pair()} · ${XMAP.events.length} events đã lưu · ${m.mappedCount||0} key levels · chain ${m.expiry||'—'} · last flow update ${XMAP.flowUpdatedAt?new Date(XMAP.flowUpdatedAt).toLocaleTimeString('vi-VN'):'—'}. Bubble đặt theo thời điểm server phát hiện Volume Delta và strike quy đổi; không đại diện limit/stop hoặc từng lệnh riêng lẻ.`;
+    setState(XMAP.events.length?'Volume history loaded':'Đang chờ Volume events',XMAP.events.length?'ok':'warn');
   }
   function syncExpiryControl(snapshot){
     const select=$('xmapExpiry');if(!select)return;
@@ -227,6 +243,35 @@
     try{if(typeof dirty!=='undefined')dirty=true}catch{}
     return true;
   }
+  async function refreshFlowEvents(){
+    if(!XMAP.enabled||!CACHE_API_BASE)return;
+    const token=++flowFetchToken;
+    try{
+      const symbol=SOURCE_NAME[XMAP.source];
+      const response=await fetch(`${CACHE_API_BASE}/api/volume-flow/events?symbol=${encodeURIComponent(symbol)}&limit=20000`,{cache:'no-store',headers:{Accept:'application/json'}});
+      const payload=await response.json();
+      if(token!==flowFetchToken||!XMAP.enabled)return;
+      if(!response.ok||payload?.ok===false)throw new Error(payload?.error||`Volume Flow API HTTP ${response.status}`);
+      XMAP.events=(Array.isArray(payload.events)?payload.events:[]).slice().sort((a,b)=>Number(a.observedAt)-Number(b.observedAt));
+      XMAP.flowUpdatedAt=Date.now();XMAP.error='';XMAP.version++;
+      try{if(typeof dirty!=='undefined')dirty=true}catch{}
+      updateMeta();
+    }catch(error){
+      XMAP.error=error?.message||String(error);
+      updateMeta();
+    }
+  }
+  function startFlowPolling(){
+    if(flowTimer)clearInterval(flowTimer);
+    refreshFlowEvents();
+    flowTimer=setInterval(()=>{if(XMAP.enabled)refreshFlowEvents()},5000);
+  }
+  function stopFlowPolling(){
+    flowFetchToken++;
+    if(flowTimer)clearInterval(flowTimer);
+    flowTimer=null;
+  }
+
   function refreshSnapshot(){
     if(!XMAP.enabled)return;
     try{XMAP.snapshot=window.stockOptionsCrossAssetSnapshot?.(XMAP.source)||null;XMAP.error=''}catch(e){XMAP.error=e?.message||String(e)}
@@ -241,11 +286,11 @@
   function start(){
     XMAP.enabled=true;XMAP.started=true;XMAP.error='';XMAP.locked=null;
     try{window.stockOptionsCrossAssetStart?.(XMAP.source)}catch(e){XMAP.error=e?.message||String(e)}
-    refreshSnapshot();updateMeta();
+    refreshSnapshot();startFlowPolling();updateMeta();
   }
   function stop(){
     const wasOn=XMAP.enabled;
-    XMAP.enabled=false;XMAP.started=false;XMAP.snapshot=null;XMAP.locked=null;XMAP.version++;
+    XMAP.enabled=false;XMAP.started=false;XMAP.snapshot=null;XMAP.locked=null;XMAP.events=[];stopFlowPolling();XMAP.version++;
     if(wasOn){try{window.stockOptionsCrossAssetStop?.()}catch{}}
     updateMeta();
     try{if(typeof dirty!=='undefined')dirty=true}catch{}
@@ -293,37 +338,55 @@
     ctx.restore();
   }
   let lastMetaSymbol='';
+  function drawFlowBubbles(w,h,indicator){
+    const events=Array.isArray(XMAP.events)?XMAP.events:[];
+    const sp=sourceSpot(),tp=targetSpot();
+    if(!events.length||!(sp>0&&tp>0))return;
+    let timeScale=null;
+    try{timeScale=chart.timeScale()}catch{return;}
+    const visible=[];
+    for(const event of events){
+      const strike=num(event.strike),delta=num(event.volumeDelta),stamp=timestampMs(event.observedAt);
+      if(!(strike>0&&delta>0&&stamp>0))continue;
+      let x=null,y=null;
+      try{x=flowEventCoordinate(stamp);y=cs.priceToCoordinate(tp*(strike/sp));}catch{continue;}
+      if(!Number.isFinite(x)||!Number.isFinite(y)||x<-24||x>w+24||y<-24||y>h+24)continue;
+      visible.push({event,x,y,delta,side:String(event.optionType||'').toUpperCase()==='C'?'C':'P'});
+    }
+    if(!visible.length)return;
+    const recent=visible.slice(-XMAP.settings.bubbleCount);
+    const maxDelta=Math.max(1,...recent.map(item=>item.delta));
+    const callColor=indicator?.c?.[2]||'#35e59a',putColor=indicator?.c?.[3]||'#ff536b';
+    ctx.save();ctx.textBaseline='middle';
+    for(const item of recent){
+      const radius=Math.max(5,Math.min(17,5+11*Math.sqrt(item.delta/maxDelta)));
+      const color=item.side==='C'?callColor:putColor;
+      const isInterval=item.event.captureMode==='interval'||Number(item.event.gapMs)>5000;
+      ctx.globalAlpha=isInterval?.62:.9;
+      ctx.fillStyle=color;ctx.beginPath();ctx.arc(item.x,item.y,radius,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=.98;ctx.lineWidth=1.15;ctx.strokeStyle='rgba(5,12,20,.95)';ctx.stroke();
+      ctx.font='700 9px "Space Grotesk",sans-serif';ctx.textAlign='center';ctx.fillStyle='#061018';
+      ctx.fillText(item.side,item.x,item.y+.5);
+      const strikeLabel=Number.isInteger(item.event.strike)?String(item.event.strike):Number(item.event.strike).toFixed(2).replace(/0+$/,'').replace(/\.$/,'');
+      const label=`${isInterval?'~':''}${strikeLabel}${item.side} · ${compact(item.delta)}`;
+      ctx.font='700 10px "Space Grotesk",sans-serif';ctx.textAlign=item.x>w-120?'right':'left';ctx.fillStyle=color;
+      ctx.fillText(label,item.x+(item.x>w-120?-radius-4:radius+4),item.y-1);
+    }
+    ctx.restore();
+  }
+
   function drawCrossAssetMap(w,h){
     if(XMAP.enabled&&(!XMAP.locked||(XMAP.locked.pendingCount>0&&sourceSpot()>0&&targetSpot()>0)))reconcileLevels();
     if(lastMetaSymbol!==C.sym){lastMetaSymbol=C.sym;updateMeta()}
-    const a=activeIndicator();if(!XMAP.enabled||!activeOnChart(a)||!XMAP.snapshot||!currentMatchesTarget())return;
-    const locked=XMAP.locked;if(!locked||locked.target!==pair())return;
-    const s=locked,P=XMAP.settings,ratio=locked.lastRatio||1,opacity=P.opacity;
-    if(!Array.isArray(s.dist)||!s.dist.length)return;
-    const rows=s.dist.map(r=>({...r})).filter(r=>Number.isFinite(r.target));
-    if(!rows.length)return;
+    const a=activeIndicator();if(!XMAP.enabled||!activeOnChart(a)||!currentMatchesTarget())return;
+    const P=XMAP.settings;
+    // Flow bubbles are independent of the selected expiry snapshot: events cover every
+    // expiry collected by the server and use event-time X + mapped strike-price Y.
+    if(P.bubbles)drawFlowBubbles(w,h,a);
+    const s=XMAP.locked;
+    if(!s||s.target!==pair())return;
+    const rows=Array.isArray(s.dist)?s.dist.map(r=>({...r})).filter(r=>Number.isFinite(r.target)):[];
     const col=(i,fb)=>{const c=a?.c?.[i];return typeof c==='string'&&c?c:fb};
-    let metricValue=r=>P.metric==='oi'?(r.callOI||0)+(r.putOI||0):P.metric==='vol'?(r.callVol||0)+(r.putVol||0):Math.abs(r.gex||0);
-    const maxMetric=Math.max(0,...rows.map(metricValue));
-    if(P.heat&&maxMetric>0){
-      const candidates=rows.filter(r=>{const y=cs.priceToCoordinate(r.target);return Number.isFinite(y)&&y>=-30&&y<=h+30;})
-        .sort((a,b)=>metricValue(b)-metricValue(a)).slice(0,64);
-      const gaps=rows.slice(1).map((r,i)=>Math.abs(r.target-rows[i].target)).filter(v=>v>0).sort((a,b)=>a-b);
-      const step=gaps.length?gaps[Math.floor(gaps.length/2)]:ratio;
-      const ya=cs.priceToCoordinate(locked.targetPrice),yb=cs.priceToCoordinate(locked.targetPrice+step),rowH=Math.max(6,Math.min(24,Math.abs((ya??0)-(yb??0))||10));
-      ctx.save();const x0=w*.48,xw=w*.50;
-      for(const r of candidates){
-        const val=metricValue(r);if(!(val>0))continue;
-        const y=cs.priceToCoordinate(r.target);if(y==null)continue;
-        const intensity=Math.min(1,Math.pow(val/maxMetric,.62));let color='64,174,221';
-        if(P.metric==='gex')color=(r.gex||0)>=0?'53,210,157':'235,83,123';
-        else if(P.metric==='oi'){const total=(r.callOI||0)+(r.putOI||0),p=total?(r.callOI||0)/total:.5;color=p>=.62?'53,185,154':p<=.38?'218,83,129':'88,153,213';}
-        else{const total=(r.callVol||0)+(r.putVol||0),p=total?(r.callVol||0)/total:.5;color=p>=.62?'53,185,154':p<=.38?'218,83,129':'88,153,213';}
-        ctx.fillStyle=`rgba(${color},${Math.min(.48,opacity*(.16+.6*intensity))})`;ctx.fillRect(x0,y-rowH/2,xw,rowH);
-        ctx.fillStyle=`rgba(${color},${Math.min(.9,opacity*(.28+.58*intensity))})`;ctx.fillRect(x0,y-rowH/2,Math.max(2,xw*intensity),2);
-      }
-      ctx.restore();
-    }
     if(P.walls){
       const cwall=s.callOIWall?.target??null,pwall=s.putOIWall?.target??null;
       if(cwall!=null)drawLine(cs.priceToCoordinate(cwall),col(4,'#ff5c8a'),'CALL OI WALL',cwall,w,h,1.5,[7,4]);
@@ -334,31 +397,17 @@
       if(cw!=null)drawLine(cs.priceToCoordinate(cw),col(10,'#65d6e8'),'CW · MAX +NET GEX',cw,w,h,1.8,[2,4]);
       if(pw!=null)drawLine(cs.priceToCoordinate(pw),col(11,'#e8bd73'),'PW · MAX |−NET GEX|',pw,w,h,1.8,[2,4]);
     }
-    if(P.gammaFlip&&s.gammaFlip?.target!=null){const p=s.gammaFlip.target;drawLine(cs.priceToCoordinate(p),col(6,'#43c7e8'),'GAMMA FLIP / ZERO GAMMA · BSM',p,w,h,1.8,[8,3]);}
-    if(P.maxPain&&s.maxPain?.target!=null){const p=s.maxPain.target;if(p!=null)drawLine(cs.priceToCoordinate(p),col(7,'#b68cff'),'MAX PAIN',p,w,h,1.6,[10,4,2,4]);}
+    if(P.gammaFlip&&s.gammaFlip?.target!=null){const price=s.gammaFlip.target;drawLine(cs.priceToCoordinate(price),col(6,'#43c7e8'),'GAMMA FLIP / ZERO GAMMA · BSM',price,w,h,1.8,[8,3]);}
+    if(P.maxPain&&s.maxPain?.target!=null){const price=s.maxPain.target;drawLine(cs.priceToCoordinate(price),col(7,'#b68cff'),'MAX PAIN',price,w,h,1.6,[10,4,2,4]);}
     if(P.gexCount>0){
-      const levels=Array.isArray(s.gexLevels)&&s.gexLevels.length?s.gexLevels:rankGexLevels(s.dist,10,excludedKeyLevelStrikes({callOIWall:s.callOIWall,putOIWall:s.putOIWall,gexCallWall:s.gexCallWall,gexPutWall:s.gexPutWall,maxPain:s.maxPain,gammaFlip:s.gammaFlip?.sourceLevel})).map((r,i)=>({rank:i+1,strike:r.strike,gex:r.gex}));
-      levels.slice(0,P.gexCount).forEach((g,i)=>{const p=g.target;if(p==null)return;const color=(g.gex||0)>=0?col(0,'#35d59a'):col(1,'#ec557c');drawLine(cs.priceToCoordinate(p),color,`GEX ${g.rank||i+1}`,p,w,h,i<3?1.7:1.1,[3,4]);});
-    }
-    if(P.bubbles){
-      const vols=[];for(const r of rows){if((r.callVol||0)>0)vols.push({r,side:'C',v:r.callVol});if((r.putVol||0)>0)vols.push({r,side:'P',v:r.putVol});}
-      const maxV=Math.max(0,...vols.map(x=>x.v));
-      if(maxV>0){
-        vols.sort((a,b)=>b.v-a.v);ctx.save();ctx.textBaseline='middle';
-        for(const item of vols.slice(0,P.bubbleCount)){
-          const y=cs.priceToCoordinate(item.r.target);if(y==null||y<-22||y>h+22)continue;
-          const radius=4+13*Math.sqrt(item.v/maxV),x=item.side==='C'?w*.70:w*.87,color=item.side==='C'?col(2,'#35e59a'):col(3,'#ff536b');
-          ctx.globalAlpha=.78;ctx.fillStyle=color;ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();ctx.globalAlpha=.95;ctx.lineWidth=1.2;ctx.strokeStyle='rgba(5,12,20,.92)';ctx.stroke();
-          if(radius>=8){ctx.font='700 9px "Space Grotesk",sans-serif';ctx.fillStyle='#071018';ctx.textAlign='center';ctx.fillText(item.side,x,y+.5);}
-          ctx.globalAlpha=.95;ctx.font='600 9px "Space Grotesk",sans-serif';ctx.fillStyle=color;ctx.textAlign='left';ctx.fillText(compact(item.v),x+radius+3,y);
-        }
-        ctx.restore();
-      }
+      const levels=Array.isArray(s.gexLevels)&&s.gexLevels.length?s.gexLevels:rankGexLevels(rows,10,excludedKeyLevelStrikes({callOIWall:s.callOIWall,putOIWall:s.putOIWall,gexCallWall:s.gexCallWall,gexPutWall:s.gexPutWall,maxPain:s.maxPain,gammaFlip:s.gammaFlip?.sourceLevel})).map((r,i)=>({rank:i+1,strike:r.strike,gex:r.gex}));
+      levels.slice(0,P.gexCount).forEach((g,i)=>{const price=g.target;if(price==null)return;const color=(g.gex||0)>=0?col(0,'#35d59a'):col(1,'#ec557c');drawLine(cs.priceToCoordinate(price),color,`GEX ${g.rank||i+1}`,price,w,h,i<3?1.7:1.1,[3,4]);});
     }
     if(P.showSourceTag){
       ctx.save();ctx.font='600 10px "Space Grotesk",sans-serif';ctx.textAlign='left';ctx.textBaseline='top';
-      const status=!s.complete?'PARTIAL CHAIN':!s.gexComplete?'FULL CHAIN · GEX INCOMPLETE':'FULL CHAIN';ctx.fillStyle='rgba(4,10,18,.76)';ctx.fillRect(8,8,Math.min(350,w-16),17);
-      ctx.fillStyle='#a8d9e8';ctx.fillText(`${SOURCE_NAME[XMAP.source]} OPTIONS → ${pair()} · LEVELS AUTO-UPDATE ON SOURCE CHANGE · ${status}`,13,11);ctx.restore();
+      const status=!s.complete?'PARTIAL CHAIN':!s.gexComplete?'FULL CHAIN · GEX INCOMPLETE':'FULL CHAIN';
+      ctx.fillStyle='rgba(4,10,18,.76)';ctx.fillRect(8,8,Math.min(350,w-16),17);
+      ctx.fillStyle='#a8d9e8';ctx.fillText(`${SOURCE_NAME[XMAP.source]} VOLUME FLOW → ${pair()} · ${XMAP.events.length} SAVED EVENTS · ${status}`,13,11);ctx.restore();
     }
   }
   window.drawCrossAssetMap=drawCrossAssetMap;

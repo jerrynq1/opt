@@ -366,30 +366,27 @@ IND.ict22={
   f:()=>[]
 };
 
-/* ===== Cross-Asset ETF Options Liquidity Map =====
-   Projects QQQ -> NAS100 and GLD -> XAUUSD option-derived levels onto the active cTrader chart.
+/* ===== Cross-Asset ETF Options Volume Flow =====
+   Projects QQQ/GLD Volume Delta bubbles onto NAS100/XAUUSD using server-persisted event timestamps and mapped strikes.
    Rendering/data lifecycle lives in cross-asset-map.js; this definition makes it a normal,
    persistent indicator with an eye toggle and the standard settings dialog.
 */
 IND.xmap={
-  n:"ETF Options Liquidity Map",t:"of",ver:1,
-  d:"Chiếu heatmap OI/GEX, volume bubbles, Call/Put OI Walls (OI-only), CW/PW (Net GEX walls), Gamma Flip / Zero Gamma (BSM repricing), Max Pain, GEX Ratio và GEX 1–10 từ QQQ → NAS100 hoặc GLD → XAUUSD. Call/Put OI Walls được tính độc lập theo OI lớn nhất từng phía. CW là strike có Net GEX dương lớn nhất; PW là strike có Net GEX âm lớn nhất theo trị tuyệt đối. GEX 1–10 loại CW, PW, Call/Put OI Walls, Max Pain (kể cả strike đồng hạng) và Gamma Flip nếu trùng strike. Từng level được quy đổi và lưu riêng; giá ETF/CFD chạy không làm level dịch chuyển. Chỉ khi giá trị level nguồn thay đổi, riêng level đó mới tự động được quy đổi lại theo tỷ lệ spot tại thời điểm phát hiện thay đổi. GEX walls, GEX ladder và GEX Ratio chỉ hiển thị khi toàn expiry có đủ OI, multiplier, gamma và spot; Gamma Flip / Zero Gamma cần thêm IV và DTE hợp lệ, được tính bằng Black–Scholes repricing với IV/DTE cố định, r=q=0 và tìm Net GEX zero-cross. GEX Ratio = tổng Call GEX / |tổng Put GEX|; >1 là Call Gamma trội (thiên hướng ổn định/biên độ hẹp), <1 là Put Gamma trội (rủi ro biến động/trượt giá cao). Đây là heuristic theo quy ước Call+/Put−, không xác nhận dealer positioning.",
+  n:"ETF Options Volume Flow",t:"of",ver:2,
+  d:"Hiển thị Volume Delta bubble của toàn bộ expiry đã được Node Server thu thập và lưu SQLite. Trục X là thời điểm server phát hiện Volume thay đổi; trục Y là strike được quy đổi từ QQQ → NAS100 hoặc GLD → XAUUSD theo tỷ lệ Spot hiện tại. Kích thước bubble tỷ lệ với Volume Delta; xanh = Call contract, đỏ = Put contract (không phải BUY/SELL classification). Không hiển thị heatmap limit/stop vì nguồn dữ liệu hiện tại không có order-book/limit-order history. Gamma Flip / Zero Gamma (BSM repricing) vẫn là key level tùy chọn, không phải dữ liệu flow. Bubble là khoảng tăng Volume giữa hai lần quan sát, không phải từng trade print riêng lẻ.",
   p:[
-    ["source","Nguồn ETF","qqq","s",{g:"Nguồn dữ liệu",o:[["qqq","QQQ → NAS100"],["gld","GLD → XAUUSD"]]}],
-    ["metric","Heatmap theo","gex","s",{g:"Heatmap",o:[["gex","Net GEX"],["oi","Open Interest"],["vol","Volume"]]}],
-    ["heat","Hiện heatmap",true,"b"],
-    ["opacity","Độ mờ heatmap",0.48,"n",{min:0.1,max:0.9,step:0.05}],
-    ["bubbles","Hiện volume bubbles",true,"b",{g:"Volume bubbles"}],
-    ["bubbleCount","Số bubble tối đa",36,"i",{min:5,max:100,step:1}],
-    ["walls","Call / Put OI Walls (OI-only)",true,"b",{g:"Key levels"}],
+    ["source","Nguồn ETF","qqq","s",{g:"Volume Flow",o:[["qqq","QQQ → NAS100"],["gld","GLD → XAUUSD"]]}],
+    ["bubbles","Hiện Volume Flow bubbles",true,"b",{g:"Volume Flow"}],
+    ["bubbleCount","Số bubble tối đa",100,"i",{min:5,max:500,step:5}],
+    ["walls","Call / Put OI Walls",true,"b",{g:"Key levels · Optional"}],
     ["gexWalls","CW / PW · Net GEX Walls",true,"b"],
-    ["gammaFlip","Gamma Flip / Zero Gamma (BSM repricing)",true,"b"],
+    ["gammaFlip","Gamma Flip / Zero Gamma",true,"b"],
     ["maxPain","Max Pain",true,"b"],
     ["gexCount","Số level GEX 1–10 (0 = tắt)",10,"i",{min:0,max:10,step:1}],
     ["showSourceTag","Nhãn nguồn dữ liệu trên chart",true,"b"]
   ],
   c:["#35b6ff","#ec557c","#35e59a","#ff536b","#ff5c8a","#35d6b0","#ffc857","#b68cff","#43c7e8","#a7d96b","#65d6e8","#e8bd73"],
-  L:["Heatmap dương / OI","Heatmap âm","Call bubble","Put bubble","Call OI Wall","Put OI Wall","Gamma Flip / Zero Gamma · BSM","Max Pain","GEX 1–10","CW · Max +Net GEX","PW · Max |−Net GEX|"],
-  lab:p=>`${p.source==='gld'?'GLD → XAUUSD':'QQQ → NAS100'} · ${String(p.metric||'gex').toUpperCase()} · GEX ${p.gexCount??10}/10`,
+  L:["GEX dương / âm","GEX âm","Call volume delta","Put volume delta","Call OI Wall","Put OI Wall","Gamma Flip / Zero Gamma","Max Pain","GEX 1–10","CW · Max +Net GEX","PW · Max |−Net GEX|"],
+  lab:p=>`${p.source==='gld'?'GLD → XAUUSD':'QQQ → NAS100'} · VOLUME FLOW · ${p.gexCount??10} GEX levels`,
   f:()=>[]
 };

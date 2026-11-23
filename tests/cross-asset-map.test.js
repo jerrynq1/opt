@@ -230,14 +230,26 @@ test('the panel no longer exposes a manual remap button or manual remap handler'
   assert.doesNotMatch(source,/xmapSync|forceLock|pendingRelock/);
 });
 
-test('chart renderer only reads mapped CFD targets and never recomputes from live prices', () => {
+test('chart renderer draws saved flow bubbles and optional key levels without remapping the source values', () => {
   const source=fs.readFileSync(path.join(__dirname,'..','js','cross-asset-map.js'),'utf8');
   const draw=source.slice(source.indexOf('function drawCrossAssetMap'),source.indexOf('window.drawCrossAssetMap'));
-  assert.match(draw,/cs\.priceToCoordinate\(p\)/);
+  assert.match(draw,/drawFlowBubbles\(w,h,a\)/);
+  assert.match(draw,/cs\.priceToCoordinate\(cwall\)/);
   assert.match(draw,/s\.gammaFlip\?\.target/);
   assert.doesNotMatch(draw,/s\.volTrigger\?\.target/);
   assert.doesNotMatch(draw,/mapStrike\(/);
   assert.match(draw,/pendingCount>0/,'live spot anchors are only consulted to resolve levels that could not yet be mapped');
+});
+
+test('Volume Flow bubbles use sub-candle event time, mapped strike and print contract strike plus delta', () => {
+  const source=fs.readFileSync(path.join(__dirname,'..','js','cross-asset-map.js'),'utf8');
+  const draw=source.slice(source.indexOf('function drawFlowBubbles'),source.indexOf('function drawCrossAssetMap'));
+  assert.match(source,/function flowEventLogicalTime\(timeSec\)/);
+  assert.match(source,/ts\.logicalToCoordinate\(logical\)/);
+  assert.match(draw,/event\.volumeDelta|volumeDelta/);
+  assert.match(draw,/item\.event\.strike/);
+  assert.match(draw,/strikeLabel.*item\.side.*compact\(item\.delta\)/);
+  assert.doesNotMatch(source,/P\.heatmap|P\.heat\b/,'ETF Options Volume Flow has no synthetic limit/stop heatmap layer');
 });
 
 

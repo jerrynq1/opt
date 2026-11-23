@@ -67,7 +67,7 @@
 <div class="px"><span><small>Bid</small><b id="bid">–</b></span><span><small>Ask</small><b id="ask">–</b></span></div>
 <div class="chart-actions">
 
-<button aria-expanded="false" class="btn ghost sm" id="xmapToggle" title="Bật bảng ETF Options Liquidity Map" type="button">⇄ ETF Map</button>
+<button aria-expanded="false" class="btn ghost sm" id="xmapToggle" title="Bật bảng ETF Options Volume Flow" type="button">⇄ ETF Flow</button>
 <button class="btn ghost sm" data-go="gexLab" type="button">⌁ QuantLab GEX</button>
 <button class="btn ghost sm" data-go="ind" type="button">ƒx Indicators</button>
 
@@ -75,15 +75,15 @@
 </div>
 </div>
 <section aria-label="Cross-asset options map" class="card xmap-panel" hidden="" id="xmapPanel">
-<div class="xmap-head"><div><div class="xmap-eyebrow">ETF OPTIONS → CFD / INDEX</div><h3>ETF Options Liquidity Map · Indicator</h3><p class="msg">Mỗi level được quy đổi riêng và giữ cố định trên chart. Giá ETF/CFD chạy không làm level dịch chuyển; chỉ khi giá trị level nguồn thay đổi, riêng level đó mới tự động quy đổi lại.</p></div><span class="xmap-state" id="xmapState">Chưa bật</span></div>
+<div class="xmap-head"><div><div class="xmap-eyebrow">ETF OPTIONS → CFD / INDEX</div><h3>ETF Options Volume Flow</h3><p class="msg">Bubble lấy từ Volume Delta đã lưu trên Node Server: trục X là thời điểm phát hiện thay đổi, trục Y là strike quy đổi sang NAS100/XAUUSD; nhãn bubble in strike + C/P + Volume Delta. Website chỉ đọc lịch sử từ server, không tải trực tiếp Option Chain từ Binance.</p></div><span class="xmap-state" id="xmapState">Chưa bật</span></div>
 <div class="xmap-controls">
 <label>EXPIRY<select id="xmapExpiry"><option value="">Bật indicator để tải kỳ hạn…</option></select></label>
 <button class="btn ghost sm" id="xmapAddIndicator" type="button">Mở Kho Indicator</button>
 <button class="btn ghost sm" id="xmapTarget" type="button">Mở chart NAS100</button>
 </div>
-<div class="xmap-meta" id="xmapMeta">Từng level có tỷ lệ quy đổi riêng tại thời điểm giá trị nguồn thay đổi. Các lần cập nhật giá ETF/CFD không làm level dịch chuyển. Khi CW, PW, Gamma Flip / Zero Gamma, Max Pain hoặc một GEX rank đổi giá trị nguồn, indicator tự động quy đổi lại đúng level đó.</div>
-<div class="xmap-legend"><span><i class="xmap-dot call"></i> Call volume</span><span><i class="xmap-dot put"></i> Put volume</span><span><i class="xmap-line call"></i> Call OI Wall</span><span><i class="xmap-line put"></i> Put OI Wall</span><span><i class="xmap-line cw"></i> CW · Max +Net GEX</span><span><i class="xmap-line pw"></i> PW · Max |−Net GEX|</span><span><i class="xmap-line flip"></i> Gamma Flip / Zero Gamma · BSM</span><span><i class="xmap-line pain"></i> Max Pain / GEX 1–10</span></div>
-<p class="xmap-disclaimer">Bubble là volume hợp đồng quyền chọn theo strike, không phải volume futures/CFD theo thời gian. Heatmap và levels là proxy từ ETF options, không phải order book/dealer positioning thực của NAS100/XAUUSD. Gamma Flip / Zero Gamma được tính bằng BSM repricing Net GEX zero-cross. GEX Ratio = tổng Call GEX / |tổng Put GEX|; đây là tỷ lệ, không phải mức giá để vẽ đường.</p>
+<div class="xmap-meta" id="xmapMeta">Đang đọc Volume events đã lưu cho tất cả expiry. Bubble Call/Put biểu thị loại hợp đồng, không phải xác nhận người mua/bán chủ động. Dấu ~ biểu thị Volume Delta được quan sát sau một khoảng gián đoạn.</div>
+<div class="xmap-legend"><span><i class="xmap-dot call"></i> Call Volume Delta</span><span><i class="xmap-dot put"></i> Put Volume Delta</span><span><i class="xmap-line call"></i> Call OI Wall</span><span><i class="xmap-line put"></i> Put OI Wall</span><span><i class="xmap-line cw"></i> CW · Max +Net GEX</span><span><i class="xmap-line pw"></i> PW · Max |−Net GEX|</span><span><i class="xmap-line flip"></i> Gamma Flip / Zero Gamma · BSM</span><span><i class="xmap-line pain"></i> Max Pain / GEX 1–10</span></div>
+<p class="xmap-disclaimer">Bubble là Volume Delta theo timestamp quan sát và strike quy đổi, không phải trade print theo từng lệnh hoặc BUY/SELL aggressor. Đã bỏ heatmap vì dữ liệu hiện tại không xác định được limit/stop/order-book liquidity. Các key levels tùy chọn vẫn là proxy tính từ ETF options, không phải order book/dealer positioning thực của NAS100/XAUUSD. Gamma Flip / Zero Gamma được tính bằng BSM repricing Net GEX zero-cross. GEX Ratio = tổng Call GEX / |tổng Put GEX|; đây là tỷ lệ, không phải mức giá để vẽ đường.</p>
 </section>
 <div class="card" id="chartCard"><div id="ohlc"></div><div id="legend"></div><div id="cw"><div id="chart"></div><div id="panes"></div></div><div class="chart-empty-state" id="chartEmptyState" role="status" aria-live="polite"><div class="chart-empty-mark" aria-hidden="true">⌁</div><div class="chart-empty-copy"><strong id="chartEmptyTitle">Kết nối cTrader để tải dữ liệu chart</strong><p id="chartEmptyText">Nhập Client ID, Client Secret và Access Token trong mục Kết nối cTrader. Sau khi feed có nến, biểu đồ sẽ tự xuất hiện.</p><button class="btn sm" type="button" data-go="conn">Mở kết nối cTrader</button></div></div>
 <div id="clk"><button aria-expanded="false" aria-haspopup="dialog" id="clkB" title="Đổi múi giờ hiển thị" type="button"><span id="clkT">--:--:--</span><small id="clkZ"></small><span aria-hidden="true">▾</span></button></div>

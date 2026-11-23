@@ -740,10 +740,12 @@ test('bilateral exposure renderer outputs visible nonzero Call and Put bar width
 });
 
 
-test('public chain-symbol requests have a configured Worker fallback for browser CORS failures', () => {
+test('Option Chain browser layer reads only the Node persistent cache', () => {
   const source = fs.readFileSync(path.join(__dirname, '../js/stock-options.js'), 'utf8');
-  assert.match(source, /if\(!response\)\{[\s\S]*?if\(!proxyUrl\)[\s\S]*?fetchWithTimeout\(proxyUrl,options,REQUEST_TIMEOUT_MS,deadlineAt\)/);
-  assert.match(source, /Worker fallback cũng lỗi/);
+  assert.match(source, /api\/options-cache\/expiries/);
+  assert.match(source, /api\/options-cache\/chain/);
+  assert.match(source, /Node SQLite cache/);
+  assert.doesNotMatch(source, /get-option-quote|chain-symbols|get-exchange-info|subscribeOptionChain|optionChainQuoteDelayed/);
 });
 
 
