@@ -6,10 +6,11 @@ import path from 'node:path';
 const PREFIX = '/api/binance-stock-proxy';
 const QUOTE_PATH = '/bapi/equity/v1/friendly/equity/option/get-option-quote';
 const CHAIN_PATH = '/bapi/equity/v1/public/equity/option/chain-symbols';
+const EXCHANGE_INFO_PATH = '/bapi/equity/v1/public/equity/option/get-exchange-info';
 const PRICE_WS_URL = 'wss://nbstream.binance.com/equity/ws/price';
 const CACHE_TTL_MS = 60_000;
 const PARTIAL_CACHE_TTL_MS = 12_000;
-const MAX_EXPIRY_CANDIDATES = 24;
+const MAX_EXPIRY_CANDIDATES = 512;
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const tokenFile = path.join(moduleDir, 'quick-options-token.txt');
@@ -123,7 +124,15 @@ function normaliseQuote(q) {
     delta: pick('de', 'delta'),
     theta: pick('th', 'theta'),
     vega: pick('ve', 'vega'),
-    volume: pick('v', 'volume')
+    volume: pick('v', 'volume'),
+    last: pick('p', 'last', 'lastPrice', 'last_price'),
+    bid: pick('bp', 'bid', 'bidPrice', 'bid_price'),
+    ask: pick('ap', 'ask', 'askPrice', 'ask_price'),
+    mid: pick('mp', 'mid', 'midPrice', 'mid_price'),
+    bidSize: pick('bs', 'bidSize', 'bid_size'),
+    askSize: pick('as', 'askSize', 'ask_size'),
+    previousClose: pick('pcp', 'previousClose', 'previous_close'),
+    breakEven: pick('be', 'breakEven', 'break_even')
   };
 }
 
@@ -154,7 +163,7 @@ function quoteRowsFromReply(reply) {
 function mergeQuoteSnapshot(previous, incoming) {
   if (!previous) return incoming;
   const merged = { ...previous, ...incoming };
-  for (const field of ['openInterest', 'multiplier', 'iv', 'gamma', 'delta', 'theta', 'vega', 'strike', 'side', 'expiration']) {
+  for (const field of ['openInterest', 'multiplier', 'iv', 'gamma', 'delta', 'theta', 'vega', 'strike', 'side', 'expiration', 'volume', 'last', 'bid', 'ask', 'mid', 'bidSize', 'askSize', 'previousClose', 'breakEven']) {
     if (incoming[field] === null || incoming[field] === undefined) {
       if (previous[field] !== null && previous[field] !== undefined) merged[field] = previous[field];
     }
@@ -532,6 +541,46 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
     return payload;
   }
 
+  async function callBinanceText(pathname) {
+    const upstreamRequest = new Request(`https://quick-options.local${PREFIX}${pathname}`, {
+      method: 'GET', headers: { Accept: 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8' }
+    });
+    const response = await worker.fetch(upstreamRequest, env);
+    const raw = await response.text();
+    if (!response.ok) {
+      let detail = raw.slice(0, 180);
+      try { const payload = JSON.parse(raw); detail = payload?.detail || payload?.error || payload?.message || detail; } catch {}
+      throw new Error(`Binance options page proxy HTTP ${response.status}: ${detail}`);
+    }
+    return raw;
+  }
+
+  function collectExpiryDatesFromHtml(html, { symbol, today = todayNewYork() } = {}) {
+    const text = String(html || ''), dates = new Set(), year = Number(today.slice(0, 4));
+    const add = value => {
+      const date = expiryDateFromValue(value);
+      if (!date || date < today) return;
+      const ms = Date.parse(`${date}T12:00:00Z`);
+      const todayMs = Date.parse(`${today}T12:00:00Z`);
+      if (Number.isFinite(ms) && ms - todayMs <= 5 * 366 * 86_400_000) dates.add(date);
+    };
+    for (const match of text.matchAll(/(?:^|[^0-9])(20\d{2})[-/](\d{2})[-/](\d{2})(?![0-9])/g)) add(`${match[1]}-${match[2]}-${match[3]}`);
+    for (const match of text.matchAll(/(?:^|[^0-9])(20\d{2})(\d{2})(\d{2})(?![0-9])/g)) add(`${match[1]}-${match[2]}-${match[3]}`);
+    const root = String(symbol || '').toUpperCase();
+    if (root) {
+      const occ = new RegExp(`${root}(?:[A-Z0-9]{0,3})?(\\d{6})[CP]\\d{8}`, 'gi');
+      for (const match of text.matchAll(occ)) add(`20${match[1].slice(0, 2)}-${match[1].slice(2, 4)}-${match[1].slice(4, 6)}`);
+    }
+    for (const match of text.matchAll(/(?:^|[^0-9-])(\d{2})-(\d{2})(?![0-9])/g)) {
+      const month = Number(match[1]), day = Number(match[2]);
+      if (month < 1 || month > 12 || day < 1 || day > 31) continue;
+      let date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      add(date);
+      if (date < today) add(`${year + 1}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+    }
+    return [...dates].sort();
+  }
+
   async function findExpiry(symbol, requestedExpiry) {
     if (requestedExpiry) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedExpiry)) throw new Error('Expiry phải có định dạng YYYY-MM-DD.');
@@ -603,6 +652,50 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
       if (pending.length && attempt < 2) await sleep(350 * (attempt + 1));
     }
     return { quotes, pending, error: lastError };
+  }
+
+  async function getVolumeSnapshot(symbol = 'GLD', requestedExpiry = '') {
+    const underlying = String(symbol || '').toUpperCase();
+    if (!['GLD', 'QQQ'].includes(underlying)) throw new Error('Only GLD and QQQ are supported.');
+    const expiryInfo = await findExpiry(underlying, requestedExpiry);
+    const canonicalBySymbol = new Map();
+    for (const contract of expiryInfo.contracts) {
+      const optionSymbol = String(contract?.os ?? contract?.optionSymbol ?? '').trim();
+      if (!optionSymbol || canonicalBySymbol.has(optionSymbol)) continue;
+      canonicalBySymbol.set(optionSymbol, { ...contract, os: optionSymbol });
+    }
+    const canonical = [...canonicalBySymbol.values()];
+    const optionSymbols = canonical.map(item => item.os);
+    if (!optionSymbols.length) throw new Error(`Binance trả chain rỗng cho ${underlying} ${expiryInfo.date}.`);
+
+    const metadataBySymbol = new Map(canonical.map(item => [item.os, normaliseQuote(item)]));
+    const result = await fetchAllQuotes(optionSymbols, metadataBySymbol);
+    const contracts = canonical.map(item => {
+      const metadata = metadataBySymbol.get(item.os) || {};
+      const quote = result.quotes.get(item.os) || {};
+      const volume = num(quote.volume) ?? num(metadata.volume);
+      const strike = num(quote.strike) ?? num(metadata.strike);
+      const side = quote.side || metadata.side || null;
+      return {
+        optionSymbol: item.os,
+        side,
+        strike,
+        volume,
+        expiration: expiryInfo.date
+      };
+    });
+    const valid = contracts.filter(item => item.volume !== null && item.volume >= 0 && item.strike !== null && item.side);
+    return {
+      ok: true,
+      symbol: underlying,
+      expiry: expiryInfo.date,
+      updated_at: new Date().toISOString(),
+      total_contracts: canonical.length,
+      volume_contracts: valid.length,
+      missing_volume: canonical.length - valid.length,
+      quote_error: result.error || null,
+      contracts: valid
+    };
   }
 
   async function buildSummary(symbol, requestedExpiry, expiryCloseMinutes = 16 * 60) {
@@ -763,43 +856,177 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
     }
   }
 
-  async function getExpiries(symbol = 'GLD', limit = 12) {
+  function expiryDateFromValue(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const text = String(value).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+    if (/^\d{8}$/.test(text)) return `${text.slice(0,4)}-${text.slice(4,6)}-${text.slice(6,8)}`;
+    if (/^\d{6}$/.test(text)) return `20${text.slice(0,2)}-${text.slice(2,4)}-${text.slice(4,6)}`;
+    if (/^\d{10,13}$/.test(text)) {
+      const n = Number(text), d = new Date(n < 1e11 ? n * 1000 : n);
+      return Number.isFinite(d.getTime()) ? d.toISOString().slice(0,10) : null;
+    }
+    const match = text.match(/^(\d{4})[-/](\d{2})[-/](\d{2})/);
+    return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
+  }
+
+  function collectExpiryInventory(payload, symbol) {
+    const dates = new Set();
+    const dateKeys = /^(expirationdate|expirydate|expiration|expiry|expirationday|expirydays|maturitydate)$/i;
+    const dateArrayKeys = /^(expirationdates|expirydates|expirations|expirylist|expirationdatelist|expirydatelist)$/i;
+    const seen = new Set();
+    const visit = (node, depth = 0) => {
+      if (!node || typeof node !== 'object' || depth > 14 || seen.has(node)) return;
+      seen.add(node);
+      if (Array.isArray(node)) {
+        for (const child of node) visit(child, depth + 1);
+        return;
+      }
+      for (const [key, value] of Object.entries(node)) {
+        if (dateArrayKeys.test(key) && Array.isArray(value)) {
+          for (const item of value) {
+            const date = expiryDateFromValue(typeof item === 'object' && item ? (item.expiry ?? item.expirationDate ?? item.date) : item);
+            if (date) dates.add(date);
+          }
+        }
+        if (typeof value === 'string' || typeof value === 'number') {
+          if (dateKeys.test(key)) {
+            const date = expiryDateFromValue(value);
+            if (date) dates.add(date);
+          }
+          if (/^(os|optionsymbol|contractsymbol|symbol)$/i.test(key)) {
+            const occ = String(value).toUpperCase().match(new RegExp(`^${symbol}(?:[A-Z0-9]{0,3})?(\\d{6})[CP]\\d{8}$`));
+            if (occ) dates.add(`20${occ[1].slice(0,2)}-${occ[1].slice(2,4)}-${occ[1].slice(4,6)}`);
+          }
+        } else if (value && typeof value === 'object') visit(value, depth + 1);
+      }
+    };
+    visit(payload);
+    return [...dates].filter(date => /^\d{4}-\d{2}-\d{2}$/.test(date) && date >= todayNewYork()).sort();
+  }
+
+  async function getExpiries(symbol = 'GLD', limit = 128) {
     const underlying = String(symbol || '').toUpperCase();
     if (!['GLD', 'QQQ'].includes(underlying)) throw new Error('Only GLD and QQQ are supported.');
-    const count = Math.max(1, Math.min(24, Number(limit) || 12));
+    const count = Math.max(1, Math.min(512, Number(limit) || 512));
     const key = `${underlying}:${count}`;
     const cached = expiryListCache.get(key);
     if (cached && cached.expiresAt > Date.now()) return { ...cached.payload, cache: 'HIT' };
     if (expiryListInFlight.has(key)) return { ...(await expiryListInFlight.get(key)), cache: 'COALESCED' };
     const task = (async () => {
-    const dates = candidateDates(MAX_EXPIRY_CANDIDATES);
-    const found = [];
-    let next = 0;
-    let firstError = '';
-    async function loop() {
-      while (next < dates.length) {
-        const expiry = dates[next++];
-        try {
-          const reply = await callBinance(`${CHAIN_PATH}?${new URLSearchParams({ symbol: underlying, rootSymbol: underlying, expirationDate: expiry })}`);
-          const contracts = reply?.data?.l || [];
-          if (contracts.length) found.push({ expiry, contract_count: contracts.length });
-        } catch (error) {
-          if (!firstError) firstError = error?.message || String(error);
-        }
+      const foundByDate = new Map();
+      let source = 'exchange-info';
+      let firstError = '';
+      let pageError = '';
+      try {
+        const reply = await callBinance(`${EXCHANGE_INFO_PATH}?${new URLSearchParams({ symbol: underlying, rootSymbol: underlying })}`);
+        for (const expiry of collectExpiryInventory(reply, underlying)) foundByDate.set(expiry, { expiry, contract_count: null });
+      } catch (error) {
+        firstError = error?.message || String(error);
       }
-    }
-    await Promise.all(Array.from({ length: 4 }, loop));
-    found.sort((a, b) => a.expiry.localeCompare(b.expiry));
-    const payload = { ok: true, symbol: underlying, expiries: found.slice(0, count), scanned_dates: dates.length, updated_at: new Date().toISOString(), warning: found.length ? null : (firstError || 'No expiry contracts found.') };
-    expiryListCache.set(key, { payload, expiresAt: Date.now() + 15 * 60_000 });
-    return payload;
+
+      // Exchange Info can expose only the nearest listed dates on some responses.
+      // Merge the official options page inventory as well, so long-dated expiries
+      // visible in Binance's own web UI are not silently omitted.
+      try {
+        const html = await callBinanceText(`/en/stocks/options/EQ_${underlying}`);
+        for (const expiry of collectExpiryDatesFromHtml(html, { symbol: underlying })) {
+          if (!foundByDate.has(expiry)) foundByDate.set(expiry, { expiry, contract_count: null });
+        }
+        if (foundByDate.size) source = firstError ? 'options-page' : 'exchange-info+options-page';
+      } catch (error) {
+        pageError = error?.message || String(error);
+      }
+
+      let found = [...foundByDate.values()].sort((a, b) => a.expiry.localeCompare(b.expiry)).slice(0, count);
+      // Last-resort bounded discovery when both inventory sources are unavailable.
+      if (!found.length) {
+        source = '90-day-chain-scan';
+        const dates = [];
+        const base = new Date(`${todayNewYork()}T12:00:00Z`);
+        for (let i = 0; i < 90 && dates.length < count; i++) {
+          const d = new Date(base.getTime() + i * 86_400_000), day = d.getUTCDay();
+          if (day !== 0 && day !== 6) dates.push(d.toISOString().slice(0,10));
+        }
+        let next = 0;
+        const discovered = [];
+        async function scanWorker() {
+          while (next < dates.length) {
+            const date = dates[next++];
+            try {
+              const reply = await callBinance(`${CHAIN_PATH}?${new URLSearchParams({ symbol: underlying, rootSymbol: underlying, expirationDate: date })}`);
+              const contracts = reply?.data?.l || [];
+              if (contracts.length) discovered.push({ expiry: date, contract_count: contracts.length });
+            } catch (error) { if (!firstError) firstError = error?.message || String(error); }
+          }
+        }
+        await Promise.all(Array.from({ length: 3 }, scanWorker));
+        discovered.sort((a,b) => a.expiry.localeCompare(b.expiry));
+        const payload = { ok: true, symbol: underlying, expiries: discovered.slice(0,count), source, inventory_source: source, scanned_dates: dates.length,
+          updated_at: new Date().toISOString(), warning: discovered.length ? null : [firstError, pageError].filter(Boolean).join(' · ') || 'No expiry contracts found.' };
+        expiryListCache.set(key, { payload, expiresAt: Date.now() + 5 * 60_000 });
+        return payload;
+      }
+      const payload = { ok: true, symbol: underlying, expiries: found, source, inventory_source: source,
+        scanned_dates: 0, updated_at: new Date().toISOString(), warning: pageError && !found.length ? pageError : null };
+      expiryListCache.set(key, { payload, expiresAt: Date.now() + 5 * 60_000 });
+      return payload;
     })();
     expiryListInFlight.set(key, task);
-    try {
-      return { ...(await task), cache: 'MISS' };
-    } finally {
-      expiryListInFlight.delete(key);
+    try { return { ...(await task), cache: 'MISS' }; }
+    finally { expiryListInFlight.delete(key); }
+  }
+
+  async function getFullChainSnapshot(symbol = 'GLD', requestedExpiry = '') {
+    const underlying = String(symbol || '').toUpperCase();
+    if (!['GLD', 'QQQ'].includes(underlying)) throw new Error('Only GLD and QQQ are supported.');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(requestedExpiry || ''))) throw new Error('Expiry phải có định dạng YYYY-MM-DD.');
+    const reply = await callBinance(`${CHAIN_PATH}?${new URLSearchParams({ symbol: underlying, rootSymbol: underlying, expirationDate: requestedExpiry })}`);
+    const rawContracts = reply?.data?.l || [];
+    const bySymbol = new Map();
+    for (const item of rawContracts) {
+      const optionSymbol = String(item?.os ?? item?.optionSymbol ?? '').trim();
+      if (optionSymbol && !bySymbol.has(optionSymbol)) bySymbol.set(optionSymbol, { ...item, os: optionSymbol });
     }
+    const chain = [...bySymbol.values()];
+    if (!chain.length) throw new Error(`Binance không có Option Chain ${underlying} ${requestedExpiry}.`);
+    const metadataBySymbol = new Map(chain.map(item => [item.os, normaliseQuote(item)]));
+    const result = await fetchAllQuotes(chain.map(item => item.os), metadataBySymbol);
+    const contracts = chain.map(item => {
+      const metadata = metadataBySymbol.get(item.os) || {};
+      const quote = result.quotes.get(item.os) || {};
+      const merged = mergeQuoteSnapshot(metadata, quote);
+      return {
+        optionSymbol: item.os,
+        symbol: underlying,
+        expiry: requestedExpiry,
+        expiration: requestedExpiry,
+        side: merged.side,
+        strike: merged.strike,
+        multiplier: merged.multiplier,
+        openInterest: merged.openInterest,
+        volume: merged.volume,
+        iv: merged.iv,
+        gamma: merged.gamma,
+        delta: merged.delta,
+        theta: merged.theta,
+        vega: merged.vega,
+        last: merged.last,
+        bid: merged.bid,
+        ask: merged.ask,
+        mid: merged.mid,
+        bidSize: merged.bidSize,
+        askSize: merged.askSize,
+        previousClose: merged.previousClose,
+        breakEven: merged.breakEven
+      };
+    }).filter(item => item.optionSymbol && item.strike > 0 && ['C','P'].includes(item.side));
+    return {
+      ok: true, symbol: underlying, expiry: requestedExpiry,
+      updated_at: new Date().toISOString(), total_contracts: chain.length,
+      quote_count: result.quotes.size, missing_quotes: Math.max(0, chain.length - result.quotes.size),
+      quote_error: result.error || null, contracts
+    };
   }
 
   async function handle(request) {
@@ -825,5 +1052,5 @@ export function createQuickOptionsService({ worker, env = {}, spotFeed = null })
     }
   }
 
-  return { handle, tokenFile, getMarketSummary, getExpiries };
+  return { handle, tokenFile, getMarketSummary, getExpiries, getVolumeSnapshot, getFullChainSnapshot };
 }

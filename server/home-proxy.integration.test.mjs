@@ -8,7 +8,7 @@ const dir = path.dirname(fileURLToPath(import.meta.url));
 const port = 19_000 + Math.floor(Math.random() * 1_000);
 const child = spawn(process.execPath, [path.join(dir, 'home-proxy.mjs')], {
   cwd: path.dirname(dir),
-  env: { ...process.env, PORT: String(port), ALLOWED_ORIGINS: '*', DISABLE_SPOT_PREWARM: '1', QUICK_OPTIONS_TOKEN: 'home-proxy-integration-test-token' },
+  env: { ...process.env, PORT: String(port), ALLOWED_ORIGINS: '*', DISABLE_SPOT_PREWARM: '1', DISABLE_VOLUME_COLLECTOR: '1', VOLUME_FLOW_DB_PATH: ':memory:', QUICK_OPTIONS_TOKEN: 'home-proxy-integration-test-token' },
   stdio: ['ignore', 'pipe', 'pipe']
 });
 let logs = '';
@@ -33,6 +33,26 @@ try {
   const status = await statusResponse.json();
   assert.equal(status.ok, true);
   assert.equal(status.feed.state, 'idle', 'status endpoint should not open a Binance socket before a price is requested');
+
+  const optionsCacheStatusResponse = await fetch(`${base}/api/options-cache/status`);
+  assert.equal(optionsCacheStatusResponse.status, 200);
+  assert.equal((await optionsCacheStatusResponse.json()).ok, true);
+  const optionsCacheExpiryResponse = await fetch(`${base}/api/options-cache/expiries?symbol=GLD`);
+  assert.equal(optionsCacheExpiryResponse.status, 200);
+  assert.deepEqual((await optionsCacheExpiryResponse.json()).expiries, []);
+
+  const volumeStatusResponse = await fetch(`${base}/api/volume-flow/status`);
+  assert.equal(volumeStatusResponse.status, 200);
+  const volumeStatus = await volumeStatusResponse.json();
+  assert.equal(volumeStatus.enabled, false, 'integration test disables background network collection');
+  assert.equal(volumeStatus.capture, 'volume-delta-only');
+
+  const volumeEventsResponse = await fetch(`${base}/api/volume-flow/events?symbol=GLD`);
+  assert.equal(volumeEventsResponse.status, 200);
+  assert.deepEqual((await volumeEventsResponse.json()).events, []);
+
+  const invalidVolumeSymbol = await fetch(`${base}/api/volume-flow/contracts?symbol=BAD`);
+  assert.equal(invalidVolumeSymbol.status, 400);
 
   const invalid = await fetch(`${base}/api/spot?symbol=BAD`);
   assert.equal(invalid.status, 400);
