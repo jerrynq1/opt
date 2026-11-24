@@ -14,7 +14,7 @@
   const SOURCE_NAME={qqq:'QQQ',gld:'GLD'};
   const CACHE_API_BASE=String(window.BINANCE_STOCK_CACHE_API||window.BINANCE_STOCK_SPOT_API||'').replace(/\/+$/,'');
   let flowTimer=null,flowFetchToken=0;
-  const DEFAULTS={source:'qqq',bubbles:true,bubbleLabelMode:'volume',bubbleCount:200,filterBy:'volume',minVolumeContracts:0,minPremiumUSD:0,sizeScaling:'auto',absoluteScaleMaxQqq:1000,absoluteScaleMaxGld:1000,sizeFactor:1,minBubblePx:0,maxBubblePx:0,showPremiumOnBubble:false,bubbleStyle:'flat',bubbleShape:'circle',bubbleOpacity:.9,autoFilter:'off',biggestPerCandle:false,horizontalPosition:'time',zones:false,zoneHeightPct:.2,zoneLengthCandles:0,zoneMinSize:0,showCalls:true,showPuts:true,moneynessFilter:'all',expiryDteFilter:'all',showRings:true,showUnlinked:true,showMultiLeg:true,showLargeEvents:true,walls:true,gexWalls:true,gammaFlip:true,maxPain:true,gexCount:10,showSourceTag:true};
+  const DEFAULTS={source:'qqq',bubbles:true,marketSession:'nasdaq_rth',bubbleLabelMode:'volume',bubbleCount:200,filterBy:'volume',minVolumeContracts:0,minPremiumUSD:0,sizeScaling:'auto',absoluteScaleMaxQqq:1000,absoluteScaleMaxGld:1000,sizeFactor:1,minBubblePx:0,maxBubblePx:0,showPremiumOnBubble:false,bubbleStyle:'flat',bubbleShape:'circle',bubbleOpacity:.9,autoFilter:'off',biggestPerCandle:false,horizontalPosition:'time',zones:false,zoneHeightPct:.2,zoneLengthCandles:0,zoneMinSize:0,showCalls:true,showPuts:true,moneynessFilter:'all',expiryDteFilter:'all',showRings:true,showUnlinked:true,showMultiLeg:true,showLargeEvents:true,walls:true,gexWalls:true,gammaFlip:true,maxPain:true,gexCount:10,showSourceTag:true};
   const XMAP=window.XMAP=window.XMAP||{};
   Object.assign(XMAP,{enabled:false,source:'qqq',settings:{...DEFAULTS},version:0,snapshot:null,locked:null,events:[],flowUpdatedAt:null,error:'',started:false,indicatorId:null,visibleBubbles:[],selectedTrade:null,tradeChainCache:new Map(),bubbleAnchorCache:new Map(),bubbleAnchorCacheDirty:false,flowPrepared:null});
 
@@ -23,10 +23,12 @@
   const fmt=(x,d=2)=>Number.isFinite(+x)?(+x).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
   const timestampMs=x=>{const t=num(x);return t===null?null:(t<1e12?t*1000:t)};
   const ageLabel=ms=>ms===null?'—':ms<60000?Math.max(0,Math.round(ms/1000))+'s':ms<3600000?Math.round(ms/60000)+'m':Math.round(ms/3600000)+'h';
-  // Option Flow timestamps are UTC from the Node collector. Chart bars are stored
-  // as broker-server time and then transformed by disp() into the selected chart TZ.
-  // Comparing raw UTC directly with agg[].st shifts every event by the timezone offset
-  // (typically 7 hours in Viet Nam), which pins all bubbles at the far left.
+  // All Option Flow events are immutable UTC epoch timestamps from the Node collector.
+  // The chart stores a stable broker/server timestamp in every bar's `.st`; only the
+  // visible `.time` label changes when the user selects UTC+7 / New York / another TZ.
+  // Resolve event X exclusively on `.st` so timezone changes cannot alter its logical
+  // candle anchor. The rendered pixel moves with the candle when the chart is panned,
+  // which is the correct data-space anchoring behavior (not screen-space pinning).
   function flowEventServerTime(timeSec){
     if(!Number.isFinite(timeSec))return null;
     try{return typeof u2s==='function'?u2s(timeSec):timeSec}catch{return timeSec;}
@@ -35,21 +37,39 @@
     const serverTime=flowEventServerTime(timeSec);if(serverTime===null)return null;
     try{return typeof disp==='function'?disp(serverTime):serverTime}catch{return serverTime;}
   }
+  const NY_SESSION_FORMATTER=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+  function newYorkSessionParts(timestamp){
+    const ms=timestampMs(timestamp);if(ms===null)return null;
+    const parts=NY_SESSION_FORMATTER.formatToParts(new Date(ms)),pick=type=>parts.find(part=>part.type===type)?.value;
+    const weekday=pick('weekday'),hour=Number(pick('hour')),minute=Number(pick('minute'));
+    if(!Number.isFinite(hour)||!Number.isFinite(minute))return null;
+    return {weekday,hour,minute,minuteOfDay:hour*60+minute};
+  }
+  // Nasdaq regular cash session, interpreted with America/New_York so EST/EDT
+  // transitions are automatic. Start inclusive at 09:30 and end exclusive at 16:00.
+  function isNasdaqRegularSession(timestamp){
+    const parts=newYorkSessionParts(timestamp);
+    return !!parts&&!['Sat','Sun'].includes(parts.weekday)&&parts.minuteOfDay>=570&&parts.minuteOfDay<960;
+  }
   function flowEventLogicalLocation(timeSec,bars=Array.isArray(agg)?agg:[],timeframe=Math.max(1,Number(C?.tf)||60)){
-    const rows=Array.isArray(bars)?bars:[],n=rows.length,chartTime=flowEventChartTime(timeSec),tf=Math.max(1,Number(timeframe)||60);
-    if(!n||!Number.isFinite(chartTime))return null;
+    const rows=Array.isArray(bars)?bars:[],n=rows.length,serverTime=flowEventServerTime(timeSec),tf=Math.max(1,Number(timeframe)||60);
+    if(!n||!Number.isFinite(serverTime))return null;
+    // `.st` is the invariant data-time axis shared by rawAgg, agg and UTC events after
+    // u2s(). Never compare against `.time`: it is deliberately shifted for display TZ.
+    const timeField='st',axisTime=serverTime;
     const first=Number(rows[0]?.st),last=Number(rows[n-1]?.st);
-    if(!Number.isFinite(first)||!Number.isFinite(last)||chartTime<first-tf*0.25||chartTime>last+tf*1.5)return null;
-    if(chartTime<first)return null; // old event: wait until the matching chart history is loaded
+    if(!Number.isFinite(first)||!Number.isFinite(last)||axisTime<first||axisTime>last+tf*1.25)return null;
+    // Events older than the loaded chart history are not clamped to logical index 0.
+    // Doing so made many historic bubbles stack at the left edge.
     let lo=0,hi=n-1;
-    while(lo<hi){const mid=(lo+hi+1)>>1;if(Number(rows[mid].st)<=chartTime)lo=mid;else hi=mid-1;}
-    const bar=rows[lo],next=rows[lo+1];
-    const step=next&&Number(next.st)>Number(bar.st)?Number(next.st)-Number(bar.st):tf;
-    const fraction=Math.max(0,Math.min(1,(chartTime-Number(bar.st))/Math.max(1,step)));
-    // Lightweight Charts places each candle timestamp at its logical center.
-    // Intrabar events interpolate from logical i to i+1; do not subtract 0.5.
+    while(lo<hi){const mid=(lo+hi+1)>>1;if(Number(rows[mid]?.st)<=axisTime)lo=mid;else hi=mid-1;}
+    const bar=rows[lo],next=rows[lo+1],barTime=Number(bar?.st),nextTime=Number(next?.st);
+    const step=next&&nextTime>barTime?nextTime-barTime:tf;
+    // Do not interpolate across missing candles, overnight or weekend gaps.
+    if(step>tf*1.75)return null;
+    const fraction=Math.max(0,Math.min(1,(axisTime-barTime)/Math.max(1,step)));
     const logical=lo+fraction;
-    return {chartTime,logical,candleIndex:lo,fraction,bar,nextBar:next||null,step};
+    return {serverTime,chartTime:flowEventChartTime(timeSec),axisTime,timeField,logical,candleIndex:lo,fraction,bar,nextBar:next||null,step};
   }
   function flowEventLogicalTime(timeSec){return flowEventLogicalLocation(timeSec)?.logical??null;}
   function flowEventCoordinate(timeMs){
@@ -60,10 +80,12 @@
   function flowEventCandleIndex(timeSec,bars=Array.isArray(agg)?agg:[],timeframe=Math.max(1,Number(C?.tf)||60)){
     const location=flowEventLogicalLocation(timeSec,bars,timeframe);
     if(location)return location.candleIndex;
-    const chartTime=flowEventChartTime(timeSec);
-    return Number.isFinite(chartTime)?Math.floor(chartTime/Math.max(1,timeframe)):null;
+    const serverTime=flowEventServerTime(timeSec);
+    return Number.isFinite(serverTime)?Math.floor(serverTime/Math.max(1,timeframe)):null;
   }
-  function flowChartTimeAtLogical(logical,bars=Array.isArray(agg)?agg:[],timeframe=Math.max(1,Number(C?.tf)||60)){
+  // Returns the broker/server timestamp represented by a logical chart position.
+  // bar.st is stable across UI timezone changes; bar.time is only a display value.
+  function flowServerTimeAtLogical(logical,bars=Array.isArray(agg)?agg:[],timeframe=Math.max(1,Number(C?.tf)||60)){
     const rows=Array.isArray(bars)?bars:[],n=rows.length;if(!n||!Number.isFinite(logical))return null;
     const index=Math.floor(logical),fraction=logical-index;
     if(index<0){const step=n>1?Number(rows[1].st)-Number(rows[0].st):timeframe;return Number(rows[0].st)+logical*step;}
@@ -71,13 +93,17 @@
     const left=Number(rows[index].st),right=Number(rows[index+1].st);
     return Number.isFinite(left)&&Number.isFinite(right)?left+(right-left)*fraction:null;
   }
+  // Backwards-compatible export name; value is intentionally server time, not chart label time.
+  const flowChartTimeAtLogical=flowServerTimeAtLogical;
   // The mapped strike is fixed from the CFD candle and ETF spot snapshot at the
   // event time. We never recompute it from today's live spot ratio on each repaint.
   function flowEventTargetPriceAt(timeSec,bars=null){
     const rawRows=typeof rawAgg!=='undefined'&&Array.isArray(rawAgg)&&rawAgg.length?rawAgg:null;
     const rows=Array.isArray(bars)?bars:(rawRows||(Array.isArray(agg)?agg:[]));
-    const serverTime=flowEventServerTime(timeSec),useServer=!!rawRows&&rows===rawRows;
-    const targetTime=useServer?serverTime:flowEventChartTime(timeSec),n=rows.length,tf=Math.max(1,Number(C?.tf)||60);
+    const serverTime=flowEventServerTime(timeSec);
+    // Both rawAgg and transformed agg preserve broker/server seconds in .st.
+    // Never use disp() here: that would make the stored Y anchor depend on chart TZ.
+    const targetTime=serverTime,n=rows.length,tf=Math.max(1,Number(C?.tf)||60);
     if(!n||!Number.isFinite(targetTime))return null;
     if(targetTime<Number(rows[0].st)||targetTime>Number(rows[n-1].st)+tf*1.5)return null;
     let lo=0,hi=n-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(Number(rows[mid].st)<=targetTime)lo=mid;else hi=mid-1;}
@@ -95,21 +121,34 @@
     if(age!==null&&age>60_000)return null;
     ensureBubbleAnchorCache();
     const key=bubbleEventKey(event),cached=XMAP.bubbleAnchorCache.get(key);
-    if(Number(cached?.ratio)>0)return {ratio:Number(cached.ratio),mappedPrice:strike*Number(cached.ratio),targetPriceAtEvent:Number(cached.targetPriceAtEvent)||null,cached:true};
+    // Persist an absolute target-chart price, not only a ratio. The event's Y anchor
+    // must never be recalculated from a later ETF/CFD spot tick or a changed timezone.
+    if(Number(cached?.mappedPrice)>0)return {ratio:Number(cached.ratio)||Number(cached.mappedPrice)/strike,mappedPrice:Number(cached.mappedPrice),targetPriceAtEvent:Number(cached.targetPriceAtEvent)||null,cached:true};
     const targetPriceAtEvent=flowEventTargetPriceAt(observed/1000);
     if(!(targetPriceAtEvent>0))return null;
-    const ratio=targetPriceAtEvent/spot;
-    XMAP.bubbleAnchorCache.set(key,{ratio,targetPriceAtEvent,sourceSpot:spot,observedAt:observed});
+    const ratio=targetPriceAtEvent/spot,mappedPrice=strike*ratio;
+    XMAP.bubbleAnchorCache.set(key,{ratio,mappedPrice,targetPriceAtEvent,sourceSpot:spot,observedAt:observed,anchorTimeUtcMs:observed});
     XMAP.bubbleAnchorCacheDirty=true;
     while(XMAP.bubbleAnchorCache.size>20000)XMAP.bubbleAnchorCache.delete(XMAP.bubbleAnchorCache.keys().next().value);
-    return {ratio,mappedPrice:strike*ratio,targetPriceAtEvent,cached:false};
+    return {ratio,mappedPrice,targetPriceAtEvent,cached:false};
   }
   let bubbleAnchorStoreKey='';
   function ensureBubbleAnchorCache(){
-    const key=`tp_xmap_bubble_anchors_v1:${XMAP.source}:${pair()}`;
+    const key=`tp_xmap_bubble_anchors_v4:${XMAP.source}:${pair()}`;
     if(bubbleAnchorStoreKey===key&&XMAP.bubbleAnchorCache instanceof Map)return;
     bubbleAnchorStoreKey=key;XMAP.bubbleAnchorCache=new Map();XMAP.bubbleAnchorCacheDirty=false;
-    try{const rows=JSON.parse(localStorage.getItem(key)||'[]');for(const row of Array.isArray(rows)?rows:[]){if(Array.isArray(row)&&row.length===2&&Number(row[1]?.ratio)>0)XMAP.bubbleAnchorCache.set(String(row[0]),row[1]);}}catch{}
+    try{
+      let rows=JSON.parse(localStorage.getItem(key)||'[]');
+      // v3 already stored absolute event-time CFD prices. Migrate those anchors so
+      // the timezone fix does not discard older saved bubbles or recalculate their Y.
+      if(!Array.isArray(rows)||!rows.length){
+        rows=JSON.parse(localStorage.getItem(`tp_xmap_bubble_anchors_v3:${XMAP.source}:${pair()}`)||'[]');
+        if(Array.isArray(rows)&&rows.length)XMAP.bubbleAnchorCacheDirty=true;
+      }
+      for(const row of Array.isArray(rows)?rows:[]){
+        if(Array.isArray(row)&&row.length===2&&Number(row[1]?.mappedPrice)>0&&Number(row[1]?.ratio)>0)XMAP.bubbleAnchorCache.set(String(row[0]),row[1]);
+      }
+    }catch{}
   }
   function persistBubbleAnchorCache(){
     if(!XMAP.bubbleAnchorCacheDirty)return;
@@ -166,9 +205,11 @@
       const min=p.filterBy==='premium'?Math.max(0,num(p.minPremiumUSD)||0):Math.max(0,num(p.minVolumeContracts)||0);
       if(metric<min)continue;
       const stamp=timestampMs(event?.observedAt);if(stamp===null)continue;
+      if(!isNasdaqRegularSession(stamp))continue;
+      const serverTime=flowEventServerTime(stamp/1000);
       const chartTime=flowEventChartTime(stamp/1000);
       const candleIndex=flowEventCandleIndex(stamp/1000,bars,timeframe);
-      eligible.push({event,eventKey:bubbleEventKey(event),side,delta,premium,metric,stamp,chartTime,candleIndex,sessionKey:newYorkDateKey(stamp)});
+      eligible.push({event,eventKey:bubbleEventKey(event),side,delta,premium,metric,stamp,serverTime,chartTime,candleIndex,sessionKey:newYorkDateKey(stamp)});
     }
     const bySession=new Map();
     for(const item of eligible){if(!bySession.has(item.sessionKey))bySession.set(item.sessionKey,[]);bySession.get(item.sessionKey).push(item.metric);}
@@ -302,7 +343,7 @@
     return buildMappedMap(snapshot,sourcePrice,targetPrice,null,lockedAt);
   }
   window.crossAssetMapMath=Object.freeze({mapStrike,rankGexLevels,excludedKeyLevelStrikes,buildLockedMap,buildMappedMap,sameLevel});
-  window.crossAssetFlowMath=Object.freeze({eventDteDays,eventMoneyness,percentileThreshold,filterFlowEventData,flowEventChartTime,flowEventLogicalLocation,flowEventLogicalTime,flowEventCandleIndex,flowChartTimeAtLogical,flowEventTargetPriceAt,flowEventMapping,persistBubbleAnchorCache});
+  window.crossAssetFlowMath=Object.freeze({eventDteDays,eventMoneyness,newYorkSessionParts,isNasdaqRegularSession,percentileThreshold,filterFlowEventData,flowEventServerTime,flowEventChartTime,flowEventLogicalLocation,flowEventLogicalTime,flowEventCandleIndex,flowServerTimeAtLogical,flowChartTimeAtLogical,flowEventTargetPriceAt,flowEventMapping,flowBubbleInsidePlot,persistBubbleAnchorCache});
   function activeIndicator(){
     try{return typeof ACT!=='undefined'?ACT.find(a=>a&&a.key==='xmap')||null:null}catch{return null;}
   }
@@ -314,6 +355,7 @@
     const p={...DEFAULTS,...(a?.p||{})};
     if(a?.p&&Object.prototype.hasOwnProperty.call(a.p,'flip')&&!Object.prototype.hasOwnProperty.call(a.p,'gammaFlip'))p.gammaFlip=!!a.p.flip;
     p.source=p.source==='gld'?'gld':'qqq';
+    p.marketSession='nasdaq_rth'; // fixed market clock: all bubble events are Nasdaq RTH, America/New_York
     p.bubbleLabelMode=p.bubbleLabelMode==='cp'?'cp':'volume';
     p.bubbleCount=Math.max(5,Math.min(2000,Math.round(+p.bubbleCount||200)));
     p.filterBy=p.filterBy==='premium'?'premium':'volume';
@@ -369,7 +411,7 @@
     const changedAt=m.lastLevelChangeAt?new Date(m.lastLevelChangeAt).toLocaleTimeString('vi-VN'):'—';
     const flip=m.gammaFlip?.target==null?'Gamma Flip / Zero Gamma: unavailable':`Gamma Flip / Zero Gamma ${fmt(m.gammaFlip.target,2)} CFD`;
     const ratio=m.gexRatioState==='call-only'?'GEX Ratio ∞ · chỉ có Call GEX':m.gexRatio==null?'GEX Ratio: —':`GEX Ratio ${m.gexRatio.toFixed(2)}x · ${m.gexRatioBias==='call-dominant'?'Call Gamma trội':m.gexRatioBias==='put-dominant'?'Put Gamma trội':'cân bằng'}`;
-    el.textContent=`VOLUME FLOW · ${SOURCE_NAME[XMAP.source]} → ${pair()} · ${XMAP.events.length} events đã lưu · ${m.mappedCount||0} key levels · chain ${m.expiry||'—'} · last flow update ${XMAP.flowUpdatedAt?new Date(XMAP.flowUpdatedAt).toLocaleTimeString('vi-VN'):'—'}. Bubble đặt theo timestamp event đã quy đổi múi giờ chart; mức strike CFD được neo bằng spot ETF và nến CFD tại thời điểm event, không chạy theo spot hiện tại. Không đại diện limit/stop hoặc từng lệnh riêng lẻ.`;
+    el.textContent=`VOLUME FLOW · ${SOURCE_NAME[XMAP.source]} → ${pair()} · ${XMAP.events.length} events đã lưu · ${m.mappedCount||0} key levels · chain ${m.expiry||'—'} · last flow update ${XMAP.flowUpdatedAt?new Date(XMAP.flowUpdatedAt).toLocaleTimeString('vi-VN'):'—'}. Bubble lọc theo Nasdaq RTH 09:30–16:00 America/New_York (tự đổi EST/EDT); X neo bằng UTC event và Y neo bằng giá CFD tại thời điểm event. Đổi timezone chart chỉ đổi nhãn giờ, không đổi điểm neo dữ liệu. Khi kéo/zoom chart, bubble đi cùng đúng timestamp và mức giá như candle/price level. Không đại diện limit/stop hoặc từng lệnh riêng lẻ.`;
     setState(XMAP.events.length?'Volume history loaded':'Đang chờ Volume events',XMAP.events.length?'ok':'warn');
   }
   function syncExpiryControl(snapshot){
@@ -775,18 +817,29 @@
     const prepared={events,settingsKey,barCount:bars.length,firstBar:first,timeframe:C?.tf,target:pair(),filtered,multiLegKeys,sessionScaleByKey};
     XMAP.flowPrepared=prepared;return prepared;
   }
-  function lowerBoundChartTime(rows,time){let lo=0,hi=rows.length;while(lo<hi){const mid=(lo+hi)>>1;if(Number(rows[mid].chartTime)<time)lo=mid+1;else hi=mid;}return lo;}
+  function lowerBoundServerTime(rows,time){let lo=0,hi=rows.length;while(lo<hi){const mid=(lo+hi)>>1;if(Number(rows[mid].serverTime)<time)lo=mid+1;else hi=mid;}return lo;}
   function visibleFlowItems(rows,timeScale,width,limit,bars){
     if(!rows.length)return [];
     let range=null;try{range=timeScale.getVisibleLogicalRange?.()||null}catch{}
     let start=0,end=rows.length;
     if(range&&bars.length){
-      const from=flowChartTimeAtLogical(Number(range.from)-1.5,bars),to=flowChartTimeAtLogical(Number(range.to)+1.5,bars);
-      if(Number.isFinite(from)&&Number.isFinite(to)){start=lowerBoundChartTime(rows,from);end=lowerBoundChartTime(rows,to+0.001);}
+      const from=flowServerTimeAtLogical(Number(range.from)-1.5,bars),to=flowServerTimeAtLogical(Number(range.to)+1.5,bars);
+      if(Number.isFinite(from)&&Number.isFinite(to)){start=lowerBoundServerTime(rows,from);end=lowerBoundServerTime(rows,to+0.001);}
     }else start=Math.max(0,rows.length-limit);
     let visible=rows.slice(start,end);
     if(visible.length>limit)visible=visible.slice(-limit);
     return visible;
+  }
+  // Do not paint partially off-screen historical events on the left/right edges.
+  // Previously the renderer allowed x down to -60px; thousands of old events then
+  // clipped against the canvas and looked like a vertical bubble pile at the left.
+  // The drawings toolbar (#dwt) overlays the first 52px of the chart canvas
+  // (left:6px + width:46px). Do not paint bubbles underneath it; otherwise
+  // clipped circles and labels look like a permanent pile at the plot's left edge.
+  const FLOW_LEFT_UI_GUTTER=54;
+  function flowBubbleInsidePlot(x,y,radius,width,height){
+    if(![x,y,radius,width,height].every(Number.isFinite)||radius<0||width<=0||height<=0)return false;
+    return x>=FLOW_LEFT_UI_GUTTER+radius&&x<=width-radius-1&&y>=radius+1&&y<=height-radius-1;
   }
   function drawBubblePath(context,x,y,radius,shape){
     context.beginPath();
@@ -861,8 +914,8 @@
       if(!mapping)continue;
       const mappedPrice=mapping.mappedPrice;
       let x=null,y=null;
-      try{x=ts.logicalToCoordinate(logical);y=cs.priceToCoordinate(mappedPrice)}catch{continue;}
-      if(!Number.isFinite(x)||!Number.isFinite(y)||x<-60||x>w+60||y<-60||y>h+60)continue;
+      try{x=timeScale.logicalToCoordinate(logical);y=cs.priceToCoordinate(mappedPrice)}catch{continue;}
+      if(!Number.isFinite(x)||!Number.isFinite(y))continue;
       const scaleBase=P.sizeScaling==='absolute'?absoluteScale:(sessionScaleByKey.get(item.sessionKey)||absoluteScale);
       const norm=Math.max(0,Math.min(1,item.metric/scaleBase));
       let diameter=10+28*Math.sqrt(norm);
@@ -873,6 +926,7 @@
       if(biggest>0)diameter=Math.min(diameter,biggest);
       if(smallest>0&&biggest>0&&biggest<smallest)diameter=biggest;
       const radius=Math.max(4,Math.min(50,diameter/2));
+      if(!flowBubbleInsidePlot(x,y,radius,w,h))continue;
       const isMulti=prepared.multiLegKeys.has(item.eventKey);
       const large=item.largeThreshold!==null&&item.largeThreshold!==undefined&&item.metric>=item.largeThreshold;
       if(P.showRings&&isMulti&&!P.showMultiLeg)continue;
@@ -924,7 +978,7 @@
     const stamp=timestampMs(trade.event?.observedAt),location=stamp?flowEventLogicalLocation(stamp/1000):null;
     const mapping=flowEventMapping(trade.event);if(!location||!mapping||!(mapping.ratio>0))return;
     const logical=location.logical;
-    let startX=ts.logicalToCoordinate(logical);if(!Number.isFinite(startX))return;startX=Math.max(0,Math.min(w-4,startX));
+    const startX=ts.logicalToCoordinate(logical);if(!Number.isFinite(startX)||startX<FLOW_LEFT_UI_GUTTER||startX>w-4)return;
     ctx.save();ctx.beginPath();ctx.rect(0,0,w,h);ctx.clip();
     // Paint expiry P/L bands along the price axis, projected to the right of the selected flow event.
     const step=4;for(let y=0;y<h;y+=step){let targetPrice=null;try{targetPrice=cs.coordinateToPrice(y+step/2)}catch{}if(!(targetPrice>0))continue;

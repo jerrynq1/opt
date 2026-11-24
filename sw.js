@@ -1,5 +1,5 @@
 /* ICT QuantLab offline shell. Bump CACHE_VERSION whenever the app shell changes. */
-const CACHE_VERSION = "ict-quantlab-shell-v66";
+const CACHE_VERSION = "ict-quantlab-shell-v67";
 const SHELL = [
   "./", "./index.html", "./manifest.webmanifest", "./THIRD_PARTY_NOTICES_LIGHTWEIGHT_CHARTS.txt",
   "./img/logo.png", "./img/pwa-192.png", "./img/pwa-512.png",

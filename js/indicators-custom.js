@@ -372,11 +372,12 @@ IND.ict22={
    persistent indicator with an eye toggle and the standard settings dialog.
 */
 IND.xmap={
-  n:"ETF Options Volume Flow",t:"of",ver:6,
+  n:"ETF Options Volume Flow",t:"of",ver:7,
   d:"QQQ → NAS100 hoặc GLD → XAUUSD. Bubble hiển thị Volume Delta theo timestamp phát hiện và strike quy đổi; có bộ lọc Volume / Estimated Premium, percentile, Call/Put, DTE, shape, zones và event rings. Estimated Premium chỉ được tính khi có quote đủ mới tại lúc phát hiện; không phải execution premium. Call/Put là loại hợp đồng, không phải hướng BUY/SELL. Multi-leg là ứng viên suy luận; không hiển thị Sweep/Liquidation vì chưa có trade tape/venue data.",
   p:[
     ["source","Nguồn ETF","qqq","s",{g:"Volume Flow",o:[["qqq","QQQ → NAS100"],["gld","GLD → XAUUSD"]]}],
     ["bubbles","Hiện Volume Flow bubbles",true,"b"],
+    ["marketSession","Trading session","nasdaq_rth","s",{g:"Time & Session",o:[["nasdaq_rth","Nasdaq RTH (09:30–16:00 New York)"]],tt:"Chỉ hiển thị event trong phiên Nasdaq 09:30–16:00 America/New_York, tự đổi EST/EDT. Vị trí X neo theo timestamp nội bộ, Y neo theo mức giá CFD đã lưu tại thời điểm event; đổi timezone không làm mất hoặc đổi anchor."}],
     ["bubbleLabelMode","Nội dung trong bubble","volume","s",{o:[["volume","Volume Delta"],["cp","Call / Put (C/P)"]],tt:"Volume Delta là số hợp đồng mới phát hiện giữa hai lần quan sát. C/P chỉ là loại hợp đồng, không phải BUY/SELL."}],
     ["bubbleCount","Số bubble tối đa",200,"i",{min:5,max:2000,step:25}],
     ["filterBy","Filter / size by","volume","s",{g:"Filter & Size",o:[["volume","Volume contracts (Delta)"],["premium","Estimated Premium (USD)"]],tt:"Estimated Premium = Volume Delta × quote tham chiếu × multiplier. Chỉ dùng khi quote tại lúc phát hiện còn mới; không phải giá khớp thực tế."}],
