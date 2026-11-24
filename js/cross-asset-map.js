@@ -23,12 +23,11 @@
   const fmt=(x,d=2)=>Number.isFinite(+x)?(+x).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
   const timestampMs=x=>{const t=num(x);return t===null?null:(t<1e12?t*1000:t)};
   const ageLabel=ms=>ms===null?'—':ms<60000?Math.max(0,Math.round(ms/1000))+'s':ms<3600000?Math.round(ms/60000)+'m':Math.round(ms/3600000)+'h';
-  // All Option Flow events are immutable UTC epoch timestamps from the Node collector.
-  // The chart stores a stable broker/server timestamp in every bar's `.st`; only the
-  // visible `.time` label changes when the user selects UTC+7 / New York / another TZ.
-  // Resolve event X exclusively on `.st` so timezone changes cannot alter its logical
-  // candle anchor. The rendered pixel moves with the candle when the chart is panned,
-  // which is the correct data-space anchoring behavior (not screen-space pinning).
+  // Option Flow timestamps are immutable UTC epoch values from the Node collector.
+  // Chart candles keep an invariant broker/server timestamp in `.st`; only `.time`
+  // is shifted for the selected display timezone. Resolve event X against `.st`
+  // after the same UTC -> broker-time conversion, so UTC+7, New York and other
+  // display zones always resolve the same event to the same logical candle.
   function flowEventServerTime(timeSec){
     if(!Number.isFinite(timeSec))return null;
     try{return typeof u2s==='function'?u2s(timeSec):timeSec}catch{return timeSec;}
@@ -52,24 +51,22 @@
     return !!parts&&!['Sat','Sun'].includes(parts.weekday)&&parts.minuteOfDay>=570&&parts.minuteOfDay<960;
   }
   function flowEventLogicalLocation(timeSec,bars=Array.isArray(agg)?agg:[],timeframe=Math.max(1,Number(C?.tf)||60)){
-    const rows=Array.isArray(bars)?bars:[],n=rows.length,serverTime=flowEventServerTime(timeSec),tf=Math.max(1,Number(timeframe)||60);
+    const rows=Array.isArray(bars)?bars:[],n=rows.length,serverTime=flowEventServerTime(timeSec),chartTime=flowEventChartTime(timeSec),tf=Math.max(1,Number(timeframe)||60);
     if(!n||!Number.isFinite(serverTime))return null;
-    // `.st` is the invariant data-time axis shared by rawAgg, agg and UTC events after
-    // u2s(). Never compare against `.time`: it is deliberately shifted for display TZ.
-    const timeField='st',axisTime=serverTime;
+    // `.st` is the invariant data-time axis shared by the candles and UTC events
+    // after u2s(). Do not use `.time` here: it is a presentation-only timezone shift.
     const first=Number(rows[0]?.st),last=Number(rows[n-1]?.st);
-    if(!Number.isFinite(first)||!Number.isFinite(last)||axisTime<first||axisTime>last+tf*1.25)return null;
-    // Events older than the loaded chart history are not clamped to logical index 0.
-    // Doing so made many historic bubbles stack at the left edge.
+    if(!Number.isFinite(first)||!Number.isFinite(last)||serverTime<first||serverTime>last+tf*1.25)return null;
+    // Never clamp an event outside the loaded history to logical index zero/last.
     let lo=0,hi=n-1;
-    while(lo<hi){const mid=(lo+hi+1)>>1;if(Number(rows[mid]?.st)<=axisTime)lo=mid;else hi=mid-1;}
+    while(lo<hi){const mid=(lo+hi+1)>>1;if(Number(rows[mid]?.st)<=serverTime)lo=mid;else hi=mid-1;}
     const bar=rows[lo],next=rows[lo+1],barTime=Number(bar?.st),nextTime=Number(next?.st);
     const step=next&&nextTime>barTime?nextTime-barTime:tf;
     // Do not interpolate across missing candles, overnight or weekend gaps.
     if(step>tf*1.75)return null;
-    const fraction=Math.max(0,Math.min(1,(axisTime-barTime)/Math.max(1,step)));
+    const fraction=Math.max(0,Math.min(1,(serverTime-barTime)/Math.max(1,step)));
     const logical=lo+fraction;
-    return {serverTime,chartTime:flowEventChartTime(timeSec),axisTime,timeField,logical,candleIndex:lo,fraction,bar,nextBar:next||null,step};
+    return {serverTime,chartTime,axisTime:serverTime,timeField:'st',logical,candleIndex:lo,fraction,bar,nextBar:next||null,step};
   }
   function flowEventLogicalTime(timeSec){return flowEventLogicalLocation(timeSec)?.logical??null;}
   function flowEventCoordinate(timeMs){
@@ -80,11 +77,10 @@
   function flowEventCandleIndex(timeSec,bars=Array.isArray(agg)?agg:[],timeframe=Math.max(1,Number(C?.tf)||60)){
     const location=flowEventLogicalLocation(timeSec,bars,timeframe);
     if(location)return location.candleIndex;
-    const serverTime=flowEventServerTime(timeSec);
-    return Number.isFinite(serverTime)?Math.floor(serverTime/Math.max(1,timeframe)):null;
+    return null;
   }
-  // Returns the broker/server timestamp represented by a logical chart position.
-  // bar.st is stable across UI timezone changes; bar.time is only a display value.
+  // Convert a logical chart index back to invariant broker/server time. This is
+  // used to query visible events and is deliberately independent of display TZ.
   function flowServerTimeAtLogical(logical,bars=Array.isArray(agg)?agg:[],timeframe=Math.max(1,Number(C?.tf)||60)){
     const rows=Array.isArray(bars)?bars:[],n=rows.length;if(!n||!Number.isFinite(logical))return null;
     const index=Math.floor(logical),fraction=logical-index;
@@ -93,21 +89,20 @@
     const left=Number(rows[index].st),right=Number(rows[index+1].st);
     return Number.isFinite(left)&&Number.isFinite(right)?left+(right-left)*fraction:null;
   }
-  // Backwards-compatible export name; value is intentionally server time, not chart label time.
+  // Backwards-compatible helper names; both values are invariant server time.
   const flowChartTimeAtLogical=flowServerTimeAtLogical;
+  const flowChartTimeAtLogicalCompat=flowServerTimeAtLogical;
   // The mapped strike is fixed from the CFD candle and ETF spot snapshot at the
   // event time. We never recompute it from today's live spot ratio on each repaint.
   function flowEventTargetPriceAt(timeSec,bars=null){
     const rawRows=typeof rawAgg!=='undefined'&&Array.isArray(rawAgg)&&rawAgg.length?rawAgg:null;
     const rows=Array.isArray(bars)?bars:(rawRows||(Array.isArray(agg)?agg:[]));
-    const serverTime=flowEventServerTime(timeSec);
-    // Both rawAgg and transformed agg preserve broker/server seconds in .st.
-    // Never use disp() here: that would make the stored Y anchor depend on chart TZ.
-    const targetTime=serverTime,n=rows.length,tf=Math.max(1,Number(C?.tf)||60);
+    const targetTime=flowEventServerTime(timeSec),n=rows.length,tf=Math.max(1,Number(C?.tf)||60);
     if(!n||!Number.isFinite(targetTime))return null;
     if(targetTime<Number(rows[0].st)||targetTime>Number(rows[n-1].st)+tf*1.5)return null;
     let lo=0,hi=n-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(Number(rows[mid].st)<=targetTime)lo=mid;else hi=mid-1;}
     const bar=rows[lo],next=rows[lo+1],step=next&&Number(next.st)>Number(bar.st)?Number(next.st)-Number(bar.st):tf;
+    if(step>tf*1.75)return null;
     const fraction=Math.max(0,Math.min(1,(targetTime-Number(bar.st))/Math.max(1,step)));
     const open=num(bar.open),close=num(bar.close);
     if(open!==null&&close!==null)return open+(close-open)*fraction;
@@ -134,17 +129,13 @@
   }
   let bubbleAnchorStoreKey='';
   function ensureBubbleAnchorCache(){
-    const key=`tp_xmap_bubble_anchors_v4:${XMAP.source}:${pair()}`;
+    const key=`tp_xmap_bubble_anchors_v6:${XMAP.source}:${pair()}`;
     if(bubbleAnchorStoreKey===key&&XMAP.bubbleAnchorCache instanceof Map)return;
     bubbleAnchorStoreKey=key;XMAP.bubbleAnchorCache=new Map();XMAP.bubbleAnchorCacheDirty=false;
     try{
-      let rows=JSON.parse(localStorage.getItem(key)||'[]');
-      // v3 already stored absolute event-time CFD prices. Migrate those anchors so
-      // the timezone fix does not discard older saved bubbles or recalculate their Y.
-      if(!Array.isArray(rows)||!rows.length){
-        rows=JSON.parse(localStorage.getItem(`tp_xmap_bubble_anchors_v3:${XMAP.source}:${pair()}`)||'[]');
-        if(Array.isArray(rows)&&rows.length)XMAP.bubbleAnchorCacheDirty=true;
-      }
+      // v6 is deliberately a clean namespace: old v3/v4/v5 anchors were created by
+      // earlier X-axis conversion logic and may have frozen a wrong price/time pair.
+      const rows=JSON.parse(localStorage.getItem(key)||'[]');
       for(const row of Array.isArray(rows)?rows:[]){
         if(Array.isArray(row)&&row.length===2&&Number(row[1]?.mappedPrice)>0&&Number(row[1]?.ratio)>0)XMAP.bubbleAnchorCache.set(String(row[0]),row[1]);
       }
@@ -178,6 +169,25 @@
     if(Math.abs(strike-spot)/spot<=0.01)return 'atm';
     return (side==='C'?strike<spot:strike>spot)?'itm':'otm';
   }
+  const MAX_BUBBLE_EVENT_GAP_MS=5*60_000;
+  function volumeEventQualitySummary(events){
+    const rows=Array.isArray(events)?events:[];
+    let validTimestamp=0,rth=0,longGap=0,qualified=0,outsideRth=0;
+    for(const event of rows){
+      const stamp=timestampMs(event?.observedAt);if(stamp===null)continue;validTimestamp++;
+      const gap=num(event?.gapMs);
+      // These are independent quality flags: an event can be both outside RTH
+      // and a long-gap catch-up. Count both so the status panel explains why it
+      // is archived, while `qualified` remains a disjoint displayable count.
+      if(gap!==null&&gap>MAX_BUBBLE_EVENT_GAP_MS)longGap++;
+      const inRth=isNasdaqRegularSession(stamp);
+      if(!inRth){outsideRth++;continue;}
+      rth++;
+      if(gap!==null&&gap>MAX_BUBBLE_EVENT_GAP_MS)continue;
+      qualified++;
+    }
+    return {stored:rows.length,validTimestamp,rth,outsideRth,longGap,qualified,invalidTimestamp:rows.length-validTimestamp};
+  }
   function percentileThreshold(values,topFraction){
     const rows=(Array.isArray(values)?values:[]).map(Number).filter(value=>Number.isFinite(value)&&value>0).sort((a,b)=>a-b);
     if(!rows.length)return null;
@@ -206,8 +216,13 @@
       if(metric<min)continue;
       const stamp=timestampMs(event?.observedAt);if(stamp===null)continue;
       if(!isNasdaqRegularSession(stamp))continue;
+      const gapMs=num(event?.gapMs);
+      // A volume delta accumulated across >5 minutes has no defensible point-in-time
+      // placement. Keep it in history, but exclude it from the chart bubble layer.
+      if(gapMs!==null&&gapMs>MAX_BUBBLE_EVENT_GAP_MS)continue;
       const serverTime=flowEventServerTime(stamp/1000);
       const chartTime=flowEventChartTime(stamp/1000);
+      if(!Number.isFinite(chartTime))continue;
       const candleIndex=flowEventCandleIndex(stamp/1000,bars,timeframe);
       eligible.push({event,eventKey:bubbleEventKey(event),side,delta,premium,metric,stamp,serverTime,chartTime,candleIndex,sessionKey:newYorkDateKey(stamp)});
     }
@@ -229,7 +244,7 @@
       }
       filtered=[...best.values()];
     }
-    return filtered.sort((a,b)=>a.stamp-b.stamp).map(item=>({...item,largeThreshold:largeThresholds.get(item.sessionKey)??null}));
+    return filtered.sort((a,b)=>a.serverTime-b.serverTime||a.stamp-b.stamp).map(item=>({...item,largeThreshold:largeThresholds.get(item.sessionKey)??null}));
   }
   const pair=()=>TARGET[XMAP.source]||'NAS100';
   const currentMatchesTarget=()=>String(C?.sym||'').toUpperCase()===pair();
@@ -343,7 +358,7 @@
     return buildMappedMap(snapshot,sourcePrice,targetPrice,null,lockedAt);
   }
   window.crossAssetMapMath=Object.freeze({mapStrike,rankGexLevels,excludedKeyLevelStrikes,buildLockedMap,buildMappedMap,sameLevel});
-  window.crossAssetFlowMath=Object.freeze({eventDteDays,eventMoneyness,newYorkSessionParts,isNasdaqRegularSession,percentileThreshold,filterFlowEventData,flowEventServerTime,flowEventChartTime,flowEventLogicalLocation,flowEventLogicalTime,flowEventCandleIndex,flowServerTimeAtLogical,flowChartTimeAtLogical,flowEventTargetPriceAt,flowEventMapping,flowBubbleInsidePlot,persistBubbleAnchorCache});
+  window.crossAssetFlowMath=Object.freeze({eventDteDays,eventMoneyness,newYorkSessionParts,isNasdaqRegularSession,volumeEventQualitySummary,percentileThreshold,filterFlowEventData,flowEventServerTime,flowEventChartTime,flowEventLogicalLocation,flowEventLogicalTime,flowEventCandleIndex,flowServerTimeAtLogical,flowChartTimeAtLogical,flowChartTimeAtLogicalCompat,flowEventTargetPriceAt,flowEventMapping,flowBubbleInsidePlot,persistBubbleAnchorCache});
   function activeIndicator(){
     try{return typeof ACT!=='undefined'?ACT.find(a=>a&&a.key==='xmap')||null:null}catch{return null;}
   }
@@ -411,7 +426,8 @@
     const changedAt=m.lastLevelChangeAt?new Date(m.lastLevelChangeAt).toLocaleTimeString('vi-VN'):'—';
     const flip=m.gammaFlip?.target==null?'Gamma Flip / Zero Gamma: unavailable':`Gamma Flip / Zero Gamma ${fmt(m.gammaFlip.target,2)} CFD`;
     const ratio=m.gexRatioState==='call-only'?'GEX Ratio ∞ · chỉ có Call GEX':m.gexRatio==null?'GEX Ratio: —':`GEX Ratio ${m.gexRatio.toFixed(2)}x · ${m.gexRatioBias==='call-dominant'?'Call Gamma trội':m.gexRatioBias==='put-dominant'?'Put Gamma trội':'cân bằng'}`;
-    el.textContent=`VOLUME FLOW · ${SOURCE_NAME[XMAP.source]} → ${pair()} · ${XMAP.events.length} events đã lưu · ${m.mappedCount||0} key levels · chain ${m.expiry||'—'} · last flow update ${XMAP.flowUpdatedAt?new Date(XMAP.flowUpdatedAt).toLocaleTimeString('vi-VN'):'—'}. Bubble lọc theo Nasdaq RTH 09:30–16:00 America/New_York (tự đổi EST/EDT); X neo bằng UTC event và Y neo bằng giá CFD tại thời điểm event. Đổi timezone chart chỉ đổi nhãn giờ, không đổi điểm neo dữ liệu. Khi kéo/zoom chart, bubble đi cùng đúng timestamp và mức giá như candle/price level. Không đại diện limit/stop hoặc từng lệnh riêng lẻ.`;
+    const quality=volumeEventQualitySummary(XMAP.events);
+    el.textContent=`VOLUME FLOW · ${SOURCE_NAME[XMAP.source]} → ${pair()} · ${quality.stored} saved / ${quality.qualified} qualified RTH bubbles · ${quality.outsideRth} outside RTH / ${quality.longGap} long-gap archived (flags may overlap) · ${m.mappedCount||0} key levels · chain ${m.expiry||'—'} · last flow update ${XMAP.flowUpdatedAt?new Date(XMAP.flowUpdatedAt).toLocaleTimeString('vi-VN'):'—'}. Bubble dùng Nasdaq RTH 09:30–16:00 America/New_York; event gap >5 phút vẫn lưu trong DB nhưng không vẽ như điểm thời gian. X khớp trực tiếp chart series time sau đổi timezone, Y neo bằng giá CFD tại event-time. Khi pan/zoom, bubble đi cùng đúng candle và mức giá dữ liệu. Không đại diện limit/stop hoặc từng lệnh riêng lẻ.`;
     setState(XMAP.events.length?'Volume history loaded':'Đang chờ Volume events',XMAP.events.length?'ok':'warn');
   }
   function syncExpiryControl(snapshot){
@@ -806,15 +822,16 @@
   }
   function prepareFlowRenderData(P){
     const events=Array.isArray(XMAP.events)?XMAP.events:[],bars=Array.isArray(agg)?agg:[];
-    const settingsKey=JSON.stringify(P),first=bars[0]?.st??null;
+    const settingsKey=JSON.stringify(P),first=bars[0]?.st??null,last=bars[bars.length-1]?.st??null,lastDisplay=bars[bars.length-1]?.time??null;
+    const timezone=typeof TZ!=='undefined'?String(TZ):'unknown';
     const existing=XMAP.flowPrepared;
-    if(existing&&existing.events===events&&existing.settingsKey===settingsKey&&existing.barCount===bars.length&&existing.firstBar===first&&existing.timeframe===C?.tf&&existing.target===pair())return existing;
+    if(existing&&existing.events===events&&existing.settingsKey===settingsKey&&existing.barCount===bars.length&&existing.firstBar===first&&existing.lastBar===last&&existing.lastDisplay===lastDisplay&&existing.timezone===timezone&&existing.timeframe===C?.tf&&existing.target===pair())return existing;
     const filtered=filterFlowEventData(events,P,bars,Math.max(1,Number(C?.tf)||60));
     const multiLegKeys=P.showRings&&P.showMultiLeg?possibleStructureEventKeys(events):new Set();
     const metricsBySession=new Map();
     for(const item of filtered){if(!metricsBySession.has(item.sessionKey))metricsBySession.set(item.sessionKey,[]);metricsBySession.get(item.sessionKey).push(item.metric);}
     const sessionScaleByKey=new Map([...metricsBySession].map(([key,values])=>[key,percentileThreshold(values,.05)||Math.max(1,...values)]));
-    const prepared={events,settingsKey,barCount:bars.length,firstBar:first,timeframe:C?.tf,target:pair(),filtered,multiLegKeys,sessionScaleByKey};
+    const prepared={events,settingsKey,barCount:bars.length,firstBar:first,lastBar:last,lastDisplay,timezone,timeframe:C?.tf,target:pair(),filtered,multiLegKeys,sessionScaleByKey};
     XMAP.flowPrepared=prepared;return prepared;
   }
   function lowerBoundServerTime(rows,time){let lo=0,hi=rows.length;while(lo<hi){const mid=(lo+hi)>>1;if(Number(rows[mid].serverTime)<time)lo=mid+1;else hi=mid;}return lo;}
