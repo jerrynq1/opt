@@ -16,7 +16,7 @@
   let flowTimer=null,flowFetchToken=0;
   const DEFAULTS={source:'qqq',bubbles:true,marketSession:'nasdaq_rth',bubbleLabelMode:'volume',bubbleCount:200,filterBy:'volume',minVolumeContracts:0,minPremiumUSD:0,sizeScaling:'auto',absoluteScaleMaxQqq:1000,absoluteScaleMaxGld:1000,sizeFactor:1,minBubblePx:0,maxBubblePx:0,showPremiumOnBubble:false,bubbleStyle:'flat',bubbleShape:'circle',bubbleOpacity:.9,autoFilter:'off',biggestPerCandle:false,horizontalPosition:'time',zones:false,zoneHeightPct:.2,zoneLengthCandles:0,zoneMinSize:0,showCalls:true,showPuts:true,moneynessFilter:'all',expiryDteFilter:'all',showRings:true,showUnlinked:true,showMultiLeg:true,showLargeEvents:true,walls:true,gexWalls:true,gammaFlip:true,maxPain:true,gexCount:10,showSourceTag:true};
   const XMAP=window.XMAP=window.XMAP||{};
-  Object.assign(XMAP,{enabled:false,source:'qqq',settings:{...DEFAULTS},version:0,snapshot:null,locked:null,events:[],flowUpdatedAt:null,error:'',started:false,indicatorId:null,visibleBubbles:[],selectedTrade:null,tradeChainCache:new Map(),bubbleAnchorCache:new Map(),bubbleAnchorCacheDirty:false,flowPrepared:null});
+  Object.assign(XMAP,{enabled:false,source:'qqq',settings:{...DEFAULTS},version:0,snapshot:null,locked:null,events:[],flowUpdatedAt:null,error:'',started:false,indicatorId:null,visibleBubbles:[],selectedTrade:null,tradeChainCache:new Map(),bubbleAnchorCache:new Map(),bubbleAnchorCacheDirty:false,flowPrepared:null,chartHistoryStatus:'Chưa nạp lịch sử nến cho Volume Flow',chartHistoryResult:null});
 
   const num=x=>(x===null||x===undefined||x==='')?null:(Number.isFinite(+x)?+x:null);
   const compact=x=>{const v=+x;if(!Number.isFinite(v))return'—';const a=Math.abs(v);return a>=1e6?(v/1e6).toFixed(1)+'m':a>=1e3?(v/1e3).toFixed(1)+'k':String(Math.round(v));};
@@ -24,28 +24,16 @@
   const timestampMs=x=>{const t=num(x);return t===null?null:(t<1e12?t*1000:t)};
   const ageLabel=ms=>ms===null?'—':ms<60000?Math.max(0,Math.round(ms/1000))+'s':ms<3600000?Math.round(ms/60000)+'m':Math.round(ms/3600000)+'h';
   // Option Flow timestamps are immutable UTC epoch values from the Node collector.
-  // Lightweight Charts does NOT index the series by `.st`: chart.js sends `bar.time`
-  // to setData/update, and `bar.time` is the selected display-time value from disp().
-  // Always resolve events against that exact field; `.st` remains broker/server time
-  // for session aggregation only. This makes UTC+7, New York (EST/EDT) and other
-  // display timezones land on the same logical candle after the series is rebuilt.
+  // CFD candle `.st` is broker/server time; `.time` is the exact Lightweight Charts
+  // axis value after the selected display timezone is applied. Event X must use
+  // disp(u2s(event UTC)) and compare only with `.time`; price lookup still uses `.st`.
   function flowEventServerTime(timeSec){
     if(!Number.isFinite(timeSec))return null;
     try{return typeof u2s==='function'?u2s(timeSec):timeSec}catch{return timeSec;}
   }
   function flowEventChartTime(timeSec){
     const serverTime=flowEventServerTime(timeSec);if(serverTime===null)return null;
-    try{
-      if(typeof disp!=='function')return serverTime;
-      // disp() rounds to whole seconds, while event timestamps may include ms.
-      // Preserve the sub-second remainder after converting the whole server second.
-      const whole=Math.floor(serverTime),fraction=serverTime-whole;
-      return disp(whole)+fraction;
-    }catch{return serverTime;}
-  }
-  function chartBarTime(bar){
-    const displayTime=Number(bar?.time);
-    return Number.isFinite(displayTime)?displayTime:Number(bar?.st);
+    try{return typeof disp==='function'?disp(serverTime):serverTime}catch{return serverTime;}
   }
   const NY_SESSION_FORMATTER=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
   function newYorkSessionParts(timestamp){
@@ -61,22 +49,23 @@
     const parts=newYorkSessionParts(timestamp);
     return !!parts&&!['Sat','Sun'].includes(parts.weekday)&&parts.minuteOfDay>=570&&parts.minuteOfDay<960;
   }
+  // Lightweight Charts uses `bar.time` as the actual X-axis value. `bar.st`
+  // remains the invariant broker/server timestamp used by CFD price lookup and
+  // server-time range queries. Compare eventChartTime with `bar.time`; never mix
+  // a UTC/server timestamp with the display-time axis.
+  function chartBarTime(bar){
+    const displayTime=Number(bar?.time);
+    return Number.isFinite(displayTime)?displayTime:Number(bar?.st);
+  }
   function flowEventLogicalLocation(timeSec,bars=Array.isArray(agg)?agg:[],timeframe=Math.max(1,Number(C?.tf)||60)){
     const rows=Array.isArray(bars)?bars:[],n=rows.length,serverTime=flowEventServerTime(timeSec),chartTime=flowEventChartTime(timeSec),tf=Math.max(1,Number(timeframe)||60);
     if(!n||!Number.isFinite(serverTime)||!Number.isFinite(chartTime))return null;
-    // Match the exact numeric time values passed to Lightweight Charts (`bar.time`).
-    // Comparing a broker `.st` (UTC+2/+3) with a display-time event was the source
-    // of bubbles disappearing after a timezone switch or collapsing at the left edge.
     const first=chartBarTime(rows[0]),last=chartBarTime(rows[n-1]);
     if(!Number.isFinite(first)||!Number.isFinite(last)||chartTime<first||chartTime>last+tf*1.25)return null;
-    // Never clamp an event outside the loaded history to logical index zero/last.
     let lo=0,hi=n-1;
     while(lo<hi){const mid=(lo+hi+1)>>1;if(chartBarTime(rows[mid])<=chartTime)lo=mid;else hi=mid-1;}
     const bar=rows[lo],next=rows[lo+1],barTime=chartBarTime(bar),nextTime=next?chartBarTime(next):NaN;
     const step=next&&nextTime>barTime?nextTime-barTime:tf;
-    // For ordinary time-based charts, don't interpolate across overnight/weekend gaps.
-    // Synthetic chart types may have irregular bar spacing; the logical axis itself
-    // remains authoritative there, so only reject non-positive or invalid steps.
     const synthetic=typeof QLChartTypes!=='undefined'&&QLChartTypes.isSynthetic?.(window.QL_CHART_TYPE);
     if(!(step>0)||(!synthetic&&step>tf*1.75))return null;
     const fraction=Math.max(0,Math.min(1,(chartTime-barTime)/Math.max(1,step)));
@@ -104,31 +93,21 @@
     const left=Number(rows[index].st),right=Number(rows[index+1].st);
     return Number.isFinite(left)&&Number.isFinite(right)?left+(right-left)*fraction:null;
   }
-  // Inverse of the chart's logical axis: return the time value actually supplied
-  // to Lightweight Charts. Use this for visible-range queries and event filtering.
-  function flowChartTimeAtLogical(logical,bars=Array.isArray(agg)?agg:[],timeframe=Math.max(1,Number(C?.tf)||60)){
-    const rows=Array.isArray(bars)?bars:[],n=rows.length;if(!n||!Number.isFinite(logical))return null;
-    const index=Math.floor(logical),fraction=logical-index;
-    if(index<0){const left=chartBarTime(rows[0]),right=n>1?chartBarTime(rows[1]):NaN,step=right>left?right-left:timeframe;return Number.isFinite(left)?left+logical*step:null;}
-    if(index>=n-1){const left=chartBarTime(rows[n-1]),prior=n>1?chartBarTime(rows[n-2]):NaN,step=left>prior?left-prior:timeframe;return Number.isFinite(left)?left+(logical-(n-1))*step:null;}
-    const left=chartBarTime(rows[index]),right=chartBarTime(rows[index+1]);
-    return Number.isFinite(left)&&Number.isFinite(right)?left+(right-left)*fraction:null;
-  }
-  const flowChartTimeAtLogicalCompat=flowChartTimeAtLogical;
+  // Backwards-compatible helper names; both values are invariant server time.
+  const flowChartTimeAtLogical=flowServerTimeAtLogical;
+  const flowChartTimeAtLogicalCompat=flowServerTimeAtLogical;
   // The mapped strike is fixed from the CFD candle and ETF spot snapshot at the
   // event time. We never recompute it from today's live spot ratio on each repaint.
   function flowEventTargetPriceAt(timeSec,bars=null){
     const rawRows=typeof rawAgg!=='undefined'&&Array.isArray(rawAgg)&&rawAgg.length?rawAgg:null;
     const rows=Array.isArray(bars)?bars:(rawRows||(Array.isArray(agg)?agg:[]));
-    const targetTime=flowEventChartTime(timeSec),n=rows.length,tf=Math.max(1,Number(C?.tf)||60);
+    const targetTime=flowEventServerTime(timeSec),n=rows.length,tf=Math.max(1,Number(C?.tf)||60);
     if(!n||!Number.isFinite(targetTime))return null;
-    const first=chartBarTime(rows[0]),last=chartBarTime(rows[n-1]);
-    if(!Number.isFinite(first)||!Number.isFinite(last)||targetTime<first||targetTime>last+tf*1.5)return null;
-    let lo=0,hi=n-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(chartBarTime(rows[mid])<=targetTime)lo=mid;else hi=mid-1;}
-    const bar=rows[lo],next=rows[lo+1],barTime=chartBarTime(bar),nextTime=next?chartBarTime(next):NaN;
-    const step=next&&nextTime>barTime?nextTime-barTime:tf;
-    if(!(step>0)||step>tf*1.75)return null;
-    const fraction=Math.max(0,Math.min(1,(targetTime-barTime)/Math.max(1,step)));
+    if(targetTime<Number(rows[0].st)||targetTime>Number(rows[n-1].st)+tf*1.5)return null;
+    let lo=0,hi=n-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(Number(rows[mid].st)<=targetTime)lo=mid;else hi=mid-1;}
+    const bar=rows[lo],next=rows[lo+1],step=next&&Number(next.st)>Number(bar.st)?Number(next.st)-Number(bar.st):tf;
+    if(step>tf*1.75)return null;
+    const fraction=Math.max(0,Math.min(1,(targetTime-Number(bar.st))/Math.max(1,step)));
     const open=num(bar.open),close=num(bar.close);
     if(open!==null&&close!==null)return open+(close-open)*fraction;
     return close??open;
@@ -154,12 +133,12 @@
   }
   let bubbleAnchorStoreKey='';
   function ensureBubbleAnchorCache(){
-    const key=`tp_xmap_bubble_anchors_v7:${XMAP.source}:${pair()}`;
+    const key=`tp_xmap_bubble_anchors_v9:${XMAP.source}:${pair()}`;
     if(bubbleAnchorStoreKey===key&&XMAP.bubbleAnchorCache instanceof Map)return;
     bubbleAnchorStoreKey=key;XMAP.bubbleAnchorCache=new Map();XMAP.bubbleAnchorCacheDirty=false;
     try{
-      // v7 is a clean namespace: prior anchors were computed using broker `.st` rather
-      // than the exact chart `.time` axis and must not be reused for historical bubbles.
+      // v9 is a clean namespace: earlier anchors may have been calculated before
+      // matching CFD historical M1 candles were loaded for the event timestamps.
       const rows=JSON.parse(localStorage.getItem(key)||'[]');
       for(const row of Array.isArray(rows)?rows:[]){
         if(Array.isArray(row)&&row.length===2&&Number(row[1]?.mappedPrice)>0&&Number(row[1]?.ratio)>0)XMAP.bubbleAnchorCache.set(String(row[0]),row[1]);
@@ -263,14 +242,14 @@
     if(p.biggestPerCandle){
       const best=new Map();
       for(const item of filtered){
-        const candleKey=Number.isFinite(item.candleIndex)?item.candleIndex:Math.floor(item.serverTime/Math.max(1,Number(timeframe)||60));
-        const key=`${item.sessionKey}|${candleKey}`;
+        const fallbackCandle=Math.floor(item.serverTime/Math.max(1,Number(timeframe)||60));
+        const key=`${item.sessionKey}|${item.candleIndex??fallbackCandle}`;
         const old=best.get(key);
         if(!old||item.metric>old.metric||(item.metric===old.metric&&item.stamp>old.stamp))best.set(key,item);
       }
       filtered=[...best.values()];
     }
-    return filtered.sort((a,b)=>a.chartTime-b.chartTime||a.stamp-b.stamp).map(item=>({...item,largeThreshold:largeThresholds.get(item.sessionKey)??null}));
+    return filtered.sort((a,b)=>a.serverTime-b.serverTime||a.stamp-b.stamp).map(item=>({...item,largeThreshold:largeThresholds.get(item.sessionKey)??null}));
   }
   const pair=()=>TARGET[XMAP.source]||'NAS100';
   const currentMatchesTarget=()=>String(C?.sym||'').toUpperCase()===pair();
@@ -384,7 +363,7 @@
     return buildMappedMap(snapshot,sourcePrice,targetPrice,null,lockedAt);
   }
   window.crossAssetMapMath=Object.freeze({mapStrike,rankGexLevels,excludedKeyLevelStrikes,buildLockedMap,buildMappedMap,sameLevel});
-  window.crossAssetFlowMath=Object.freeze({eventDteDays,eventMoneyness,newYorkSessionParts,isNasdaqRegularSession,volumeEventQualitySummary,percentileThreshold,filterFlowEventData,flowEventServerTime,flowEventChartTime,flowEventLogicalLocation,flowEventLogicalTime,flowEventCandleIndex,flowServerTimeAtLogical,flowChartTimeAtLogical,flowChartTimeAtLogicalCompat,flowEventTargetPriceAt,flowEventMapping,flowBubbleInsidePlot,persistBubbleAnchorCache});
+  window.crossAssetFlowMath=Object.freeze({eventDteDays,eventMoneyness,newYorkSessionParts,isNasdaqRegularSession,volumeEventQualitySummary,percentileThreshold,filterFlowEventData,flowEventServerTime,flowEventChartTime,chartBarTime,flowEventLogicalLocation,flowEventLogicalTime,flowEventCandleIndex,flowServerTimeAtLogical,flowChartTimeAtLogical,flowChartTimeAtLogicalCompat,flowEventTargetPriceAt,flowEventMapping,flowBubbleInsidePlot,flowHistoryRanges,persistBubbleAnchorCache});
   function activeIndicator(){
     try{return typeof ACT!=='undefined'?ACT.find(a=>a&&a.key==='xmap')||null:null}catch{return null;}
   }
@@ -430,21 +409,62 @@
     const t=pair();b.textContent=currentMatchesTarget()?'Chart '+t+' đang mở':'Mở chart '+t;
     b.disabled=currentMatchesTarget();
   }
+  function jumpToLatestFlowEvent(){
+    const bars=Array.isArray(agg)?agg:[];if(!bars.length)return false;
+    const prepared=prepareFlowRenderData(XMAP.settings||DEFAULTS),rows=prepared.filtered||[];
+    for(let index=rows.length-1;index>=0;index--){
+      const location=flowEventLogicalLocation(rows[index].stamp/1000,bars,Math.max(1,Number(C?.tf)||60));
+      if(!location)continue;
+      const span=Math.max(24,Math.min(180,Math.round(120*60/Math.max(1,Number(C?.tf)||60))));
+      const from=Math.max(0,location.logical-span*.8),to=Math.min(bars.length-1,location.logical+Math.max(8,span*.2));
+      if(!(to>from))continue;
+      try{chart.timeScale().setVisibleLogicalRange({from,to});XMAP.lastJumpedEvent=rows[index].event;return true;}catch{return false;}
+    }
+    return false;
+  }
+  function ensureFlowJumpButton(quality,chartBars){
+    const meta=$('xmapMeta');if(!meta?.parentNode)return;
+    let button=$('xmapJumpLatest');
+    if(!button){
+      button=document.createElement('button');button.id='xmapJumpLatest';button.type='button';button.className='btn ghost sm';
+      button.style.marginTop='8px';button.textContent='Đến bubble mới nhất';
+      meta.insertAdjacentElement('afterend',button);
+      button.addEventListener('click',()=>{
+        if(!jumpToLatestFlowEvent()){XMAP.chartHistoryStatus='Chưa tìm được event nằm trong lịch sử nến đã tải';updateMeta();return;}
+        try{if(typeof dirty!=='undefined')dirty=true}catch{};updateMeta();
+      });
+    }
+    button.hidden=!(XMAP.enabled&&currentMatchesTarget()&&quality.qualified>0&&chartBars>0);
+    button.disabled=!(chartBars>0&&quality.qualified>0);
+    button.textContent=`Đến bubble mới nhất (${quality.qualified||0})`;
+  }
   function updateMeta(){
     const el=$('xmapMeta');if(!el)return;
     updateTargetButton();
-    if(!XMAP.enabled){el.textContent='Thêm “ETF Options Volume Flow” trong Kho Indicator → Orderflow, sau đó bật bằng nút mắt. Bubble được dựng từ Volume Delta đã lưu trên server, theo timestamp và strike.';setState('Indicator inactive');return;}
+    if(!XMAP.enabled){const jump=$('xmapJumpLatest');if(jump)jump.hidden=true;el.textContent='Thêm “ETF Options Volume Flow” trong Kho Indicator → Orderflow, sau đó bật bằng nút mắt. Bubble được dựng từ Volume Delta đã lưu trên server, theo timestamp và strike.';setState('Indicator inactive');return;}
     if(!currentMatchesTarget()){
+      const jump=$('xmapJumpLatest');if(jump)jump.hidden=true;
       el.textContent=`Đang chọn ${SOURCE_NAME[XMAP.source]} → ${pair()}. Chart hiện tại là ${C.sym}; mở chart ${pair()} để đặt các level lên đúng trục giá.`;
       setState('Chờ chart đích','warn');return;
     }
+    const quality=volumeEventQualitySummary(XMAP.events);
+    const chartBars=Array.isArray(rawAgg)?rawAgg.length:0;
+    const flowDiag=XMAP.flowRenderDiagnostics||{};
+    const apiError=XMAP.error?` · API error: ${XMAP.error}`:'';
+    const flowStatus=`VOLUME FLOW · ${SOURCE_NAME[XMAP.source]} → ${pair()} · ${quality.stored} saved / ${quality.qualified} qualified RTH events · chart M1 ${chartBars} bars · ${XMAP.chartHistoryStatus||'đang chờ kiểm tra lịch sử CFD'} · visible ${flowDiag.visible||0} / mapped ${flowDiag.mapped||0} / drawn ${flowDiag.drawn||0}${apiError}`;
+    ensureFlowJumpButton(quality,chartBars);
     const s=XMAP.snapshot,m=XMAP.locked;
     syncExpiryControl(s);
-    if(s?.error){el.textContent=`Binance ${SOURCE_NAME[XMAP.source]}: ${s.error}`;setState('Lỗi nguồn dữ liệu','warn');return;}
-    if(!s||!sourceSpot()){el.textContent=`Đang chờ Spot ${SOURCE_NAME[XMAP.source]} từ server cache…`;setState('Đang tải','loading');return;}
+    if(s?.error){el.textContent=`${flowStatus} · Binance ${SOURCE_NAME[XMAP.source]}: ${s.error}`;setState('Lỗi nguồn dữ liệu','warn');return;}
+    // Bubbles use saved events independently of the level snapshot. Never hide
+    // the historical-loader status just because Spot/Option Chain levels are late.
+    if(!s||!sourceSpot()){
+      el.textContent=`${flowStatus} · đang chờ Spot/Option Chain cache; lịch sử bubble vẫn được tải độc lập.`;
+      setState(XMAP.events.length?'Đã tải Volume history':'Đang chờ Volume events',XMAP.events.length?'ok':'loading');return;
+    }
     if(!m){
-      if(!s.complete){el.textContent=`Đang nhận full Option Chain ${SOURCE_NAME[XMAP.source]} (${s.oiKnown||0}/${s.totalContracts||0} OI). Các level sẽ được ánh xạ khi source sẵn sàng.`;setState('Chờ full chain','loading');return;}
-      el.textContent=`Đã có levels từ ${SOURCE_NAME[XMAP.source]}, đang chờ giá chart ${pair()} để quy đổi.`;setState('Chờ giá CFD','warn');return;
+      if(!s.complete){el.textContent=`${flowStatus} · đang nhận full Option Chain ${SOURCE_NAME[XMAP.source]} (${s.oiKnown||0}/${s.totalContracts||0} OI); levels chưa sẵn sàng.`;setState('Chờ full chain','loading');return;}
+      el.textContent=`${flowStatus} · đã có option levels, đang chờ giá chart ${pair()} để quy đổi.`;setState('Chờ giá CFD','warn');return;
     }
     const coverage=Number.isFinite(m.coverage)?(m.coverage*100).toFixed(1)+'%':'—';
     const gexCoverage=Number.isFinite(s.gexCoverage)?(s.gexCoverage*100).toFixed(1)+'%':'—';
@@ -452,10 +472,10 @@
     const changedAt=m.lastLevelChangeAt?new Date(m.lastLevelChangeAt).toLocaleTimeString('vi-VN'):'—';
     const flip=m.gammaFlip?.target==null?'Gamma Flip / Zero Gamma: unavailable':`Gamma Flip / Zero Gamma ${fmt(m.gammaFlip.target,2)} CFD`;
     const ratio=m.gexRatioState==='call-only'?'GEX Ratio ∞ · chỉ có Call GEX':m.gexRatio==null?'GEX Ratio: —':`GEX Ratio ${m.gexRatio.toFixed(2)}x · ${m.gexRatioBias==='call-dominant'?'Call Gamma trội':m.gexRatioBias==='put-dominant'?'Put Gamma trội':'cân bằng'}`;
-    const quality=volumeEventQualitySummary(XMAP.events);
-    el.textContent=`VOLUME FLOW · ${SOURCE_NAME[XMAP.source]} → ${pair()} · ${quality.stored} saved / ${quality.qualified} qualified RTH bubbles · ${quality.outsideRth} outside RTH / ${quality.longGap} long-gap archived (flags may overlap) · ${m.mappedCount||0} key levels · chain ${m.expiry||'—'} · last flow update ${XMAP.flowUpdatedAt?new Date(XMAP.flowUpdatedAt).toLocaleTimeString('vi-VN'):'—'}. Bubble dùng Nasdaq RTH 09:30–16:00 America/New_York; event gap >5 phút vẫn lưu trong DB nhưng không vẽ như điểm thời gian. X khớp trực tiếp chart series time sau đổi timezone, Y neo bằng giá CFD tại event-time. Khi pan/zoom, bubble đi cùng đúng candle và mức giá dữ liệu. Không đại diện limit/stop hoặc từng lệnh riêng lẻ.`;
+    el.textContent=`${flowStatus} · ${m.mappedCount||0} key levels · mapping ${coverage} · GEX coverage ${gexCoverage}. Nasdaq RTH 09:30–16:00 America/New_York; gap >5 phút được lưu nhưng không vẽ. Event X dùng chart time; Y dùng nến CFD tại event-time. Không đại diện limit/stop hoặc từng lệnh riêng lẻ.`;
     setState(XMAP.events.length?'Volume history loaded':'Đang chờ Volume events',XMAP.events.length?'ok':'warn');
   }
+
   function syncExpiryControl(snapshot){
     const select=$('xmapExpiry');if(!select)return;
     const expirations=Array.isArray(snapshot?.expirations)?snapshot.expirations:[];
@@ -499,8 +519,86 @@
     try{if(typeof dirty!=='undefined')dirty=true}catch{}
     return true;
   }
+  let flowChartHistoryPromise=null,flowChartHistorySignature='',flowChartHistoryRetryAt=0;
+  function newYorkUtcOffsetSeconds(timestampMsValue){
+    const ms=timestampMs(timestampMsValue);if(ms===null)return null;
+    const parts=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(new Date(ms));
+    const pick=type=>parts.find(part=>part.type===type)?.value;
+    const wall=Date.UTC(Number(pick('year')),Number(pick('month'))-1,Number(pick('day')),Number(pick('hour')),Number(pick('minute')),Number(pick('second')));
+    return Math.round(wall/1000-Math.floor(ms/1000));
+  }
+  function flowHistoryRanges(events){
+    const sessions=new Map();
+    for(const event of Array.isArray(events)?events:[]){
+      const stamp=timestampMs(event?.observedAt),gap=num(event?.gapMs),delta=num(event?.volumeDelta);
+      if(stamp===null||!(delta>0)||!isNasdaqRegularSession(stamp)||(gap!==null&&gap>MAX_BUBBLE_EVENT_GAP_MS))continue;
+      const key=newYorkDateKey(stamp);if(!key)continue;
+      if(!sessions.has(key)){
+        const [year,month,day]=key.split('-').map(Number),offset=newYorkUtcOffsetSeconds(stamp);
+        if(offset===null)continue;
+        // Load the full Nasdaq regular session, not just the first-to-last event
+        // window. A stable session range also prevents a new event every 5s from
+        // causing another overlapping REST history request.
+        const openUtc=Date.UTC(year,month-1,day,9,30,0)/1000-offset;
+        const closeUtc=Date.UTC(year,month-1,day,16,0,0)/1000-offset;
+        sessions.set(key,{sessionKey:key,fromUtcSec:Math.floor(openUtc)-180,toUtcSec:Math.ceil(closeUtc)+180});
+      }
+    }
+    // Keep the newest 20 RTH sessions (about one trading month); each range is
+    // fetched once and coverage is verified against the local M1 history.
+    return [...sessions.values()].sort((a,b)=>a.fromUtcSec-b.fromUtcSec).slice(-20);
+  }
+  async function ensureFlowChartHistory(events){
+    if(!XMAP.enabled||!currentMatchesTarget())return null;
+    if(flowChartHistoryPromise)return flowChartHistoryPromise;
+    const ranges=flowHistoryRanges(events),signature=`${pair()}|${ranges.map(r=>`${r.sessionKey}:${r.fromUtcSec}:${r.toUtcSec}`).join(',')}`;
+    if(!ranges.length){XMAP.chartHistoryStatus='Không có event RTH đủ điều kiện để tải nến lịch sử';updateMeta();return null;}
+    if(signature===flowChartHistorySignature){
+      // The chart can be reset/reloaded while this page remains open. A completed
+      // history request is reusable only if current M1 still covers every session.
+      const coveredNow=ranges.every(range=>{
+        const lo=typeof u2s==='function'?u2s(range.fromUtcSec-120):range.fromUtcSec-120;
+        const hi=typeof u2s==='function'?u2s(range.toUtcSec+120):range.toUtcSec+120;
+        const count=(Array.isArray(m1)?m1:[]).reduce((n,bar)=>n+(Number(bar?.[0])>=lo&&Number(bar?.[0])<=hi?1:0),0);
+        return count>=Math.max(5,Math.min(30,Math.floor(((range.toUtcSec-range.fromUtcSec)/60)*.15)));
+      });
+      if(coveredNow)return XMAP.chartHistoryResult;
+      flowChartHistorySignature='';
+    }
+    if(Date.now()<flowChartHistoryRetryAt)return XMAP.chartHistoryResult;
+    if(typeof window.ensureVolumeFlowChartHistory!=='function'){
+      XMAP.chartHistoryStatus='Chart chưa có historical loader';flowChartHistoryRetryAt=Date.now()+15000;updateMeta();return null;
+    }
+    flowChartHistoryPromise=(async()=>{
+      XMAP.chartHistoryStatus=`Đang tải nến CFD lịch sử cho ${ranges.length} phiên…`;updateMeta();
+      try{
+        const result=await window.ensureVolumeFlowChartHistory(ranges);
+        XMAP.chartHistoryResult=result;
+        const coverage=Array.isArray(result?.coverage)?result.coverage:[];
+        const covered=coverage.filter(x=>x.covered).length;
+        if(result?.ok&&(!coverage.length||covered===coverage.length)){
+          flowChartHistorySignature=signature;flowChartHistoryRetryAt=0;
+          const warnings=Array.isArray(result.errors)?result.errors.length:0;
+          XMAP.chartHistoryStatus=`Đã xác nhận ${result.targetSymbol||pair()} history: ${result.totalM1Bars||0} M1 bars trong chart · tải ${result.fetchedBars||0}, thêm ${result.addedBars||0} · ${covered}/${ranges.length} phiên đủ coverage${warnings?` · ${warnings} cảnh báo`:''}`;
+          XMAP.flowPrepared=null;XMAP.version++;
+          try{if(typeof dirty!=='undefined')dirty=true}catch{}
+        }else{
+          flowChartHistoryRetryAt=Date.now()+30000;
+          const detail=(Array.isArray(result?.coverage)?result.coverage.filter(x=>!x.covered).map(x=>`${x.sessionKey}: ${x.count}/${x.expected}`).join(', '):'');
+          const errors=(Array.isArray(result?.errors)?result.errors.map(x=>x.error).filter(Boolean).slice(0,2).join('; '):'');
+          XMAP.chartHistoryStatus=`Lịch sử CFD chưa đủ: ${covered}/${ranges.length} phiên · ${detail||errors||'kiểm tra cTrader/symbol broker'}`;
+        }
+      }catch(error){
+        flowChartHistoryRetryAt=Date.now()+30000;
+        XMAP.chartHistoryStatus=`Không tải được nến lịch sử: ${error?.message||String(error)}`;
+      }
+      updateMeta();return XMAP.chartHistoryResult;
+    })().finally(()=>{flowChartHistoryPromise=null;});
+    return flowChartHistoryPromise;
+  }
   async function refreshFlowEvents(){
-    if(!XMAP.enabled||!CACHE_API_BASE)return;
+    if(!XMAP.enabled)return;
+    if(!CACHE_API_BASE){XMAP.error='Chưa cấu hình BINANCE_STOCK_CACHE_API / Node Gateway';XMAP.chartHistoryStatus='Không thể tải Volume Events';updateMeta();return;}
     const token=++flowFetchToken;
     try{
       const symbol=SOURCE_NAME[XMAP.source];
@@ -513,6 +611,10 @@
       XMAP.flowUpdatedAt=Date.now();XMAP.error='';XMAP.version++;
       try{if(typeof dirty!=='undefined')dirty=true}catch{}
       updateMeta();
+      // Fetch target-chart M1 history for the dates represented by stored events.
+      // Volume Events alone are not enough to anchor Y: the matching NAS100/XAUUSD
+      // candle must exist locally so we can freeze the CFD price at event time.
+      void ensureFlowChartHistory(XMAP.events);
     }catch(error){
       XMAP.error=error?.message||String(error);
       updateMeta();
@@ -860,14 +962,14 @@
     const prepared={events,settingsKey,barCount:bars.length,firstBar:first,lastBar:last,lastDisplay,timezone,timeframe:C?.tf,target:pair(),filtered,multiLegKeys,sessionScaleByKey};
     XMAP.flowPrepared=prepared;return prepared;
   }
-  function lowerBoundChartTime(rows,time){let lo=0,hi=rows.length;while(lo<hi){const mid=(lo+hi)>>1;if(Number(rows[mid].chartTime)<time)lo=mid+1;else hi=mid;}return lo;}
+  function lowerBoundServerTime(rows,time){let lo=0,hi=rows.length;while(lo<hi){const mid=(lo+hi)>>1;if(Number(rows[mid].serverTime)<time)lo=mid+1;else hi=mid;}return lo;}
   function visibleFlowItems(rows,timeScale,width,limit,bars){
     if(!rows.length)return [];
     let range=null;try{range=timeScale.getVisibleLogicalRange?.()||null}catch{}
     let start=0,end=rows.length;
     if(range&&bars.length){
-      const from=flowChartTimeAtLogical(Number(range.from)-1.5,bars),to=flowChartTimeAtLogical(Number(range.to)+1.5,bars);
-      if(Number.isFinite(from)&&Number.isFinite(to)){start=lowerBoundChartTime(rows,from);end=lowerBoundChartTime(rows,to+0.001);}
+      const from=flowServerTimeAtLogical(Number(range.from)-1.5,bars),to=flowServerTimeAtLogical(Number(range.to)+1.5,bars);
+      if(Number.isFinite(from)&&Number.isFinite(to)){start=lowerBoundServerTime(rows,from);end=lowerBoundServerTime(rows,to+0.001);}
     }else start=Math.max(0,rows.length-limit);
     let visible=rows.slice(start,end);
     if(visible.length>limit)visible=visible.slice(-limit);
@@ -934,13 +1036,20 @@
     }
     ctx.restore();
   }
+  let flowDiagSignature='';
+  function setFlowRenderDiagnostics(value){
+    const signature=JSON.stringify(value);
+    XMAP.flowRenderDiagnostics=value;
+    if(signature!==flowDiagSignature){flowDiagSignature=signature;updateMeta();}
+  }
   function drawFlowBubbles(w,h,indicator){
     const events=Array.isArray(XMAP.events)?XMAP.events:[];
-    if(!events.length){XMAP.visibleBubbles=[];return;}
+    if(!events.length){XMAP.visibleBubbles=[];setFlowRenderDiagnostics({saved:0,qualified:0,visible:0,mapped:0,drawn:0,chartBars:Array.isArray(agg)?agg.length:0});return;}
     let timeScale=null;try{timeScale=chart.timeScale()}catch{XMAP.visibleBubbles=[];return;}
     const P=XMAP.settings,bars=Array.isArray(agg)?agg:[],prepared=prepareFlowRenderData(P);
     const recent=visibleFlowItems(prepared.filtered,timeScale,w,P.bubbleCount,bars);
-    if(!recent.length){XMAP.visibleBubbles=[];return;}
+    const diagnostics={saved:events.length,qualified:prepared.filtered.length,visible:recent.length,mapped:0,drawn:0,chartBars:bars.length};
+    if(!recent.length){XMAP.visibleBubbles=[];setFlowRenderDiagnostics(diagnostics);return;}
     const sessionScaleByKey=prepared.sessionScaleByKey;
     const absoluteScale=Math.max(1,num(P.source==='gld'?P.absoluteScaleMaxGld:P.absoluteScaleMaxQqq)||1000);
     const labelMode=P.bubbleLabelMode==='cp'?'cp':'volume';
@@ -956,6 +1065,7 @@
       const mapping=flowEventMapping(event);
       if(!mapping)continue;
       const mappedPrice=mapping.mappedPrice;
+      diagnostics.mapped++;
       let x=null,y=null;
       try{x=timeScale.logicalToCoordinate(logical);y=cs.priceToCoordinate(mappedPrice)}catch{continue;}
       if(!Number.isFinite(x)||!Number.isFinite(y))continue;
@@ -1012,6 +1122,7 @@
       ctx.restore();
     }
     XMAP.visibleBubbles=visible;
+    diagnostics.drawn=visible.length;setFlowRenderDiagnostics(diagnostics);
     ctx.restore();
   }
 

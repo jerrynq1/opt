@@ -136,6 +136,130 @@ function prependM1(bars){
   const d=i-n0,c=ts.getVisibleLogicalRange();                // giữ đúng các nến đang xem (chart có thể đã tự giữ, thì không làm gì)
   if(d&&(!c||Math.abs(c.from-(r.from+d))>.5))try{ts.setVisibleLogicalRange({from:r.from+d,to:r.to+d})}catch{}
 }
+
+/* ===== Historical candles required by ETF Option Volume Flow =====
+   Volume Events live in SQLite independently of the CFD chart. Before drawing a
+   historical bubble, explicitly fetch the matching target-symbol M1 candles from
+   cTrader. This is the missing link between the saved Volume history and the CFD
+   price/time axes. Fetch one complete Nasdaq RTH session per date, merge by the
+   broker/server candle timestamp, rebuild once, then restore the user's viewport. */
+let volumeFlowHistoryPromise=null;
+const volumeFlowFetchedRanges=new Set();
+function chartServerAtLogical(logical){
+  if(!Array.isArray(agg)||!agg.length||!Number.isFinite(logical))return null;
+  const index=Math.floor(logical),fraction=logical-index;
+  if(index<0){const a=agg[0],b=agg[1];const step=b?Number(b.st)-Number(a.st):Math.max(60,Number(C.tf)||60);return Number(a.st)+logical*step;}
+  if(index>=agg.length-1){const a=agg[agg.length-1],b=agg[agg.length-2];const step=b?Number(a.st)-Number(b.st):Math.max(60,Number(C.tf)||60);return Number(a.st)+(logical-(agg.length-1))*step;}
+  const a=Number(agg[index].st),b=Number(agg[index+1].st);
+  return Number.isFinite(a)&&Number.isFinite(b)?a+(b-a)*fraction:null;
+}
+function chartLogicalAtServer(serverTime){
+  if(!Array.isArray(agg)||!agg.length||!Number.isFinite(serverTime))return null;
+  let lo=0,hi=agg.length-1;
+  if(serverTime<Number(agg[0].st)||serverTime>Number(agg[hi].st))return null;
+  while(lo<hi){const mid=(lo+hi+1)>>1;if(Number(agg[mid].st)<=serverTime)lo=mid;else hi=mid-1;}
+  if(Math.abs(Number(agg[lo].st)-serverTime)<.001)return lo;
+  if(lo>=agg.length-1)return lo;
+  const left=Number(agg[lo].st),right=Number(agg[lo+1].st);
+  if(!(right>left))return lo;
+  const step=right-left;
+  if(step>Math.max(60,Number(C.tf)||60)*1.75)return null;
+  return lo+Math.max(0,Math.min(1,(serverTime-left)/step));
+}
+function volumeFlowRangeBounds(range){
+  const lo=Math.max(1,Math.floor(Number(range?.fromUtcSec)||0)-120);
+  const hi=Math.ceil(Number(range?.toUtcSec)||0)+120;
+  return{lo,hi,key:`${String(C.sym)}|${lo}|${hi}`};
+}
+function volumeFlowRangeCoverage(range){
+  const {lo,hi}=volumeFlowRangeBounds(range);
+  const serverLo=u2s(lo),serverHi=u2s(hi);
+  const count=(Array.isArray(m1)?m1:[]).reduce((total,bar)=>total+(Number(bar?.[0])>=serverLo&&Number(bar?.[0])<=serverHi?1:0),0);
+  const expected=Math.max(1,Math.ceil((hi-lo)/60));
+  const minimum=Math.max(5,Math.min(30,Math.floor(expected*.15)));
+  return{count,expected,minimum,covered:count>=minimum,serverLo,serverHi};
+}
+async function ensureVolumeFlowChartHistory(ranges=[]){
+  if(SUB())return{ok:false,reason:"sub-minute-chart-not-supported-for-event-anchor",loadedBars:0};
+  if(QLChartTypes.isSynthetic(CHART_TYPE))return{ok:false,reason:"synthetic-chart-has-no-time-based-candle-anchor",loadedBars:0};
+  const normalized=(Array.isArray(ranges)?ranges:[]).map(r=>({
+    fromUtcSec:Math.floor(Number(r?.fromUtcSec??r?.from??0)),
+    toUtcSec:Math.ceil(Number(r?.toUtcSec??r?.to??0)),
+    sessionKey:String(r?.sessionKey||"")
+  })).filter(r=>Number.isFinite(r.fromUtcSec)&&Number.isFinite(r.toUtcSec)&&r.fromUtcSec>0&&r.toUtcSec>r.fromUtcSec)
+    .sort((a,b)=>a.fromUtcSec-b.fromUtcSec).slice(-20);
+  if(!normalized.length)return{ok:true,reason:"no-qualified-events",loadedBars:0,requestedRanges:0,coverage:[]};
+  if(volumeFlowHistoryPromise)return volumeFlowHistoryPromise;
+  volumeFlowHistoryPromise=(async()=>{
+    const waitUntil=Date.now()+45000;
+    while((loading||fillBusy)&&Date.now()<waitUntil)await new Promise(resolve=>setTimeout(resolve,100));
+    if(loading||fillBusy)throw new Error("Chart đang tải lịch sử khác quá lâu; chưa thể nạp Volume Flow history.");
+    await ctEnsure();
+    if(!ctReady()||CT.sym?.req!==C.sym)throw new Error(`cTrader chưa sẵn sàng cho chart ${C.sym}.`);
+
+    const chartSymbol=C.sym,ts=chart.timeScale(),visibleRange=ts.getVisibleLogicalRange?.();
+    const viewport=visibleRange?{fromServer:chartServerAtLogical(Number(visibleRange.from)),toServer:chartServerAtLogical(Number(visibleRange.to))}:null;
+    const byTime=new Map((Array.isArray(m1)?m1:[]).map(bar=>[Number(bar[0]),bar]));
+    let fetchedBars=0,addedBars=0,updatedBars=0,requestedRanges=0,skippedRanges=0;
+    const rangeErrors=[],coverageBefore=[];
+    let earliestUtc=Infinity;
+
+    for(const range of normalized){
+      if(C.sym!==chartSymbol)throw new Error("Chart symbol changed while loading Volume Flow history; request cancelled.");
+      const bounds=volumeFlowRangeBounds(range),before=volumeFlowRangeCoverage(range);
+      coverageBefore.push({sessionKey:range.sessionKey,...before});
+      // A previous page/session cache is trusted only while the actual M1 array
+      // still contains enough bars for this complete RTH session.
+      if(before.covered){volumeFlowFetchedRanges.add(bounds.key);skippedRanges++;continue;}
+      volumeFlowFetchedRanges.delete(bounds.key);
+      if(bounds.hi-bounds.lo>8*86400){rangeErrors.push({sessionKey:range.sessionKey,error:"history range exceeds 8 days"});continue;}
+      requestedRanges++;earliestUtc=Math.min(earliestUtc,bounds.lo);
+      try{
+        // cTrader expects UTC milliseconds; ctBars converts returned UTC minute
+        // timestamps into the same broker/server `.st` values used by M1 and rawAgg.
+        const rows=await ctBars(bounds.lo,bounds.hi);
+        if(!Array.isArray(rows)||!rows.length){rangeErrors.push({sessionKey:range.sessionKey,error:"cTrader returned no M1 candles"});continue;}
+        fetchedBars+=rows.length;
+        for(const bar of rows){
+          const stamp=Number(bar?.[0]);if(!Number.isFinite(stamp))continue;
+          const old=byTime.get(stamp);
+          if(!old){byTime.set(stamp,bar);addedBars++;}
+          else if(old.some((value,index)=>Number(value)!==Number(bar[index]))){byTime.set(stamp,bar);updatedBars++;}
+        }
+      }catch(error){rangeErrors.push({sessionKey:range.sessionKey,error:error?.message||String(error)});}
+    }
+
+    if(C.sym!==chartSymbol)throw new Error("Chart symbol changed before Volume Flow history merge; request cancelled.");
+    if(addedBars>0||updatedBars>0){
+      if(Number.isFinite(earliestUtc))m1Old=Math.min(Number(m1Old)||Infinity,earliestUtc);
+      m1=[...byTime.values()].sort((a,b)=>Number(a[0])-Number(b[0]));
+      m1NoMore=false;m1Empty=0;
+      rebuild(false);
+      // setData can change logical indexes when older candles were prepended.
+      // Restore the user's view using broker/server timestamps, not pixel offsets.
+      if(viewport&&Number.isFinite(viewport.fromServer)&&Number.isFinite(viewport.toServer)){
+        const from=chartLogicalAtServer(viewport.fromServer),to=chartLogicalAtServer(viewport.toServer);
+        if(Number.isFinite(from)&&Number.isFinite(to)&&to>from){try{ts.setVisibleLogicalRange({from,to});}catch{}}
+      }
+    }
+
+    const coverage=normalized.map(range=>{
+      const bounds=volumeFlowRangeBounds(range),state=volumeFlowRangeCoverage(range);
+      if(state.covered)volumeFlowFetchedRanges.add(bounds.key);
+      else volumeFlowFetchedRanges.delete(bounds.key); // partial/empty downloads remain retryable
+      return{sessionKey:range.sessionKey,count:state.count,expected:state.expected,minimum:state.minimum,covered:state.covered,
+        firstServerTime:m1.find(bar=>Number(bar[0])>=state.serverLo)?.[0]??null,
+        lastServerTime:[...m1].reverse().find(bar=>Number(bar[0])<=state.serverHi)?.[0]??null};
+    });
+    return{ok:true,targetSymbol:chartSymbol,requestedRanges,skippedRanges,fetchedBars,addedBars,updatedBars,totalM1Bars:m1.length,
+      rawChartBars:Array.isArray(rawAgg)?rawAgg.length:0,firstServerTime:m1[0]?.[0]??null,lastServerTime:m1[m1.length-1]?.[0]??null,
+      coverageBefore,coverage,errors:rangeErrors};
+  })().finally(()=>{volumeFlowHistoryPromise=null;});
+  return volumeFlowHistoryPromise;
+}
+window.ensureVolumeFlowChartHistory=ensureVolumeFlowChartHistory;
+
+
 chart.timeScale().subscribeVisibleLogicalRangeChange(r=>{
   if(!r)return;
   if(r.from<40)fillLeft();
