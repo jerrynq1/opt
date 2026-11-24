@@ -24,17 +24,28 @@
   const timestampMs=x=>{const t=num(x);return t===null?null:(t<1e12?t*1000:t)};
   const ageLabel=ms=>ms===null?'—':ms<60000?Math.max(0,Math.round(ms/1000))+'s':ms<3600000?Math.round(ms/60000)+'m':Math.round(ms/3600000)+'h';
   // Option Flow timestamps are immutable UTC epoch values from the Node collector.
-  // Chart candles keep an invariant broker/server timestamp in `.st`; only `.time`
-  // is shifted for the selected display timezone. Resolve event X against `.st`
-  // after the same UTC -> broker-time conversion, so UTC+7, New York and other
-  // display zones always resolve the same event to the same logical candle.
+  // Lightweight Charts does NOT index the series by `.st`: chart.js sends `bar.time`
+  // to setData/update, and `bar.time` is the selected display-time value from disp().
+  // Always resolve events against that exact field; `.st` remains broker/server time
+  // for session aggregation only. This makes UTC+7, New York (EST/EDT) and other
+  // display timezones land on the same logical candle after the series is rebuilt.
   function flowEventServerTime(timeSec){
     if(!Number.isFinite(timeSec))return null;
     try{return typeof u2s==='function'?u2s(timeSec):timeSec}catch{return timeSec;}
   }
   function flowEventChartTime(timeSec){
     const serverTime=flowEventServerTime(timeSec);if(serverTime===null)return null;
-    try{return typeof disp==='function'?disp(serverTime):serverTime}catch{return serverTime;}
+    try{
+      if(typeof disp!=='function')return serverTime;
+      // disp() rounds to whole seconds, while event timestamps may include ms.
+      // Preserve the sub-second remainder after converting the whole server second.
+      const whole=Math.floor(serverTime),fraction=serverTime-whole;
+      return disp(whole)+fraction;
+    }catch{return serverTime;}
+  }
+  function chartBarTime(bar){
+    const displayTime=Number(bar?.time);
+    return Number.isFinite(displayTime)?displayTime:Number(bar?.st);
   }
   const NY_SESSION_FORMATTER=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekday:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
   function newYorkSessionParts(timestamp){
@@ -52,21 +63,25 @@
   }
   function flowEventLogicalLocation(timeSec,bars=Array.isArray(agg)?agg:[],timeframe=Math.max(1,Number(C?.tf)||60)){
     const rows=Array.isArray(bars)?bars:[],n=rows.length,serverTime=flowEventServerTime(timeSec),chartTime=flowEventChartTime(timeSec),tf=Math.max(1,Number(timeframe)||60);
-    if(!n||!Number.isFinite(serverTime))return null;
-    // `.st` is the invariant data-time axis shared by the candles and UTC events
-    // after u2s(). Do not use `.time` here: it is a presentation-only timezone shift.
-    const first=Number(rows[0]?.st),last=Number(rows[n-1]?.st);
-    if(!Number.isFinite(first)||!Number.isFinite(last)||serverTime<first||serverTime>last+tf*1.25)return null;
+    if(!n||!Number.isFinite(serverTime)||!Number.isFinite(chartTime))return null;
+    // Match the exact numeric time values passed to Lightweight Charts (`bar.time`).
+    // Comparing a broker `.st` (UTC+2/+3) with a display-time event was the source
+    // of bubbles disappearing after a timezone switch or collapsing at the left edge.
+    const first=chartBarTime(rows[0]),last=chartBarTime(rows[n-1]);
+    if(!Number.isFinite(first)||!Number.isFinite(last)||chartTime<first||chartTime>last+tf*1.25)return null;
     // Never clamp an event outside the loaded history to logical index zero/last.
     let lo=0,hi=n-1;
-    while(lo<hi){const mid=(lo+hi+1)>>1;if(Number(rows[mid]?.st)<=serverTime)lo=mid;else hi=mid-1;}
-    const bar=rows[lo],next=rows[lo+1],barTime=Number(bar?.st),nextTime=Number(next?.st);
+    while(lo<hi){const mid=(lo+hi+1)>>1;if(chartBarTime(rows[mid])<=chartTime)lo=mid;else hi=mid-1;}
+    const bar=rows[lo],next=rows[lo+1],barTime=chartBarTime(bar),nextTime=next?chartBarTime(next):NaN;
     const step=next&&nextTime>barTime?nextTime-barTime:tf;
-    // Do not interpolate across missing candles, overnight or weekend gaps.
-    if(step>tf*1.75)return null;
-    const fraction=Math.max(0,Math.min(1,(serverTime-barTime)/Math.max(1,step)));
+    // For ordinary time-based charts, don't interpolate across overnight/weekend gaps.
+    // Synthetic chart types may have irregular bar spacing; the logical axis itself
+    // remains authoritative there, so only reject non-positive or invalid steps.
+    const synthetic=typeof QLChartTypes!=='undefined'&&QLChartTypes.isSynthetic?.(window.QL_CHART_TYPE);
+    if(!(step>0)||(!synthetic&&step>tf*1.75))return null;
+    const fraction=Math.max(0,Math.min(1,(chartTime-barTime)/Math.max(1,step)));
     const logical=lo+fraction;
-    return {serverTime,chartTime,axisTime:serverTime,timeField:'st',logical,candleIndex:lo,fraction,bar,nextBar:next||null,step};
+    return {serverTime,chartTime,axisTime:chartTime,timeField:'time',logical,candleIndex:lo,fraction,bar,nextBar:next||null,step};
   }
   function flowEventLogicalTime(timeSec){return flowEventLogicalLocation(timeSec)?.logical??null;}
   function flowEventCoordinate(timeMs){
@@ -89,21 +104,31 @@
     const left=Number(rows[index].st),right=Number(rows[index+1].st);
     return Number.isFinite(left)&&Number.isFinite(right)?left+(right-left)*fraction:null;
   }
-  // Backwards-compatible helper names; both values are invariant server time.
-  const flowChartTimeAtLogical=flowServerTimeAtLogical;
-  const flowChartTimeAtLogicalCompat=flowServerTimeAtLogical;
+  // Inverse of the chart's logical axis: return the time value actually supplied
+  // to Lightweight Charts. Use this for visible-range queries and event filtering.
+  function flowChartTimeAtLogical(logical,bars=Array.isArray(agg)?agg:[],timeframe=Math.max(1,Number(C?.tf)||60)){
+    const rows=Array.isArray(bars)?bars:[],n=rows.length;if(!n||!Number.isFinite(logical))return null;
+    const index=Math.floor(logical),fraction=logical-index;
+    if(index<0){const left=chartBarTime(rows[0]),right=n>1?chartBarTime(rows[1]):NaN,step=right>left?right-left:timeframe;return Number.isFinite(left)?left+logical*step:null;}
+    if(index>=n-1){const left=chartBarTime(rows[n-1]),prior=n>1?chartBarTime(rows[n-2]):NaN,step=left>prior?left-prior:timeframe;return Number.isFinite(left)?left+(logical-(n-1))*step:null;}
+    const left=chartBarTime(rows[index]),right=chartBarTime(rows[index+1]);
+    return Number.isFinite(left)&&Number.isFinite(right)?left+(right-left)*fraction:null;
+  }
+  const flowChartTimeAtLogicalCompat=flowChartTimeAtLogical;
   // The mapped strike is fixed from the CFD candle and ETF spot snapshot at the
   // event time. We never recompute it from today's live spot ratio on each repaint.
   function flowEventTargetPriceAt(timeSec,bars=null){
     const rawRows=typeof rawAgg!=='undefined'&&Array.isArray(rawAgg)&&rawAgg.length?rawAgg:null;
     const rows=Array.isArray(bars)?bars:(rawRows||(Array.isArray(agg)?agg:[]));
-    const targetTime=flowEventServerTime(timeSec),n=rows.length,tf=Math.max(1,Number(C?.tf)||60);
+    const targetTime=flowEventChartTime(timeSec),n=rows.length,tf=Math.max(1,Number(C?.tf)||60);
     if(!n||!Number.isFinite(targetTime))return null;
-    if(targetTime<Number(rows[0].st)||targetTime>Number(rows[n-1].st)+tf*1.5)return null;
-    let lo=0,hi=n-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(Number(rows[mid].st)<=targetTime)lo=mid;else hi=mid-1;}
-    const bar=rows[lo],next=rows[lo+1],step=next&&Number(next.st)>Number(bar.st)?Number(next.st)-Number(bar.st):tf;
-    if(step>tf*1.75)return null;
-    const fraction=Math.max(0,Math.min(1,(targetTime-Number(bar.st))/Math.max(1,step)));
+    const first=chartBarTime(rows[0]),last=chartBarTime(rows[n-1]);
+    if(!Number.isFinite(first)||!Number.isFinite(last)||targetTime<first||targetTime>last+tf*1.5)return null;
+    let lo=0,hi=n-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(chartBarTime(rows[mid])<=targetTime)lo=mid;else hi=mid-1;}
+    const bar=rows[lo],next=rows[lo+1],barTime=chartBarTime(bar),nextTime=next?chartBarTime(next):NaN;
+    const step=next&&nextTime>barTime?nextTime-barTime:tf;
+    if(!(step>0)||step>tf*1.75)return null;
+    const fraction=Math.max(0,Math.min(1,(targetTime-barTime)/Math.max(1,step)));
     const open=num(bar.open),close=num(bar.close);
     if(open!==null&&close!==null)return open+(close-open)*fraction;
     return close??open;
@@ -129,12 +154,12 @@
   }
   let bubbleAnchorStoreKey='';
   function ensureBubbleAnchorCache(){
-    const key=`tp_xmap_bubble_anchors_v6:${XMAP.source}:${pair()}`;
+    const key=`tp_xmap_bubble_anchors_v7:${XMAP.source}:${pair()}`;
     if(bubbleAnchorStoreKey===key&&XMAP.bubbleAnchorCache instanceof Map)return;
     bubbleAnchorStoreKey=key;XMAP.bubbleAnchorCache=new Map();XMAP.bubbleAnchorCacheDirty=false;
     try{
-      // v6 is deliberately a clean namespace: old v3/v4/v5 anchors were created by
-      // earlier X-axis conversion logic and may have frozen a wrong price/time pair.
+      // v7 is a clean namespace: prior anchors were computed using broker `.st` rather
+      // than the exact chart `.time` axis and must not be reused for historical bubbles.
       const rows=JSON.parse(localStorage.getItem(key)||'[]');
       for(const row of Array.isArray(rows)?rows:[]){
         if(Array.isArray(row)&&row.length===2&&Number(row[1]?.mappedPrice)>0&&Number(row[1]?.ratio)>0)XMAP.bubbleAnchorCache.set(String(row[0]),row[1]);
@@ -238,13 +263,14 @@
     if(p.biggestPerCandle){
       const best=new Map();
       for(const item of filtered){
-        const key=`${item.sessionKey}|${item.candleIndex}`;
+        const candleKey=Number.isFinite(item.candleIndex)?item.candleIndex:Math.floor(item.serverTime/Math.max(1,Number(timeframe)||60));
+        const key=`${item.sessionKey}|${candleKey}`;
         const old=best.get(key);
         if(!old||item.metric>old.metric||(item.metric===old.metric&&item.stamp>old.stamp))best.set(key,item);
       }
       filtered=[...best.values()];
     }
-    return filtered.sort((a,b)=>a.serverTime-b.serverTime||a.stamp-b.stamp).map(item=>({...item,largeThreshold:largeThresholds.get(item.sessionKey)??null}));
+    return filtered.sort((a,b)=>a.chartTime-b.chartTime||a.stamp-b.stamp).map(item=>({...item,largeThreshold:largeThresholds.get(item.sessionKey)??null}));
   }
   const pair=()=>TARGET[XMAP.source]||'NAS100';
   const currentMatchesTarget=()=>String(C?.sym||'').toUpperCase()===pair();
@@ -834,14 +860,14 @@
     const prepared={events,settingsKey,barCount:bars.length,firstBar:first,lastBar:last,lastDisplay,timezone,timeframe:C?.tf,target:pair(),filtered,multiLegKeys,sessionScaleByKey};
     XMAP.flowPrepared=prepared;return prepared;
   }
-  function lowerBoundServerTime(rows,time){let lo=0,hi=rows.length;while(lo<hi){const mid=(lo+hi)>>1;if(Number(rows[mid].serverTime)<time)lo=mid+1;else hi=mid;}return lo;}
+  function lowerBoundChartTime(rows,time){let lo=0,hi=rows.length;while(lo<hi){const mid=(lo+hi)>>1;if(Number(rows[mid].chartTime)<time)lo=mid+1;else hi=mid;}return lo;}
   function visibleFlowItems(rows,timeScale,width,limit,bars){
     if(!rows.length)return [];
     let range=null;try{range=timeScale.getVisibleLogicalRange?.()||null}catch{}
     let start=0,end=rows.length;
     if(range&&bars.length){
-      const from=flowServerTimeAtLogical(Number(range.from)-1.5,bars),to=flowServerTimeAtLogical(Number(range.to)+1.5,bars);
-      if(Number.isFinite(from)&&Number.isFinite(to)){start=lowerBoundServerTime(rows,from);end=lowerBoundServerTime(rows,to+0.001);}
+      const from=flowChartTimeAtLogical(Number(range.from)-1.5,bars),to=flowChartTimeAtLogical(Number(range.to)+1.5,bars);
+      if(Number.isFinite(from)&&Number.isFinite(to)){start=lowerBoundChartTime(rows,from);end=lowerBoundChartTime(rows,to+0.001);}
     }else start=Math.max(0,rows.length-limit);
     let visible=rows.slice(start,end);
     if(visible.length>limit)visible=visible.slice(-limit);

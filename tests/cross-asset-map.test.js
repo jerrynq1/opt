@@ -388,6 +388,50 @@ test('Volume Flow timestamps are converted from collector UTC to the chart selec
   assert.equal(location.chartTime, utcStart + 30 + chartOffset);
 });
 
+
+test('Volume Flow maps events against Lightweight Charts display-time values in UTC+7 and New York', () => {
+  const utcStart = Date.parse('2026-11-23T14:30:00Z') / 1000;
+  const serverOffset = 2 * 3600; // broker candles use UTC+2 during NY winter
+  for (const chartOffset of [7 * 3600, -5 * 3600]) {
+    const bars = [0, 60, 120, 180].map(offset => ({
+      st: utcStart + offset + serverOffset,
+      time: utcStart + offset + chartOffset,
+      open: 1, close: 1
+    }));
+    const flow = loadMath({
+      agg: bars,
+      u2s: value => value + serverOffset,
+      disp: value => value - serverOffset + chartOffset
+    });
+    const location = flow.flow.flowEventLogicalLocation(utcStart + 30, bars, 60);
+    assert.ok(location, `event should map when display offset is ${chartOffset}`);
+    assert.equal(location.candleIndex, 0);
+    assert.equal(location.fraction, 0.5);
+    assert.equal(location.logical, 0.5);
+    assert.equal(location.chartTime, utcStart + 30 + chartOffset);
+    assert.equal(location.timeField, 'time');
+    assert.equal(flow.flow.flowChartTimeAtLogical(0.5, bars, 60), utcStart + 30 + chartOffset);
+  }
+});
+
+test('event-time CFD price anchor uses the exact chart display-time axis after timezone conversion', () => {
+  const utcStart = Date.parse('2026-11-23T14:30:00Z') / 1000;
+  const serverOffset = 2 * 3600;
+  const chartOffset = -5 * 3600;
+  const rawBars = [0, 60, 120].map(offset => ({
+    st: utcStart + offset + serverOffset,
+    time: utcStart + offset + chartOffset,
+    open: 26000 + offset,
+    close: 26060 + offset
+  }));
+  const flow = loadMath({
+    rawAgg: rawBars,
+    u2s: value => value + serverOffset,
+    disp: value => value - serverOffset + chartOffset
+  });
+  assert.equal(flow.flow.flowEventTargetPriceAt(utcStart + 30), 26030);
+});
+
 test('Volume Flow does not extrapolate old events to the left edge when chart history is not loaded', () => {
   const bars = [1000, 1060, 1120].map(st => ({ st }));
   const flow = loadMath({ agg: bars });
@@ -424,7 +468,7 @@ test('event strike mapping stays fixed after the live CFD candle changes', () =>
   assert.equal(later.mappedPrice, first.mappedPrice, 'the stored event-time mapping must not float with live price ticks');
   assert.equal(later.ratio, first.ratio);
   assert.equal(later.cached, true);
-  assert.ok([...flow.storage.keys()].some(key => String(key).includes('tp_xmap_bubble_anchors_v1')));
+  assert.ok([...flow.storage.keys()].some(key => String(key).includes('tp_xmap_bubble_anchors_v7')));
 
   // Simulate a browser reload: the persisted event anchor wins over a newer live chart price.
   const reloaded = loadMath({ rawAgg: [{ st: utcStart + 2 * 3600, open: 28000, close: 28100 }], u2s: value => value + 2 * 3600, storage: flow.storage });
