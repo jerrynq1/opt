@@ -7,6 +7,21 @@ const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_DB_PATH = path.join(moduleDir, 'data', 'gexadecimal-volume-flow.sqlite');
 const ALLOWED_SYMBOLS = new Set(['GLD', 'QQQ']);
 
+const MAX_BUBBLE_EVENT_GAP_MS = 5 * 60_000;
+const NASDAQ_RTH_FORMATTER = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+});
+
+function isNasdaqRegularSession(timestamp) {
+  const parts = NASDAQ_RTH_FORMATTER.formatToParts(new Date(timestamp));
+  const pick = type => parts.find(part => part.type === type)?.value;
+  const weekday = pick('weekday');
+  const hour = Number(pick('hour'));
+  const minute = Number(pick('minute'));
+  const minuteOfDay = hour * 60 + minute;
+  return !['Sat', 'Sun'].includes(weekday) && minuteOfDay >= 570 && minuteOfDay < 960;
+}
+
 function asNumber(value) {
   if (value === null || value === undefined || value === '') return null;
   const result = Number(value);
@@ -233,6 +248,20 @@ export class VolumeFlowStore {
 
     const delta = contract.volume - previous.volume;
     const gapMs = Math.max(0, observed - previous.lastSeenAt);
+
+    // The collector also reconciles cumulative Volume outside the cash session and
+    // after reconnects. Such changes update the snapshot baseline, but must never be
+    // presented as a point-in-time RTH bubble. The next short-gap in-session change
+    // can then be captured normally.
+    const skipReason = !isNasdaqRegularSession(observed)
+      ? 'outside-nasdaq-rth'
+      : gapMs > MAX_BUBBLE_EVENT_GAP_MS ? 'observation-gap-too-large' : null;
+    if (skipReason) {
+      this.#saveState(contract, sessionDate, observed, sourceTime, source);
+      this.memoryState.set(contract.optionSymbol, { volume: contract.volume, lastSeenAt: observed, sourceTimeMs: sourceTime, sessionDate });
+      return { accepted: true, changed: true, baseline: true, skippedEvent: true, skippedEventReason: skipReason, volumeDelta: delta, event: null };
+    }
+
     const captureMode = source === 'websocket' && gapMs <= 5_000 ? 'live' : 'interval';
     const quoteTime = contract.quoteUpdatedAtMs ?? (contract.hasInlineQuote ? observed : null);
     const quoteAgeMs = quoteTime === null ? null : Math.max(0, observed - quoteTime);
@@ -355,4 +384,4 @@ export class VolumeFlowStore {
   }
 }
 
-export { DEFAULT_DB_PATH, normaliseContract };
+export { DEFAULT_DB_PATH, normaliseContract, isNasdaqRegularSession, MAX_BUBBLE_EVENT_GAP_MS };
